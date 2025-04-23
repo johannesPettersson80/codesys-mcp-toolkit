@@ -1,0 +1,24 @@
+# Source files (we only publish compiled JS)
+src/
+
+# Development files
+tsconfig.json
+.github/
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Test files
+test/
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+
+# Miscellaneous
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.DS_Store

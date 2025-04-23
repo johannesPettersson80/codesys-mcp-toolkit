@@ -1,0 +1,32 @@
+{
+  "mcpServers": {
+    "codesys_local": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@codesys/mcp-toolkit",
+        "--codesys-path", "C:\\Program Files\\CODESYS 3.5.21.0\\CODESYS\\Common\\CODESYS.exe",
+        "--codesys-profile", "CODESYS V3.5 SP21"
+      ]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:/MyProjects"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "@codesys/mcp-toolkit",
+  "version": "1.0.0",
+  "main": "dist/server.js",
+  "bin": {
+    "codesys-mcp-toolkit": "./dist/bin.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "codesys",
+    "mcp",
+    "modelcontextprotocol",
+    "plc",
+    "automation",
+    "programming"
+  ],
+  "author": "Your Name <your.email@example.com>",
+  "license": "MIT",
+  "type": "commonjs",
+  "description": "Model Context Protocol (MCP) server for CODESYS automation platform",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/codesys-mcp-toolkit.git"
+  },
+  "homepage": "https://github.com/yourusername/codesys-mcp-toolkit#readme",
+  "bugs": {
+    "url": "https://github.com/yourusername/codesys-mcp-toolkit/issues"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.9.0",
+    "axios": "^1.6.8",
+    "commander": "^11.1.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/commander": "^2.12.5",
+    "@types/node": "^22.14.1",
+    "typescript": "^5.8.3"
+  }
+}
