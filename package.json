@@ -24,11 +24,11 @@
   "description": "Model Context Protocol (MCP) server for CODESYS automation platform",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/codesys-mcp-toolkit.git"
+    "url": "git+https://github.com/johannesPettersson80/codesys-mcp-toolkit.git"
   },
-  "homepage": "https://github.com/yourusername/codesys-mcp-toolkit#readme",
+  "homepage": "https://github.com/johannesPettersson80/codesys-mcp-toolkit#readme",
   "bugs": {
-    "url": "https://github.com/yourusername/codesys-mcp-toolkit/issues"
+    "url": "https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues"
   },
   "engines": {
     "node": ">=14.0.0"

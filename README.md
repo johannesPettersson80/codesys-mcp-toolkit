@@ -1,7 +1,7 @@
 # @codesys/mcp-toolkit
 
 ![npm](https://img.shields.io/npm/v/@codesys/mcp-toolkit)
-![License](https://img.shields.io/github/license/yourusername/codesys-mcp-toolkit)
+![License](https://img.shields.io/github/license/johannesPettersson80/codesys-mcp-toolkit)
 
 A Model Context Protocol (MCP) server for CODESYS V3 programming environments. This toolkit enables seamless interaction between MCP clients (like Claude Desktop) and CODESYS, allowing automation of project management, POU creation, code editing, and compilation tasks.
 
@@ -53,7 +53,7 @@ This installs the package globally, making the `codesys-mcp-toolkit` command ava
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/codesys-mcp-toolkit.git
+git clone https://github.com/johannesPettersson80/codesys-mcp-toolkit.git
 cd codesys-mcp-toolkit
 
 # Install dependencies
@@ -136,53 +136,116 @@ Claude will:
 Check logs at:
 - Windows: `C:\Users\<YourUsername>\AppData\Roaming\Claude\logs\`
 
-## 🤖 Using with Claude.ai
+## 📖 Detailed OOP Workflow Guide
 
-To get the best experience using this toolkit with Claude.ai, you can add these custom instructions. This helps Claude understand how to properly use the CODESYS MCP tools.
+When creating object-oriented structures with this toolkit, follow this step-by-step workflow for best results:
 
-### Recommended Custom Instructions
+### Creating Function Blocks with Properties and Methods
 
-```
-Primary Context: My primary workflow involves interacting with CODESYS projects using the available codesys_local MCP tools. Please prioritize using these tools correctly and efficiently for tasks related to CODESYS project manipulation, object-oriented programming (OOP) structure creation, and code generation.
+1. **Create the Function Block**
+   ```
+   create_pou(
+     projectFilePath: "path/to/project.project",
+     name: "PumpController", 
+     type: "FunctionBlock",
+     language: "ST",
+     parentPath: "Application"
+   )
+   ```
 
-CODESYS Tool Usage Guidelines:
-Prioritize MCP Tool Invocation: Use the available codesys_local tools (compile_project, create_method, create_pou, create_project, create_property, open_project, save_project, set_pou_code) whenever an action directly maps to one. Focus on using the provided MCP abstraction layer.
+2. **Create Properties**
+   ```
+   create_property(
+     projectFilePath: "path/to/project.project",
+     parentPouPath: "Application/PumpController",
+     propertyName: "SpeedSetpoint",
+     propertyType: "INT"
+   )
+   ```
 
-OOP Structure Creation Workflow: When asked to create an OOP structure (e.g., "create a pump controller Function Block with properties and methods"):
-Step 1: Create FB: Use create_pou.
-Step 2: Create Properties: Use create_property.
-Step 3: Create Methods: Use create_method.
-Step 4: Implement Methods: Use set_pou_code targeting the method's path (e.g., Application/PumpController/Start) for its implementationCode.
-Step 5: Declare Backing Variables: Use set_pou_code targeting the main FB's path (e.g., Application/PumpController) to set its declarationCode, including necessary VAR PRIVATE for property backing fields (e.g., _speedSetpoint, _isRunning).
-Step 6: Implement Property Accessors:
-  - Use the set_pou_code tool to set the code for the GET and SET accessors.
-  - Target the Accessor Path: Provide the full path to the specific accessor in the pouPath parameter. For example:
-    - To set the GET accessor for property SpeedSetpoint under Application/PumpController, use pouPath: "Application/PumpController/SpeedSetpoint/Get".
-    - To set the SET accessor, use pouPath: "Application/PumpController/SpeedSetpoint/Set".
-  - Provide Code: Use the implementationCode parameter of set_pou_code to provide the ST code for the respective accessor (e.g., SpeedSetpoint := _speedSetpoint; for the Get, _speedSetpoint := SpeedSetpoint; for the Set).
-Step 7: Save Project: Use save_project after completing the structural changes and code modifications.
+3. **Create Methods**
+   ```
+   create_method(
+     projectFilePath: "path/to/project.project",
+     parentPouPath: "Application/PumpController",
+     methodName: "Start",
+     returnType: "" // Empty for no return value
+   )
+   ```
 
-CODESYS Naming Conventions (Modern Style):
-- POUs (PROGRAM, FUNCTION_BLOCK, FUNCTION): PascalCase (e.g., MotorControl)
-- INTERFACE: PascalCase with I_ prefix (e.g., I_AxisCommands)
-- DUTs (STRUCT, UNION, ENUM, ALIAS): PascalCase (e.g., MachineState, E_OperationMode)
-- Variables (VAR, VAR_GLOBAL): camelCase (e.g., motorSpeed). Backing variables prefix _ (e.g., _speedSetpoint)
-- Constants (CONSTANT): UPPER_SNAKE_CASE (e.g., MAX_RPM)
-- Properties & Methods: PascalCase with descriptive names (e.g., MotorEnable, ActualSpeed, SpeedSetpoint)
+4. **Implement Methods**
+   ```
+   set_pou_code(
+     projectFilePath: "path/to/project.project",
+     pouPath: "Application/PumpController/Start",
+     implementationCode: "isRunning := TRUE;"
+   )
+   ```
 
-Use Descriptive Property Naming:
-- Use suffixes like "Setpoint", "Actual", "Target", "Status", etc. to indicate purpose
-- For control values: SpeedSetpoint, TemperatureSetpoint, PressureSetpoint
-- For measured values: SpeedActual, TemperatureActual, PressureActual
-- For status indicators: IsRunning, IsEnabled, IsReady, HasError
-- For configuration: MaxSpeed, MinPressure, AlarmThreshold
-```
+5. **Declare Backing Variables**
+   ```
+   set_pou_code(
+     projectFilePath: "path/to/project.project",
+     pouPath: "Application/PumpController",
+     declarationCode: "VAR PRIVATE\n  _speedSetpoint : INT;\n  _isRunning : BOOL;\nEND_VAR"
+   )
+   ```
 
-These instructions help Claude understand the correct workflow, naming conventions, and best practices when working with CODESYS through MCP tools.
+6. **Implement Property Accessors**
+   - For GET accessor:
+     ```
+     set_pou_code(
+       projectFilePath: "path/to/project.project",
+       pouPath: "Application/PumpController/SpeedSetpoint/Get",
+       implementationCode: "SpeedSetpoint := _speedSetpoint;"
+     )
+     ```
+   - For SET accessor:
+     ```
+     set_pou_code(
+       projectFilePath: "path/to/project.project",
+       pouPath: "Application/PumpController/SpeedSetpoint/Set",
+       implementationCode: "_speedSetpoint := SpeedSetpoint;"
+     )
+     ```
+
+7. **Save Project**
+   ```
+   save_project(
+     projectFilePath: "path/to/project.project"
+   )
+   ```
+
+### Important Path Usage Notes
+
+- Use forward slashes (`/`) in all object paths
+- Ensure paths are precise and target the specific object
+- For property accessors, always specify the full path including `/Get` or `/Set`
+
+### CODESYS Naming Conventions
+
+- **POUs** (Programs, FBs, Functions): PascalCase (e.g., `MotorControl`)
+- **Interfaces**: PascalCase with I_ prefix (e.g., `I_AxisCommands`)
+- **DUTs** (Structs, Enums): PascalCase (e.g., `MachineState`, `E_OperationMode`)
+- **Variables**: camelCase (e.g., `motorSpeed`)
+- **Backing variables**: camelCase with _ prefix (e.g., `_speedSetpoint`)
+- **Constants**: UPPER_SNAKE_CASE (e.g., `MAX_RPM`)
+- **Properties & Methods**: PascalCase with descriptive names
+
+### Recommended Property Naming
+
+- Control values: Add `Setpoint` suffix (e.g., `SpeedSetpoint`)
+- Measured values: Add `Actual` suffix (e.g., `TemperatureActual`)
+- Status indicators: Use `Is` or `Has` prefix (e.g., `IsRunning`, `HasError`)
+- Configuration: Use descriptive prefixes (e.g., `MaxSpeed`, `MinPressure`)
 
 ## 🤝 Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgements
 
