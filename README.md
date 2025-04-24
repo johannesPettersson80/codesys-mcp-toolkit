@@ -139,7 +139,6 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🙏 Acknowledgements
-*(Keep as is)*
 - The CODESYS GmbH team for the powerful CODESYS platform and its scripting engine.
 - The Model Context Protocol project for defining the interaction standard.
 - All contributors and users who help improve this toolkit.
