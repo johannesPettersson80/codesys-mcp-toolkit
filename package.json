@@ -1,14 +1,16 @@
 {
   "name": "@codesys/mcp-toolkit",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "description": "Model Context Protocol (MCP) server for CODESYS automation platform",
   "main": "dist/server.js",
   "bin": {
-    "codesys-mcp-toolkit": "./dist/bin.js"
+    "codesys-mcp-tool": "./dist/bin.js"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "start": "node ./dist/server.js"
   },
   "keywords": [
     "codesys",
@@ -21,7 +23,6 @@
   "author": "Your Name <your.email@example.com>",
   "license": "MIT",
   "type": "commonjs",
-  "description": "Model Context Protocol (MCP) server for CODESYS automation platform",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/johannesPettersson80/codesys-mcp-toolkit.git"
@@ -31,17 +32,17 @@
     "url": "https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.9.0",
+    "@modelcontextprotocol/sdk": "^1.10.2",
     "axios": "^1.6.8",
-    "commander": "^11.1.0",
-    "zod": "^3.24.2"
+    "yargs": "^17.7.2",
+    "zod": "^3.24.3"
   },
   "devDependencies": {
-    "@types/commander": "^2.12.5",
-    "@types/node": "^22.14.1",
-    "typescript": "^5.8.3"
+    "@types/node": "^20.14.1",
+    "@types/yargs": "^17.0.33",
+    "typescript": "^5.5.3"
   }
 }

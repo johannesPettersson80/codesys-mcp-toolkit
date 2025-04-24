@@ -1,254 +1,151 @@
+
 # @codesys/mcp-toolkit
 
 ![npm](https://img.shields.io/npm/v/@codesys/mcp-toolkit)
 ![License](https://img.shields.io/github/license/johannesPettersson80/codesys-mcp-toolkit)
+![Node Version](https://img.shields.io/node/v/@codesys/mcp-toolkit)
 
-A Model Context Protocol (MCP) server for CODESYS V3 programming environments. This toolkit enables seamless interaction between MCP clients (like Claude Desktop) and CODESYS, allowing automation of project management, POU creation, code editing, and compilation tasks.
+A Model Context Protocol (MCP) server for CODESYS V3 programming environments. This toolkit enables seamless interaction between MCP clients (like Claude Desktop) and CODESYS, allowing automation of project management, POU creation, code editing, and compilation tasks via the CODESYS Scripting Engine.
 
 ## 🌟 Features
 
 - **Project Management**
-  - Open existing CODESYS projects
-  - Create new projects from templates
-  - Save project changes
+  - Open existing CODESYS projects (`open_project`)
+  - Create new projects from standard templates (`create_project`)
+  - Save project changes (`save_project`)
 
 - **POU Management**
-  - Create Programs, Function Blocks, and Functions
-  - Set declaration and implementation code
-  - Create properties and methods for Function Blocks
-  - Compile projects
+  - Create Programs, Function Blocks, and Functions (`create_pou`)
+  - Set declaration and implementation code (`set_pou_code`)
+  - Create properties for Function Blocks (`create_property`)
+  - Create methods for Function Blocks (`create_method`)
+  - Compile projects (`compile_project`)
 
 - **MCP Resources**
-  - `codesys://project/status`: Check scripting status and project state
-  - `codesys://project/{+project_path}/structure`: Retrieve project structure
-  - `codesys://project/{+project_path}/pou/{+pou_path}/code`: Read POU code
-
-- **MCP Tools**
-  - `open_project`: Open specified CODESYS project
-  - `create_project`: Create new CODESYS project
-  - `save_project`: Save currently open project
-  - `create_pou`: Create new Program, Function Block, or Function
-  - `set_pou_code`: Update code for a specified POU
-  - `create_property`: Create property in a Function Block
-  - `create_method`: Create method in a Function Block
-  - `compile_project`: Compile the open project
+  - `codesys://project/status`: Check scripting status and currently open project state.
+  - `codesys://project/{+project_path}/structure`: Retrieve the object structure of a specified project.
+  - `codesys://project/{+project_path}/pou/{+pou_path}/code`: Read the declaration and implementation code for a specified POU, Method, or Property accessor.
 
 ## 📋 Prerequisites
 
-- **CODESYS V3**: A working CODESYS V3 installation (tested with 3.5 SP21) with **Scripting Engine** component enabled
-- **Node.js**: Version 18 or later required
-- **MCP Client**: An MCP-enabled application (e.g., Claude Desktop)
+- **CODESYS V3**: A working CODESYS V3 installation (tested with 3.5 SP21) with the **Scripting Engine** component enabled during installation.
+- **Node.js**: Version 18.0.0 or later is recommended.
+- **MCP Client**: An MCP-enabled application (e.g., Claude Desktop).
+
+*(Note: CODESYS uses Python 2.7 internally for its scripting engine, but this toolkit handles the interaction; you do not need to manage Python separately.)*
 
 ## 🚀 Installation
 
-### Option 1: Install from npm (Recommended)
+The recommended way to install is globally using npm:
 
 ```bash
 npm install -g @codesys/mcp-toolkit
 ```
 
-This installs the package globally, making the `codesys-mcp-toolkit` command available in your terminal.
+This installs the package globally, making the `codesys-mcp-tool` command available in your system's terminal PATH.
 
-### Option 2: Install from Source
+*(Advanced users can also install from source for development - see CONTRIBUTING.md if available).*
 
-```bash
-# Clone the repository
-git clone https://github.com/johannesPettersson80/codesys-mcp-toolkit.git
-cd codesys-mcp-toolkit
+## 🔧 Configuration (IMPORTANT!)
 
-# Install dependencies
-npm install
+This toolkit needs to know where your CODESYS installation is and which profile to use. Configuration is typically done within your MCP Client application (like Claude Desktop).
 
-# Build the project
-npm run build
+### Recommended Configuration Method (Direct Command)
 
-# Install globally
-npm install -g .
-```
+Due to potential environment variable issues (especially with `PATH`) when launching Node.js tools via wrappers like `npx` within certain host applications (e.g., Claude Desktop), it is **strongly recommended** to configure your MCP client to run the installed command `codesys-mcp-tool` **directly**.
 
-## 🔧 Configuration
-
-### Claude Desktop Configuration
-
-1. Locate your Claude Desktop configuration file:
-   - Windows: `C:\Users\<YourUsername>\AppData\Roaming\Claude\claude_desktop_config.json`
-
-2. Add the CODESYS MCP server entry:
+**Example for Claude Desktop (`settings.json` -> `mcpServers`):**
 
 ```json
+{
+  "mcpServers": {
+    // ... other servers ...
+    "codesys_local": {
+      "command": "codesys-mcp-tool", // <<< Use the direct command name
+      "args": [
+        // Pass arguments directly to the tool using flags
+        "--codesys-path", "C:\\Program Files\\Path\\To\\Your\\CODESYS\\Common\\CODESYS.exe",
+        "--codesys-profile", "Your CODESYS Profile Name"
+        // Optional: Add --workspace "/path/to/your/projects" if needed
+      ]
+    }
+    // ... other servers ...
+  }
+}
+```
+
+**Key Steps:**
+1.  Replace `"C:\\Program Files\\Path\\To\\Your\\CODESYS\\Common\\CODESYS.exe"` with the **full, correct path** to your specific `CODESYS.exe` file.
+2.  Replace `"Your CODESYS Profile Name"` with the **exact name** of the CODESYS profile you want to use (visible in the CODESYS UI).
+3.  Ensure the `codesys-mcp-tool` command is accessible in the system PATH where the MCP Client application runs. Global installation via `npm install -g` usually handles this.
+4.  Restart your MCP Client application (e.g., Claude Desktop) to apply the settings changes.
+
+### Alternative Configuration (Using `npx` - Not Recommended)
+
+Launching with `npx` has been observed to cause immediate errors (`'C:\Program' is not recognized...`) in some environments, likely due to how `npx` handles the execution environment. **Use the Direct Command method above if possible.** If you must use `npx`:
+
+```json
+// Example using npx (POTENTIALLY PROBLEMATIC - USE WITH CAUTION):
 {
   "mcpServers": {
     "codesys_local": {
       "command": "npx",
       "args": [
-        "-y",
+        "-y", // Tells npx to install temporarily if not found globally
         "@codesys/mcp-toolkit",
-        "--codesys-path", "C:\\Program Files\\CODESYS 3.5.21.0\\CODESYS\\Common\\CODESYS.exe",
-        "--codesys-profile", "CODESYS V3.5 SP21"
+        // Arguments for the tool MUST come AFTER the package name
+        "--codesys-path", "C:\\Program Files\\Path\\To\\Your\\CODESYS\\Common\\CODESYS.exe",
+        "--codesys-profile", "Your CODESYS Profile Name"
       ]
     }
   }
 }
 ```
+*(Note: The `--` separator after the package name might sometimes help `npx` but is not guaranteed to fix the environment issue.)*
 
-3. Customize the paths to match your CODESYS installation:
-   - `--codesys-path`: Path to your CODESYS.exe
-   - `--codesys-profile`: Your CODESYS profile name
+## 🛠️ Command-Line Arguments
 
-4. Restart Claude Desktop to apply the changes
+When running `codesys-mcp-tool` directly or configuring it, you can use these arguments:
 
-## 🛠️ Usage Examples
-
-### Creating a Function Block with Properties
-
-```
-Ask Claude: "Using the CODESYS Local server, please create a Motor Controller function block with Start and Stop methods, plus CurrentSpeed property."
-```
-
-Claude will execute these MCP tool calls:
-1. `create_pou` to create the MotorController Function Block
-2. `create_property` to add the CurrentSpeed property
-3. `create_method` to add Start and Stop methods
-4. `set_pou_code` to implement each method and property
-
-### Opening and Compiling a Project
-
-```
-Ask Claude: "Can you open the project at C:/MyProjects/TestProject.project using CODESYS Local and compile it?"
-```
-
-Claude will:
-1. Use `open_project` to open the specified file
-2. Use `compile_project` to build the application
+*   `-p, --codesys-path <path>`: Full path to `CODESYS.exe`. (Required, overrides `CODESYS_PATH` env var, has a default but relying on it is not recommended).
+*   `-f, --codesys-profile <profile>`: Name of the CODESYS profile. (Required, overrides `CODESYS_PROFILE` env var, has a default but relying on it is not recommended).
+*   `-w, --workspace <dir>`: Workspace directory for resolving relative project paths passed to tools. Defaults to the directory where the command was launched (which might be unpredictable when run by another application). Setting this explicitly might be needed if using relative paths.
+*   `-h, --help`: Show help message.
+*   `--version`: Show package version.
 
 ## 🔍 Troubleshooting
 
-### Common Issues
+*   **`'C:\Program' is not recognized...` error immediately after connection:**
+    *   **Cause:** This typically happens when the tool is launched via `npx` within an environment like Claude Desktop. The execution environment (`PATH` variable) provided to the process likely causes an internal CODESYS command (like running Python) to fail.
+    *   **Solution:** Configure your MCP Client to run the command **directly** (`"command": "codesys-mcp-tool"`) instead of using `"command": "npx"`. See the **Recommended Configuration Method** section above.
 
-- **Connection Failures**: Check Claude Desktop logs for error messages
-- **Path Issues**: Ensure CODESYS executable path is correct
-- **Profile Mismatch**: Verify profile name matches exactly
-- **Permission Problems**: Ensure Claude has appropriate permissions
-- **CODESYS Already Running**: Close other CODESYS instances
+*   **Tool Fails / Errors in Output:**
+    *   Check the logs from your MCP Client application (e.g., Claude Desktop logs). Look for `INTEROP:` messages or Python `DEBUG:` / `ERROR:` messages printed to stderr from the CODESYS script execution.
+    *   Ensure the `--codesys-path` and `--codesys-profile` arguments passed to the command are correct and point to a valid CODESYS installation with scripting enabled.
+    *   Verify the project paths and object paths you are passing to tools are correct (use forward slashes `/`).
+    *   Make sure no other CODESYS instances are running in conflicting ways (e.g., holding a lock on the profile).
 
-### Debug Logs
+*   **`command not found: codesys-mcp-tool`:**
+    *   Ensure the package was installed globally (`npm install -g @codesys/mcp-toolkit`).
+    *   Ensure the npm global bin directory is in your system's `PATH` environment variable. Find it with `npm config get prefix` and add the `bin` subdirectory (or the main directory itself on Windows) to your PATH.
 
-Check logs at:
-- Windows: `C:\Users\<YourUsername>\AppData\Roaming\Claude\logs\`
+*   **Check Logs:**
+    *   Claude Desktop logs: `C:\Users\<YourUsername>\AppData\Roaming\Claude\logs\` (Windows)
 
 ## 📖 Detailed OOP Workflow Guide
-
-When creating object-oriented structures with this toolkit, follow this step-by-step workflow for best results:
-
-### Creating Function Blocks with Properties and Methods
-
-1. **Create the Function Block**
-   ```
-   create_pou(
-     projectFilePath: "path/to/project.project",
-     name: "PumpController", 
-     type: "FunctionBlock",
-     language: "ST",
-     parentPath: "Application"
-   )
-   ```
-
-2. **Create Properties**
-   ```
-   create_property(
-     projectFilePath: "path/to/project.project",
-     parentPouPath: "Application/PumpController",
-     propertyName: "SpeedSetpoint",
-     propertyType: "INT"
-   )
-   ```
-
-3. **Create Methods**
-   ```
-   create_method(
-     projectFilePath: "path/to/project.project",
-     parentPouPath: "Application/PumpController",
-     methodName: "Start",
-     returnType: "" // Empty for no return value
-   )
-   ```
-
-4. **Implement Methods**
-   ```
-   set_pou_code(
-     projectFilePath: "path/to/project.project",
-     pouPath: "Application/PumpController/Start",
-     implementationCode: "isRunning := TRUE;"
-   )
-   ```
-
-5. **Declare Backing Variables**
-   ```
-   set_pou_code(
-     projectFilePath: "path/to/project.project",
-     pouPath: "Application/PumpController",
-     declarationCode: "VAR PRIVATE\n  _speedSetpoint : INT;\n  _isRunning : BOOL;\nEND_VAR"
-   )
-   ```
-
-6. **Implement Property Accessors**
-   - For GET accessor:
-     ```
-     set_pou_code(
-       projectFilePath: "path/to/project.project",
-       pouPath: "Application/PumpController/SpeedSetpoint/Get",
-       implementationCode: "SpeedSetpoint := _speedSetpoint;"
-     )
-     ```
-   - For SET accessor:
-     ```
-     set_pou_code(
-       projectFilePath: "path/to/project.project",
-       pouPath: "Application/PumpController/SpeedSetpoint/Set",
-       implementationCode: "_speedSetpoint := SpeedSetpoint;"
-     )
-     ```
-
-7. **Save Project**
-   ```
-   save_project(
-     projectFilePath: "path/to/project.project"
-   )
-   ```
-
-### Important Path Usage Notes
-
-- Use forward slashes (`/`) in all object paths
-- Ensure paths are precise and target the specific object
-- For property accessors, always specify the full path including `/Get` or `/Set`
-
-### CODESYS Naming Conventions
-
-- **POUs** (Programs, FBs, Functions): PascalCase (e.g., `MotorControl`)
-- **Interfaces**: PascalCase with I_ prefix (e.g., `I_AxisCommands`)
-- **DUTs** (Structs, Enums): PascalCase (e.g., `MachineState`, `E_OperationMode`)
-- **Variables**: camelCase (e.g., `motorSpeed`)
-- **Backing variables**: camelCase with _ prefix (e.g., `_speedSetpoint`)
-- **Constants**: UPPER_SNAKE_CASE (e.g., `MAX_RPM`)
-- **Properties & Methods**: PascalCase with descriptive names
-
-### Recommended Property Naming
-
-- Control values: Add `Setpoint` suffix (e.g., `SpeedSetpoint`)
-- Measured values: Add `Actual` suffix (e.g., `TemperatureActual`)
-- Status indicators: Use `Is` or `Has` prefix (e.g., `IsRunning`, `HasError`)
-- Configuration: Use descriptive prefixes (e.g., `MaxSpeed`, `MinPressure`)
+*(This section seems good, keep as is)*
+... (Paste your existing OOP Workflow Guide here) ...
 
 ## 🤝 Contributing
-
+*(Keep as is or add details)*
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## 📝 License
-
+*(Keep as is)*
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgements
-
+*(Keep as is)*
 - The [CODESYS](https://www.codesys.com/) team for their scripting engine
 - [Model Context Protocol](https://github.com/m-ld/model-context-protocol) project
 - All contributors who have helped improve this toolkit
