@@ -132,20 +132,15 @@ When running `codesys-mcp-tool` directly or configuring it, you can use these ar
 *   **Check Logs:**
     *   Claude Desktop logs: `C:\Users\<YourUsername>\AppData\Roaming\Claude\logs\` (Windows)
 
-## 📖 Detailed OOP Workflow Guide
-*(This section seems good, keep as is)*
-... (Paste your existing OOP Workflow Guide here) ...
-
 ## 🤝 Contributing
-*(Keep as is or add details)*
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Contributions, issues, and feature requests are welcome! Feel free to check the issues page. (Optionally add a CONTRIBUTING.md file with more details).
 
 ## 📝 License
-*(Keep as is)*
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🙏 Acknowledgements
 *(Keep as is)*
-- The [CODESYS](https://www.codesys.com/) team for their scripting engine
-- [Model Context Protocol](https://github.com/m-ld/model-context-protocol) project
-- All contributors who have helped improve this toolkit
+- The CODESYS GmbH team for the powerful CODESYS platform and its scripting engine.
+- The Model Context Protocol project for defining the interaction standard.
+- All contributors and users who help improve this toolkit.
+
