@@ -5,7 +5,7 @@
  *
  * IMPORTANT: This server receives configuration as parameters from bin.ts,
  * which helps avoid issues with command-line argument passing in different execution environments.
- * (Incorporates script templates from v1.6.9)
+ * (Incorporates script templates from v1.6.9 and improved tool descriptions)
  */
 
 // --- Import 'os' FIRST ---
@@ -90,7 +90,11 @@ export async function startMcpServer(config: ServerConfig) {
     const server = new McpServer({
         name: "CODESYS Control MCP Server",
         version: "1.7.1", // Update version as needed
-        capabilities: { resources: {}, tools: {} }
+        capabilities: {
+            // Explicitly declare capabilities - enables listChanged notifications if supported by SDK
+            resources: { listChanged: true }, // Assuming you might want to notify if resources change dynamically
+            tools: { listChanged: true }      // Assuming you might want to notify if tools change dynamically (less common)
+         }
     });
     console.error("SERVER.TS: McpServer instance created.");
     // --- End MCP Server Initialization ---
@@ -1127,275 +1131,294 @@ except Exception as e:
 
 
     // --- Tools ---
-    server.tool("open_project", { filePath: z.string().describe("Path to the project file.") }, async (args) => {
-        const { filePath } = args; let absPath = path.normalize(path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE_DIR, filePath));
-        console.error(`Tool call: open_project: ${absPath}`);
-        try {
-            const escapedPath = absPath.replace(/\\/g, '\\\\');
-            // *** DEFINE script ***
-            const script = OPEN_PROJECT_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escapedPath);
-            // *** END DEFINE script ***
-            const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
-            const success = result.success && result.output.includes("SCRIPT_SUCCESS");
-            // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: success ? `Project opened: ${absPath}` : `Failed open project ${absPath}. Output:\n${result.output}` }], isError: !success };
-        } catch (e: any) {
-             console.error(`Error open_project ${absPath}: ${e}`);
-             // **** RETURN MCP STRUCTURE ****
-             return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
-        }
-    });
-
-    server.tool("create_project", { filePath: z.string().describe("Path for new project.") }, async (args) => {
-        const { filePath } = args; let absPath = path.normalize(path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE_DIR, filePath));
-        console.error(`Tool call: create_project (copy template): ${absPath}`);
-        let templatePath = "";
-        try {
-            // Template finding logic (same as before)
-            const baseDir = path.dirname(path.dirname(codesysExePath));
-            templatePath = path.normalize(path.join(baseDir, 'Templates', 'Standard.project'));
-             if (!(await fileExists(templatePath))) {
-                 console.error(`WARN: Template not found relative to exe: ${templatePath}. Trying ProgramData...`);
-                 const programData = process.env.ALLUSERSPROFILE || process.env.ProgramData || 'C:\\ProgramData';
-                 const possibleTemplateDir = path.join(programData, 'CODESYS', 'CODESYS', codesysProfileName, 'Templates');
-                 let potentialTemplatePath = path.normalize(path.join(possibleTemplateDir, 'Standard.project'));
-                 if (await fileExists(potentialTemplatePath)) { templatePath = potentialTemplatePath; console.error(`DEBUG: Found template in ProgramData: ${templatePath}`); }
-                 else {
-                      const alternativeTemplateDir = path.join(programData, 'CODESYS', 'Templates');
-                      potentialTemplatePath = path.normalize(path.join(alternativeTemplateDir, 'Standard.project'));
-                      if (await fileExists(potentialTemplatePath)) { templatePath = potentialTemplatePath; console.error(`DEBUG: Found template in ProgramData (alternative): ${templatePath}`); }
-                      else { throw new Error(`Standard template project file not found at relative path or ProgramData locations.`); }
-                 }
-             } else { console.error(`DEBUG: Found template relative to exe: ${templatePath}`); }
-             // *** END TEMPLATE FINDING ***
-        } catch (e:any) {
-             console.error(`Template Error: ${e.message}`);
-             // **** RETURN MCP STRUCTURE ****
-             return { content: [{ type: "text", text: `Template Error: ${e.message}` }], isError: true };
-        }
-        try {
-            const escProjPath = absPath.replace(/\\/g, '\\\\'); const escTmplPath = templatePath.replace(/\\/g, '\\\\');
-             // *** DEFINE script ***
-            const script = CREATE_PROJECT_SCRIPT_TEMPLATE
-                .replace("{PROJECT_FILE_PATH}", escProjPath)
-                .replace("{TEMPLATE_PROJECT_PATH}", escTmplPath);
-             // *** END DEFINE script ***
-            console.error(">>> create_project (copy-then-open): PREPARED SCRIPT:", script.substring(0, 500) + "...");
-            const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
-            console.error(">>> create_project (copy-then-open): EXECUTION RESULT:", JSON.stringify(result));
-            const success = result.success && result.output.includes("SCRIPT_SUCCESS");
-             // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: success ? `Project created from template: ${absPath}` : `Failed create project ${absPath} from template. Output:\n${result.output}` }], isError: !success };
-        } catch (e: any) {
-            console.error(`Error create_project ${absPath}: ${e}`);
-             // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
-        }
-    });
-
-    server.tool("save_project", { projectFilePath: z.string().describe("Path to project.") }, async (args) => {
-        const { projectFilePath } = args; let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
-        console.error(`Tool call: save_project: ${absPath}`);
-         try {
-            const escapedPath = absPath.replace(/\\/g, '\\\\');
-             // *** DEFINE script ***
-            const script = SAVE_PROJECT_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escapedPath);
-             // *** END DEFINE script ***
-            const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
-            const success = result.success && result.output.includes("SCRIPT_SUCCESS");
-             // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: success ? `Project saved: ${absPath}` : `Failed save project ${absPath}. Output:\n${result.output}` }], isError: !success };
-         } catch (e:any) {
-             console.error(`Error save_project ${absPath}: ${e}`);
-             // **** RETURN MCP STRUCTURE ****
-             return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
-         }
-    });
-
-    server.tool("create_pou", {
-        projectFilePath: z.string().describe("Path to project."),
-        name: z.string().describe("Name for the new POU."),
-        type: PouTypeEnum.describe("Type of POU (Program, FunctionBlock, Function)."),
-        language: ImplementationLanguageEnum.describe("Implementation language (ST, LD, FBD, etc.). Will use default if not directly supported/mapped by script."),
-        parentPath: z.string().describe("Relative path under project/application (e.g., 'Application' or 'MyFolder/SubFolder').")
-    }, async (args) => {
-        const { projectFilePath, name, type, language, parentPath } = args;
-        let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
-        const sanParentPath = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-        const sanName = name.trim();
-
-        console.error(`Tool call: create_pou: Name='${sanName}', Type='${type}', Lang='${language}', Parent='${sanParentPath}', Project='${absPath}'`);
-         try {
-            const escProjPath = absPath.replace(/\\/g, '\\\\');
-             // *** DEFINE script ***
-            let script = CREATE_POU_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
-            script = script.replace("{POU_NAME}", sanName);
-            script = script.replace("{POU_TYPE_STR}", type);
-            script = script.replace("{IMPL_LANGUAGE_STR}", language);
-            script = script.replace("{PARENT_PATH}", sanParentPath);
-             // *** END DEFINE script ***
-
-            console.error(">>> create_pou: PREPARED SCRIPT:", script.substring(0,500)+"...");
-            const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
-            console.error(">>> create_pou: EXECUTION RESULT:", JSON.stringify(result));
-            const success = result.success && result.output.includes("SCRIPT_SUCCESS");
-             // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: success ? `POU '${sanName}' created in '${sanParentPath}' of ${absPath}. Project saved.` : `Failed create POU '${sanName}'. Output:\n${result.output}` }], isError: !success };
-         } catch (e:any) {
-             console.error(`Error create_pou ${sanName} in ${absPath}: ${e}`);
-             // **** RETURN MCP STRUCTURE ****
-             return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
-         }
-    });
-
-    server.tool("set_pou_code", {
-        projectFilePath: z.string().describe("Path to project."),
-        pouPath: z.string().describe("Relative POU/Method/Property path (e.g., 'Application/MyPOU' or 'MyFolder/MyFB/MyMethod')."),
-        declarationCode: z.string().describe("Code for the declaration part (VAR...END_VAR).").optional(),
-        implementationCode: z.string().describe("Code for the implementation logic part.").optional()
-    }, async (args) => {
-        const { projectFilePath, pouPath, declarationCode, implementationCode } = args;
-        if (declarationCode === undefined && implementationCode === undefined) {
-            return { content: [{ type: "text", text: "Error: At least one of declarationCode or implementationCode must be provided." }], isError: true };
-        }
-        let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
-        const sanPouPath = pouPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-        console.error(`Tool call: set_pou_code: Target='${sanPouPath}', Project='${absPath}'`);
-         try {
-            const escProjPath = absPath.replace(/\\/g, '\\\\');
-            // Escape content for Python triple-quoted strings
-            const sanDeclCode = (declarationCode ?? "").replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
-            const sanImplCode = (implementationCode ?? "").replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
-             // *** DEFINE script ***
-            let script = SET_POU_CODE_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
-            script = script.replace("{POU_FULL_PATH}", sanPouPath);
-            script = script.replace("{DECLARATION_CONTENT}", sanDeclCode);
-            script = script.replace("{IMPLEMENTATION_CONTENT}", sanImplCode);
-             // *** END DEFINE script ***
-
-            console.error(">>> set_pou_code: PREPARED SCRIPT:", script.substring(0, 500) + "...");
-            const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
-            console.error(">>> set_pou_code: EXECUTION RESULT:", JSON.stringify(result));
-            const success = result.success && result.output.includes("SCRIPT_SUCCESS");
-             // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: success ? `Code set for '${sanPouPath}' in ${absPath}. Project saved.` : `Failed set code for '${sanPouPath}'. Output:\n${result.output}` }], isError: !success };
-         } catch (e:any) {
-             console.error(`Error set_pou_code ${sanPouPath} in ${absPath}: ${e}`);
-             // **** RETURN MCP STRUCTURE ****
-             return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
-         }
-    });
-
-    server.tool("create_property", {
-        projectFilePath: z.string().describe("Path to the project file."),
-        parentPouPath: z.string().describe("Relative path to the parent POU (e.g., 'Application/MyFB')."),
-        propertyName: z.string().describe("Name of the new property."),
-        propertyType: z.string().describe("Data type of the property (e.g., 'BOOL', 'INT', 'MyDUT').")
-    }, async (args) => {
-        const { projectFilePath, parentPouPath, propertyName, propertyType } = args;
-        let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
-        const sanParentPath = parentPouPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-        const sanPropName = propertyName.trim();
-        const sanPropType = propertyType.trim();
-        console.error(`Tool call: create_property: Name='${sanPropName}', Type='${sanPropType}', ParentPOU='${sanParentPath}', Project='${absPath}'`);
-        if (!sanPropName || !sanPropType) {
-             // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: `Error: Property name and type cannot be empty.` }], isError: true };
-        }
-        try {
-            const escProjPath = absPath.replace(/\\/g, '\\\\');
-             // *** DEFINE script ***
-            let script = CREATE_PROPERTY_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
-            script = script.replace("{PARENT_POU_FULL_PATH}", sanParentPath);
-            script = script.replace("{PROPERTY_NAME}", sanPropName);
-            script = script.replace("{PROPERTY_TYPE}", sanPropType);
-             // *** END DEFINE script ***
-
-            console.error(">>> create_property: PREPARED SCRIPT:", script.substring(0, 500) + "...");
-            const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
-            console.error(">>> create_property: EXECUTION RESULT:", JSON.stringify(result));
-            const success = result.success && result.output.includes("SCRIPT_SUCCESS");
-             // **** RETURN MCP STRUCTURE ****
-            return {
-                content: [{ type: "text", text: success ? `Property '${sanPropName}' created under '${sanParentPath}' in ${absPath}. Project saved.` : `Failed to create property '${sanPropName}'. Output:\n${result.output}` }],
-                isError: !success
-            };
-        } catch (e: any) {
-            console.error(`Error create_property ${sanPropName} in ${absPath}: ${e}`);
-             // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
-        }
-    });
-
-    server.tool("create_method", {
-        projectFilePath: z.string().describe("Path to the project file."),
-        parentPouPath: z.string().describe("Relative path to the parent POU (e.g., 'Application/MyFB')."),
-        methodName: z.string().describe("Name of the new method."),
-        returnType: z.string().optional().describe("Return type (e.g., 'BOOL', 'INT'). Leave empty or omit for no return value."),
-    }, async (args) => {
-        const { projectFilePath, parentPouPath, methodName, returnType } = args;
-        let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
-        const sanParentPath = parentPouPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-        const sanMethName = methodName.trim();
-        const sanReturnType = (returnType ?? "").trim();
-        console.error(`Tool call: create_method: Name='${sanMethName}', Return='${sanReturnType}', ParentPOU='${sanParentPath}', Project='${absPath}'`);
-         if (!sanMethName) {
-             // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: `Error: Method name cannot be empty.` }], isError: true };
-        }
-        try {
-            const escProjPath = absPath.replace(/\\/g, '\\\\');
-             // *** DEFINE script ***
-            let script = CREATE_METHOD_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
-            script = script.replace("{PARENT_POU_FULL_PATH}", sanParentPath);
-            script = script.replace("{METHOD_NAME}", sanMethName);
-            script = script.replace("{RETURN_TYPE}", sanReturnType);
-             // *** END DEFINE script ***
-
-            console.error(">>> create_method: PREPARED SCRIPT:", script.substring(0, 500) + "...");
-            const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
-            console.error(">>> create_method: EXECUTION RESULT:", JSON.stringify(result));
-            const success = result.success && result.output.includes("SCRIPT_SUCCESS");
-             // **** RETURN MCP STRUCTURE ****
-            return {
-                content: [{ type: "text", text: success ? `Method '${sanMethName}' created under '${sanParentPath}' in ${absPath}. Project saved.` : `Failed to create method '${sanMethName}'. Output:\n${result.output}` }],
-                isError: !success
-            };
-        } catch (e: any) {
-            console.error(`Error create_method ${sanMethName} in ${absPath}: ${e}`);
-             // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
-        }
-    });
-
-    server.tool("compile_project", { projectFilePath: z.string().describe("Path to project.") }, async (args) => {
-        const { projectFilePath } = args;
-        let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
-        console.error(`Tool call: compile_project: ${absPath}`);
-        try {
-            const escapedPath = absPath.replace(/\\/g, '\\\\');
-             // *** DEFINE script ***
-            const script = COMPILE_PROJECT_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escapedPath);
-             // *** END DEFINE script ***
-            const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
-            const success = result.success && result.output.includes("SCRIPT_SUCCESS");
-            const hasCompileErrors = result.output.includes("Compile complete --") && !/ 0 error\(s\),/.test(result.output);
-            let message = success ? `Compilation initiated for application in ${absPath}. Check CODESYS messages for results.` : `Failed initiating compilation for ${absPath}. Output:\n${result.output}`;
-            let isError = !success; // Base error status on script success
-            if (success && hasCompileErrors) {
-                message += " WARNING: Build command reported errors in the output log.";
-                console.warn("Compile project reported build errors in the output.");
-                 // Optionally set isError = true here if compile errors should fail the tool call
-                 isError = true;
+    server.tool(
+        "open_project", // Tool Name
+        "Opens an existing CODESYS project file.", // Tool Description
+        { // Input Schema
+            filePath: z.string().describe("Path to the project file (e.g., 'C:/Projects/MyPLC.project' or '/Users/user/projects/my_project.project').")
+        },
+        async (args) => { // Handler
+            const { filePath } = args;
+            let absPath = path.normalize(path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE_DIR, filePath));
+            console.error(`Tool call: open_project: ${absPath}`);
+            try {
+                const escapedPath = absPath.replace(/\\/g, '\\\\');
+                const script = OPEN_PROJECT_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escapedPath);
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
+                return { content: [{ type: "text", text: success ? `Project opened: ${absPath}` : `Failed open project ${absPath}. Output:\n${result.output}` }], isError: !success };
+            } catch (e: any) {
+                console.error(`Error open_project ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
             }
-             // **** RETURN MCP STRUCTURE ****
-            return { content: [{ type: "text", text: message }], isError: isError };
-         } catch (e:any) {
-             console.error(`Error compile_project ${absPath}: ${e}`);
-             // **** RETURN MCP STRUCTURE ****
-             return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
-         }
-    });
+        }
+    );
+
+    server.tool(
+        "create_project", // Tool Name
+        "Creates a new CODESYS project from the standard template.", // Tool Description
+        { // Input Schema
+            filePath: z.string().describe("Path where the new project file should be created (e.g., 'C:/Projects/NewPLC.project' or '/Users/user/projects/new_project.project').")
+        },
+        async (args) => { // Handler
+            const { filePath } = args;
+            let absPath = path.normalize(path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE_DIR, filePath));
+            console.error(`Tool call: create_project (copy template): ${absPath}`);
+            let templatePath = "";
+            try {
+                // Template finding logic (same as before)
+                const baseDir = path.dirname(path.dirname(codesysExePath));
+                templatePath = path.normalize(path.join(baseDir, 'Templates', 'Standard.project'));
+                if (!(await fileExists(templatePath))) {
+                    console.error(`WARN: Template not found relative to exe: ${templatePath}. Trying ProgramData...`);
+                    const programData = process.env.ALLUSERSPROFILE || process.env.ProgramData || 'C:\\ProgramData';
+                    const possibleTemplateDir = path.join(programData, 'CODESYS', 'CODESYS', codesysProfileName, 'Templates');
+                    let potentialTemplatePath = path.normalize(path.join(possibleTemplateDir, 'Standard.project'));
+                    if (await fileExists(potentialTemplatePath)) { templatePath = potentialTemplatePath; console.error(`DEBUG: Found template in ProgramData: ${templatePath}`); }
+                    else {
+                         const alternativeTemplateDir = path.join(programData, 'CODESYS', 'Templates');
+                         potentialTemplatePath = path.normalize(path.join(alternativeTemplateDir, 'Standard.project'));
+                         if (await fileExists(potentialTemplatePath)) { templatePath = potentialTemplatePath; console.error(`DEBUG: Found template in ProgramData (alternative): ${templatePath}`); }
+                         else { throw new Error(`Standard template project file not found at relative path or ProgramData locations.`); }
+                    }
+                } else { console.error(`DEBUG: Found template relative to exe: ${templatePath}`); }
+                // *** END TEMPLATE FINDING ***
+            } catch (e:any) {
+                console.error(`Template Error: ${e.message}`);
+                return { content: [{ type: "text", text: `Template Error: ${e.message}` }], isError: true };
+            }
+            try {
+                const escProjPath = absPath.replace(/\\/g, '\\\\'); const escTmplPath = templatePath.replace(/\\/g, '\\\\');
+                const script = CREATE_PROJECT_SCRIPT_TEMPLATE
+                    .replace("{PROJECT_FILE_PATH}", escProjPath)
+                    .replace("{TEMPLATE_PROJECT_PATH}", escTmplPath);
+                console.error(">>> create_project (copy-then-open): PREPARED SCRIPT:", script.substring(0, 500) + "...");
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                console.error(">>> create_project (copy-then-open): EXECUTION RESULT:", JSON.stringify(result));
+                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
+                return { content: [{ type: "text", text: success ? `Project created from template: ${absPath}` : `Failed create project ${absPath} from template. Output:\n${result.output}` }], isError: !success };
+            } catch (e: any) {
+                console.error(`Error create_project ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "save_project", // Tool Name
+        "Saves the currently open CODESYS project.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file to ensure is open before saving (e.g., 'C:/Projects/MyPLC.project').")
+        },
+        async (args) => { // Handler
+            const { projectFilePath } = args;
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            console.error(`Tool call: save_project: ${absPath}`);
+            try {
+                const escapedPath = absPath.replace(/\\/g, '\\\\');
+                const script = SAVE_PROJECT_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escapedPath);
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
+                return { content: [{ type: "text", text: success ? `Project saved: ${absPath}` : `Failed save project ${absPath}. Output:\n${result.output}` }], isError: !success };
+            } catch (e:any) {
+                console.error(`Error save_project ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "create_pou", // Tool Name
+        "Creates a new Program, Function Block, or Function POU within the specified CODESYS project.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file (e.g., 'C:/Projects/MyPLC.project')."),
+            name: z.string().describe("Name for the new POU (must be a valid IEC identifier)."),
+            type: PouTypeEnum.describe("Type of POU (Program, FunctionBlock, Function)."),
+            language: ImplementationLanguageEnum.describe("Implementation language (ST, LD, FBD, etc.). CODESYS default will be used if specific language is not set or directly supported by scripting for this POU type."),
+            parentPath: z.string().describe("Relative path under project root or application where the POU should be created (e.g., 'Application' or 'MyFolder/SubFolder').")
+        },
+        async (args) => { // Handler
+            const { projectFilePath, name, type, language, parentPath } = args;
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            const sanParentPath = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            const sanName = name.trim();
+
+            console.error(`Tool call: create_pou: Name='${sanName}', Type='${type}', Lang='${language}', Parent='${sanParentPath}', Project='${absPath}'`);
+            try {
+                const escProjPath = absPath.replace(/\\/g, '\\\\');
+                let script = CREATE_POU_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
+                script = script.replace("{POU_NAME}", sanName);
+                script = script.replace("{POU_TYPE_STR}", type);
+                script = script.replace("{IMPL_LANGUAGE_STR}", language);
+                script = script.replace("{PARENT_PATH}", sanParentPath);
+
+                console.error(">>> create_pou: PREPARED SCRIPT:", script.substring(0,500)+"...");
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                console.error(">>> create_pou: EXECUTION RESULT:", JSON.stringify(result));
+                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
+                return { content: [{ type: "text", text: success ? `POU '${sanName}' created in '${sanParentPath}' of ${absPath}. Project saved.` : `Failed create POU '${sanName}'. Output:\n${result.output}` }], isError: !success };
+            } catch (e:any) {
+                console.error(`Error create_pou ${sanName} in ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "set_pou_code", // Tool Name
+        "Sets the declaration and/or implementation code for a specific POU, Method, or Property.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file (e.g., 'C:/Projects/MyPLC.project')."),
+            pouPath: z.string().describe("Full relative path to the target object (e.g., 'Application/MyPOU', 'MyFolder/MyFB/MyMethod', 'MyFolder/MyFB/MyProperty')."),
+            declarationCode: z.string().describe("Code for the declaration part (VAR...END_VAR). If omitted, the declaration is not changed.").optional(),
+            implementationCode: z.string().describe("Code for the implementation logic part. If omitted, the implementation is not changed.").optional()
+        },
+        async (args) => { // Handler
+            const { projectFilePath, pouPath, declarationCode, implementationCode } = args;
+            if (declarationCode === undefined && implementationCode === undefined) {
+                return { content: [{ type: "text", text: "Error: At least one of declarationCode or implementationCode must be provided." }], isError: true };
+            }
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            const sanPouPath = pouPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            console.error(`Tool call: set_pou_code: Target='${sanPouPath}', Project='${absPath}'`);
+            try {
+                const escProjPath = absPath.replace(/\\/g, '\\\\');
+                // Escape content for Python triple-quoted strings
+                const sanDeclCode = (declarationCode ?? "").replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+                const sanImplCode = (implementationCode ?? "").replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+                let script = SET_POU_CODE_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
+                script = script.replace("{POU_FULL_PATH}", sanPouPath);
+                script = script.replace("{DECLARATION_CONTENT}", sanDeclCode);
+                script = script.replace("{IMPLEMENTATION_CONTENT}", sanImplCode);
+
+                console.error(">>> set_pou_code: PREPARED SCRIPT:", script.substring(0, 500) + "...");
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                console.error(">>> set_pou_code: EXECUTION RESULT:", JSON.stringify(result));
+                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
+                return { content: [{ type: "text", text: success ? `Code set for '${sanPouPath}' in ${absPath}. Project saved.` : `Failed set code for '${sanPouPath}'. Output:\n${result.output}` }], isError: !success };
+            } catch (e:any) {
+                console.error(`Error set_pou_code ${sanPouPath} in ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "create_property", // Tool Name
+        "Creates a new Property within a specific Function Block POU.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file (e.g., 'C:/Projects/MyPLC.project')."),
+            // Assuming properties can only be added to FBs in standard CODESYS scripting
+            parentPouPath: z.string().describe("Relative path to the parent Function Block POU (e.g., 'Application/MyFB')."),
+            propertyName: z.string().describe("Name for the new property (must be a valid IEC identifier)."),
+            propertyType: z.string().describe("Data type of the property (e.g., 'BOOL', 'INT', 'MyDUT').")
+        },
+        async (args) => { // Handler
+            const { projectFilePath, parentPouPath, propertyName, propertyType } = args;
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            const sanParentPath = parentPouPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            const sanPropName = propertyName.trim();
+            const sanPropType = propertyType.trim();
+            console.error(`Tool call: create_property: Name='${sanPropName}', Type='${sanPropType}', ParentPOU='${sanParentPath}', Project='${absPath}'`);
+            if (!sanPropName || !sanPropType) {
+                return { content: [{ type: "text", text: `Error: Property name and type cannot be empty.` }], isError: true };
+            }
+            try {
+                const escProjPath = absPath.replace(/\\/g, '\\\\');
+                let script = CREATE_PROPERTY_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
+                script = script.replace("{PARENT_POU_FULL_PATH}", sanParentPath);
+                script = script.replace("{PROPERTY_NAME}", sanPropName);
+                script = script.replace("{PROPERTY_TYPE}", sanPropType);
+
+                console.error(">>> create_property: PREPARED SCRIPT:", script.substring(0, 500) + "...");
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                console.error(">>> create_property: EXECUTION RESULT:", JSON.stringify(result));
+                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
+                return {
+                    content: [{ type: "text", text: success ? `Property '${sanPropName}' created under '${sanParentPath}' in ${absPath}. Project saved.` : `Failed to create property '${sanPropName}'. Output:\n${result.output}` }],
+                    isError: !success
+                };
+            } catch (e: any) {
+                console.error(`Error create_property ${sanPropName} in ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "create_method", // Tool Name
+        "Creates a new Method within a specific Function Block POU.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file (e.g., 'C:/Projects/MyPLC.project')."),
+            // Assuming methods can typically only be added to FBs in standard CODESYS scripting
+            parentPouPath: z.string().describe("Relative path to the parent Function Block POU (e.g., 'Application/MyFB')."),
+            methodName: z.string().describe("Name of the new method (must be a valid IEC identifier)."),
+            returnType: z.string().optional().describe("Return type (e.g., 'BOOL', 'INT'). Leave empty or omit for no return value (PROCEDURE)."),
+        },
+        async (args) => { // Handler
+            const { projectFilePath, parentPouPath, methodName, returnType } = args;
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            const sanParentPath = parentPouPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            const sanMethName = methodName.trim();
+            const sanReturnType = (returnType ?? "").trim();
+            console.error(`Tool call: create_method: Name='${sanMethName}', Return='${sanReturnType}', ParentPOU='${sanParentPath}', Project='${absPath}'`);
+            if (!sanMethName) {
+                return { content: [{ type: "text", text: `Error: Method name cannot be empty.` }], isError: true };
+            }
+            try {
+                const escProjPath = absPath.replace(/\\/g, '\\\\');
+                let script = CREATE_METHOD_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
+                script = script.replace("{PARENT_POU_FULL_PATH}", sanParentPath);
+                script = script.replace("{METHOD_NAME}", sanMethName);
+                script = script.replace("{RETURN_TYPE}", sanReturnType);
+
+                console.error(">>> create_method: PREPARED SCRIPT:", script.substring(0, 500) + "...");
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                console.error(">>> create_method: EXECUTION RESULT:", JSON.stringify(result));
+                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
+                return {
+                    content: [{ type: "text", text: success ? `Method '${sanMethName}' created under '${sanParentPath}' in ${absPath}. Project saved.` : `Failed to create method '${sanMethName}'. Output:\n${result.output}` }],
+                    isError: !success
+                };
+            } catch (e: any) {
+                console.error(`Error create_method ${sanMethName} in ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "compile_project", // Tool Name
+        "Compiles (Builds) the primary application within a CODESYS project.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file containing the application to compile (e.g., 'C:/Projects/MyPLC.project').")
+        },
+        async (args) => { // Handler
+            const { projectFilePath } = args;
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            console.error(`Tool call: compile_project: ${absPath}`);
+            try {
+                const escapedPath = absPath.replace(/\\/g, '\\\\');
+                const script = COMPILE_PROJECT_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escapedPath);
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
+                // Check for actual compile errors in the output log
+                const hasCompileErrors = result.output.includes("Compile complete --") && !/ 0 error\(s\),/.test(result.output);
+                let message = success ? `Compilation initiated for application in ${absPath}. Check CODESYS messages for results.` : `Failed initiating compilation for ${absPath}. Output:\n${result.output}`;
+                let isError = !success; // Base error status on script success
+                if (success && hasCompileErrors) {
+                    message += " WARNING: Build command reported errors in the output log.";
+                    console.warn("Compile project reported build errors in the output.");
+                    // Report as error if compile fails, even if script technically succeeded
+                    isError = true;
+                }
+                return { content: [{ type: "text", text: message }], isError: isError };
+            } catch (e:any) {
+                console.error(`Error compile_project ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
     // --- End Tools ---
 
     console.error("SERVER.TS: Resources and Tools defined.");
