@@ -116,71 +116,82 @@ Launching with `npx` has been observed to cause immediate errors (`'C:\Program' 
 
 This section provides a guide on how you might want to instruct an AI assistant (like Claude, ChatGPT, etc.) that has access to this MCP toolkit to interact with your CODESYS projects. The goal is to achieve efficient and correct project manipulation, OOP structure creation, and code generation.
 
-### CODESYS Object Paths
+Follow these steps for interacting with CODESYS projects using the `codesys_local` MCP tools. My primary goal is efficient and correct project manipulation, OOP structure creation, and code generation via these tools.
 
-When referring to objects in CODESYS:
-- For top-level Application object, use one of these formats based on how your project is structured:
-  * Just "Application" (the toolkit will attempt to auto-resolve if unique)
-  * "projectName.Application" (dot notation for top-level items, e.g., `MyProject.Application`)
-  * "projectName/Application" (slash notation, e.g., `MyProject/Application`)
-- For child objects, use slash format: "Application/MyFolder/MyPOU" (e.g., `MyProject.Application/Logic/PumpControllerFB`)
-It's crucial to provide the correct and full path to objects for reliable operations.
+**1. Prioritize MCP Tool Usage:**
 
-### Operation Workflow Example: Creating an OOP Structure
+*   Always use the available `codesys_local` tools (`compile_project`, `create_method`, `create_pou`, `create_project`, `create_property`, `open_project`, `save_project`, `set_pou_code`) for corresponding actions.
+*   **Crucially:** Use `set_pou_code` for setting all textual code (POU declarations/implementations, Method implementations, Property Get/Set accessor implementations). Identify the target object precisely using its full `pouPath`.
 
-When creating an OOP structure (e.g., "create a pump controller Function Block with properties and methods"), you could guide the AI as follows:
+**2. CODESYS Object Paths:**
 
-1.  **Open Project**: Use `open_project` or `create_project` with the correct project file path.
-    *   Example: `open_project --projectFilePath "C:/Path/To/Your/Project/MyMachine.project"`
+*   Use **forward slashes (`/`)** for all object paths within the project (e.g., `Application/MyFolder/MyPOU`).
+*   Be precise with `projectFilePath`, `parentPouPath`, and `pouPath` arguments.
 
-2.  **Create Function Block**: Use `create_pou` with:
-    *   `projectFilePath`: Full path to the .project file
-    *   `name`: The name for the FB (e.g., "PumpController")
-    *   `type`: "FunctionBlock"
-    *   `language`: "ST" (Structured Text)
-    *   `parentPath`: The parent path (e.g., "Application" or "MyMachine.Application"). Ensure this path is correct.
-    *   Example: `create_pou --projectFilePath "C:/Path/To/Your/Project/MyMachine.project" --name "PumpController" --type "FunctionBlock" --language "ST" --parentPath "MyMachine.Application"`
+**3. OOP Structure Creation Workflow (Strict Sequence - CRITICAL):**
 
-3.  **Create Properties**: Use `create_property` for each required property, with:
-    *   `projectFilePath`: Full path to the .project file
-    *   `parentPouPath`: Path to the parent FB (e.g., "MyMachine.Application/PumpController")
-    *   `name`: The property name (e.g., "SpeedSetpoint")
-    *   `dataType`: The property's data type (e.g., "REAL")
-    *   Example: `create_property --projectFilePath "C:/Path/To/Your/Project/MyMachine.project" --parentPouPath "MyMachine.Application/PumpController" --name "SpeedSetpoint" --dataType "REAL"`
+When asked to create an OOP structure (e.g., "create a pump controller Function Block with properties and methods"):
 
-4.  **Create Methods**: Use `create_method` for each required method, with:
-    *   `projectFilePath`: Full path to the .project file
-    *   `parentPouPath`: Path to the parent FB (e.g., "MyMachine.Application/PumpController")
-    *   `name`: The method name (e.g., "Start")
-    *   `returnType`: Return data type (or "VOID" if none)
-    *   Example: `create_method --projectFilePath "C:/Path/To/Your/Project/MyMachine.project" --parentPouPath "MyMachine.Application/PumpController" --name "Start" --returnType "VOID"`
+*   **Step 1: Create FB:** Use `create_pou` for the Function Block.
+*   **Step 2: Create Properties:** Use `create_property` for **each** required property under the FB.
+*   **Step 3: Create Methods:** Use `create_method` for **each** required method under the FB. **This step is MANDATORY before implementing method code.**
+*   **Step 4: Declare FB Variables:** Use `set_pou_code` targeting **only the FB's path** (e.g., `Application/PumpController`) via `pouPath`. Provide **only** the necessary `VAR...END_VAR` declarations in `declarationCode`. **CRITICAL: The `implementationCode` for the FB itself MUST be empty or contain only top-level FB logic, NEVER `METHOD...END_METHOD` blocks.**
+*   **Step 5: Implement Methods:** For **each** method created in Step 3, use a **separate `set_pou_code` call**:
+    *   Target the **Method's specific full path** (e.g., `Application/PumpController/Start`) via `pouPath`.
+    *   Provide the method's logic **only** in the `implementationCode` argument. `declarationCode` is usually empty/omitted for methods.
+*   **Step 6: Implement Property Accessors:** For **each** property created in Step 2, use **separate `set_pou_code` calls** for its `Get` and `Set` accessors:
+    *   Target the **Accessor's specific full path** (e.g., `Application/PumpController/SpeedSetpoint/Get` or `.../Set`) via `pouPath`.
+    *   Provide the accessor logic **only** in the `implementationCode`. `declarationCode` is usually empty for accessors.
+*   **Step 7: Save Project:** Use `save_project` **only after** all structural and code implementations are complete.
 
-5.  **Set FB Declaration Code**: Use `set_pou_code` to define the FB's variables:
-    *   `projectFilePath`: Full path to the .project file
-    *   `pouPath`: Path to the FB (e.g., "MyMachine.Application/PumpController")
-    *   `declarationCode`: The VAR...END_VAR declarations
-    *   `implementationCode`: Either empty or containing only top-level FB logic (NEVER method implementations)
-    *   Example: `set_pou_code --projectFilePath "C:/Path/To/Your/Project/MyMachine.project" --pouPath "MyMachine.Application/PumpController" --declarationCode "VAR_INPUT\n  Enable : BOOL;\nEND_VAR\nVAR_OUTPUT\n  Status : INT;\nEND_VAR\nVAR\n  _internalCounter : INT;\nEND_VAR" --implementationCode "IF Enable THEN\n  Status := 1;\nELSE\n  Status := 0;\nEND_IF;"`
+**4. Naming and Style Conventions (CODESYS Modern):**
 
-6.  **Implement Methods**: For each method, use a separate `set_pou_code` call:
-    *   `projectFilePath`: Full path to the .project file
-    *   `pouPath`: Full path to the method (e.g., "MyMachine.Application/PumpController/Start")
-    *   `implementationCode`: The method implementation code
-    *   `declarationCode`: Usually empty for methods
-    *   Example: `set_pou_code --projectFilePath "C:/Path/To/Your/Project/MyMachine.project" --pouPath "MyMachine.Application/PumpController/Start" --implementationCode "GVL.PumpMotor := TRUE;"`
+*   **POUs (PROGRAM, FUNCTION\_BLOCK, FUNCTION):** `PascalCase` (e.g., `MotorControl`)
+*   **INTERFACE:** `I_PascalCase` (e.g., `I_AxisCommands`)
+*   **DUTs (STRUCT, UNION, ENUM, ALIAS):** `PascalCase` (e.g., `MachineState`, `E_OperationMode`)
+*   **Variables (VAR, VAR\_GLOBAL):** `camelCase` (e.g., `motorSpeed`). Prefix private backing variables with `_` (e.g., `_speedSetpoint`).
+*   **Constants (CONSTANT):** `UPPER_SNAKE_CASE` (e.g., `MAX_RPM`)
+*   **Properties & Methods:** `PascalCase` (e.g., `MotorEnable`, `ActualSpeed`, `SpeedSetpoint`)
+*   **Descriptive Property Names:** Use suffixes like `Setpoint`, `Actual`, `Status`, `Is`, `Has` (e.g., `SpeedSetpoint`, `TemperatureActual`, `IsReady`, `HasError`).
 
-7.  **Implement Property Accessors**: For each property accessor (Get/Set), use separate `set_pou_code` calls:
-    *   `projectFilePath`: Full path to the .project file
-    *   `pouPath`: Path to the accessor (e.g., "MyMachine.Application/PumpController/SpeedSetpoint/Get" or ".../Set")
-    *   `implementationCode`: The accessor implementation code
-    *   `declarationCode`: Usually empty for accessors
-    *   Example: `set_pou_code --projectFilePath "C:/Path/To/Your/Project/MyMachine.project" --pouPath "MyMachine.Application/PumpController/SpeedSetpoint/Get" --implementationCode "Get := _speedSetpoint;"`
+**4.5 OOP Design Principles for Generated ST Code (CRITICAL):**
 
-8.  **Save Project**: Use `save_project` after all structural and code implementations are complete.
-    *   Example: `save_project --projectFilePath "C:/Path/To/Your/Project/MyMachine.project"`
+When generating Structured Text (ST) code for Function Block (FB) methods and property accessors, adhere strictly to these OOP principles:
 
-9.  **Compile Project**: Use `compile_project` if verification is needed.
-    *   Example: `compile_project --projectFilePath "C:/Path/To/Your/Project/MyMachine.project"`
+*   **A. Encapsulation & Property Usage:**
+    *   **Backing Fields:** All properties **MUST** have corresponding `VAR PRIVATE` backing fields (e.g., `_myVar : INT;` for a property `MyVar : INT`).
+    *   **Internal Access via Accessors:** Within the FB's methods, when reading or writing a value that is exposed as a property, you **MUST** interact with it via its Property Get or Set accessor. **DO NOT** directly read from or write to the private backing field from other methods.
+        *   *Example (Correct):* `MyVar := MyVar + 1;` (This calls the Get and then the Set accessor of `MyVar`).
+        *   *Example (Incorrect):* `_myVar := _myVar + 1;` (This bypasses property logic).
+    *   **Exception to Direct Access:** Direct access to a backing field from a method is only permissible if that method is the property's *own* Get or Set accessor, or in very rare, explicitly justified cases for complex internal logic that cannot be cleanly handled by the accessor itself.
+*   **B. Getter/Setter Accessor Logic:**
+    *   **Get Accessor:** The implementation of a Get accessor **MUST** be simple and typically only return the value of its corresponding private backing field.
+        *   *Example:* `MyVar := _myVar;`
+    *   **Set Accessor:** The implementation of a Set accessor receives the new value (e.g., `MyVar` implicitly available). It **MAY** contain validation logic or side effects related to setting the value. It **MUST** ultimately assign the (potentially validated) new value to its corresponding private backing field.
+        *   *Example:* `IF MyVar >= GVL.MinValue THEN _myVar := MyVar; END_IF`
+*   **C. Method Design:**
+    *   **Single Responsibility:** Each method should perform one clear, distinct task or operation. Avoid overly long methods that handle multiple unrelated concerns.
+    *   **Internal Method/Property Calls:** If a method's logic requires performing an action already encapsulated by another public/private method or property of the same FB, **MUST** call that existing method/property. Do not duplicate logic.
+        *   *Example:* If a `ResetStateMachine` method needs to set a `_currentState` backing field which has a `CurrentState` property, the method should call `CurrentState := E_States.Idle;` not `_currentState := E_States.Idle;`.
+*   **D. Code Structure within `set_pou_code`:**
+    *   When `set_pou_code` targets a Function Block (e.g., `pouPath: 'Application/MyFB'`), the `implementationCode` **MUST NOT** contain `METHOD...END_METHOD` or `PROPERTY...END_PROPERTY` blocks. These are created structurally by `create_method` and `create_property`. The FB's `implementationCode` is for its main body logic (if any, often empty for pure OOP FBs).
+    *   Declarations (`VAR...END_VAR`) for the FB are set via `declarationCode` when targeting the FB.
+    *   Implementations for methods are set via `implementationCode` when `set_pou_code` targets the specific method path (e.g., `pouPath: 'Application/MyFB/MyMethod'`).
+    *   Implementations for property accessors (Get/Set) are set via `implementationCode` when `set_pou_code` targets the specific accessor path (e.g., `pouPath: 'Application/MyFB/MyProperty/Get'`).
+*   **E. Interface Design (FB Inputs vs. Methods/Properties):**
+    *   For parameters that represent continuous data flow into the FB (e.g., an analog sensor value, a setpoint from a PID loop), `VAR_INPUT` is appropriate.
+    *   For parameters that trigger discrete actions or commands (e.g., "start", "stop", "reset", "configure"), prefer public Methods.
+    *   For configurable settings or state values of the FB that require validation or have side-effects when changed, prefer public Properties with Get/Set accessors.
+    *   Avoid using many boolean `VAR_INPUT` flags to control different internal modes if distinct Methods offer a clearer behavioral interface.
+
+**5. Communication Preferences:**
+
+*   Clearly state which tool and arguments you are using for each step.
+*   Follow the OOP workflow sequence accurately.
+*   Explicitly mention the full `pouPath` being targeted when using `set_pou_code`, especially for property accessors (`.../PropertyName/Get`, `.../PropertyName/Set`).
+*   If a tool call fails, report the failure and the error message provided by the server clearly.
+
+---
 
 ### Naming and Style Conventions (CODESYS Modern)
 
