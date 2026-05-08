@@ -507,6 +507,7 @@ import sys, scriptengine as script_engine, os, traceback
 ${ENSURE_PROJECT_OPEN_PYTHON_SNIPPET}
 ${FIND_OBJECT_BY_PATH_PYTHON_SNIPPET}
 POU_NAME = "{POU_NAME}"; POU_TYPE_STR = "{POU_TYPE_STR}"; IMPL_LANGUAGE_STR = "{IMPL_LANGUAGE_STR}"; PARENT_PATH_REL = "{PARENT_PATH}"
+RETURN_TYPE = "{RETURN_TYPE}" # Required for Function POUs (e.g. "BOOL", "STRING"); ignored for Program/FunctionBlock
 pou_type_map = { "Program": script_engine.PouType.Program, "FunctionBlock": script_engine.PouType.FunctionBlock, "Function": script_engine.PouType.Function }
 # Map common language names to ImplementationLanguages attributes if needed (optional, None usually works)
 # lang_map = { "ST": script_engine.ImplementationLanguage.st, ... }
@@ -537,14 +538,26 @@ try:
     print("DEBUG: Setting language to None (will use default).")
     # Example if mapping language string: lang_guid = lang_map.get(IMPL_LANGUAGE_STR, None)
 
-    print("DEBUG: Calling parent_object.create_pou: Name='%s', Type=%s, Lang=%s" % (POU_NAME, pou_type_enum, lang_guid))
+    print("DEBUG: Calling parent_object.create_pou: Name='%s', Type=%s, Lang=%s, ReturnType='%s'" % (POU_NAME, pou_type_enum, lang_guid, RETURN_TYPE))
 
-    # Call create_pou using keyword arguments
-    new_pou = parent_object.create_pou(
-        name=POU_NAME,
-        type=pou_type_enum,
-        language=lang_guid # Pass None
-    )
+    # Function POUs require a return_type kwarg per CODESYS scripting API;
+    # Program/FunctionBlock create_pou does not accept it. Branch accordingly.
+    if pou_type_enum == script_engine.PouType.Function:
+        actual_return_type = RETURN_TYPE if RETURN_TYPE else None
+        if actual_return_type is None:
+            raise ValueError("Function POU '%s' requires a return_type. Provide the 'returnType' tool parameter (e.g. 'BOOL', 'STRING', 'INT')." % POU_NAME)
+        new_pou = parent_object.create_pou(
+            name=POU_NAME,
+            type=pou_type_enum,
+            language=lang_guid, # Pass None to use default
+            return_type=actual_return_type
+        )
+    else:
+        new_pou = parent_object.create_pou(
+            name=POU_NAME,
+            type=pou_type_enum,
+            language=lang_guid # Pass None
+        )
 
     print("DEBUG: parent_object.create_pou returned: %s" % new_pou)
     if new_pou:
@@ -1235,15 +1248,21 @@ except Exception as e:
             name: z.string().describe("Name for the new POU (must be a valid IEC identifier)."),
             type: PouTypeEnum.describe("Type of POU (Program, FunctionBlock, Function)."),
             language: ImplementationLanguageEnum.describe("Implementation language (ST, LD, FBD, etc.). CODESYS default will be used if specific language is not set or directly supported by scripting for this POU type."),
-            parentPath: z.string().describe("Relative path under project root or application where the POU should be created (e.g., 'Application' or 'MyFolder/SubFolder').")
+            parentPath: z.string().describe("Relative path under project root or application where the POU should be created (e.g., 'Application' or 'MyFolder/SubFolder')."),
+            returnType: z.string().describe("Return type for Function POUs (e.g., 'BOOL', 'STRING', 'INT', 'REAL'). Required when type is 'Function'; ignored for 'Program' and 'FunctionBlock'.").optional()
         },
         async (args) => { // Handler
-            const { projectFilePath, name, type, language, parentPath } = args;
+            const { projectFilePath, name, type, language, parentPath, returnType } = args;
+            // Function POUs require a return_type per CODESYS scripting API.
+            if (type === "Function" && (!returnType || !returnType.trim())) {
+                return { content: [{ type: "text", text: `Error: Function POUs require a 'returnType' parameter (e.g. 'BOOL', 'STRING', 'INT'). Pass returnType when type is 'Function'.` }], isError: true };
+            }
             let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
             const sanParentPath = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
             const sanName = name.trim();
+            const sanReturnType = (returnType ?? "").trim();
 
-            console.error(`Tool call: create_pou: Name='${sanName}', Type='${type}', Lang='${language}', Parent='${sanParentPath}', Project='${absPath}'`);
+            console.error(`Tool call: create_pou: Name='${sanName}', Type='${type}', Lang='${language}', Parent='${sanParentPath}', Return='${sanReturnType}', Project='${absPath}'`);
             try {
                 const escProjPath = absPath.replace(/\\/g, '\\\\');
                 let script = CREATE_POU_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
@@ -1251,6 +1270,7 @@ except Exception as e:
                 script = script.replace("{POU_TYPE_STR}", type);
                 script = script.replace("{IMPL_LANGUAGE_STR}", language);
                 script = script.replace("{PARENT_PATH}", sanParentPath);
+                script = script.replace("{RETURN_TYPE}", sanReturnType);
 
                 console.error(">>> create_pou: PREPARED SCRIPT:", script.substring(0,500)+"...");
                 const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
