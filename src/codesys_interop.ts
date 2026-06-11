@@ -56,7 +56,16 @@ export async function executeCodesysScript(
     const codesysDir = path.dirname(codesysExePath); // Directory containing CODESYS.exe
 
     try {
-        const normalizedScriptContent = scriptContent.replace(/\r\n/g, '\n'); // Normalize line endings
+        let normalizedScriptContent = scriptContent.replace(/\r\n/g, '\n'); // Normalize line endings
+
+        // Ensure a PEP 263 UTF-8 encoding declaration is present so the CODESYS
+        // scripting engine (IronPython 2.7) accepts non-ASCII characters (e.g. CJK
+        // comments/identifiers/strings) instead of raising a SyntaxError. Without it,
+        // any non-ASCII byte in the generated script aborts parsing of the whole file.
+        const firstTwoLines = normalizedScriptContent.split('\n').slice(0, 2).join('\n');
+        if (!/coding[:=]\s*utf-?8/i.test(firstTwoLines)) {
+            normalizedScriptContent = '# -*- coding: utf-8 -*-\n' + normalizedScriptContent;
+        }
 
         // <<< --- ADDED SCRIPT CONTENT LOGGING --- >>>
         process.stderr.write(`INTEROP: Script content to be written (first 500 chars):\n`);
@@ -65,7 +74,7 @@ export async function executeCodesysScript(
         process.stderr.write(`------ END SCRIPT SNIPPET (TEMP FILE) -----\n`);
         // <<< --- END SCRIPT CONTENT LOGGING --- >>>
 
-        await writeFile(tempFilePath, normalizedScriptContent, 'latin1'); // Write the normalized content
+        await writeFile(tempFilePath, normalizedScriptContent, 'utf8'); // Write as UTF-8 so multi-byte (e.g. CJK) characters are encoded correctly; matches the PEP 263 declaration above
         process.stderr.write(`INTEROP: Temp script written: ${tempFilePath}\n`);
 
 
