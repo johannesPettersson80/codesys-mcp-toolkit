@@ -1007,6 +1007,167 @@ except Exception as e:
     print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
 `;
 
+    // --- Shared python: resolve the project's Library Manager object ---
+    const RESOLVE_LIBMAN_PYTHON_SNIPPET = `
+def resolve_libman(primary_project, parent_path):
+    libman_obj = None
+    parent_obj = find_object_by_path_robust(primary_project, parent_path, "parent")
+    if parent_obj is not None:
+        try:
+            if hasattr(parent_obj, 'has_library_manager') and parent_obj.has_library_manager and hasattr(parent_obj, 'get_library_manager'):
+                libman_obj = parent_obj.get_library_manager()
+        except Exception as lm_err:
+            print("WARN: get_library_manager failed: %s" % lm_err)
+    if libman_obj is None:
+        libman_obj = find_object_by_path_robust(primary_project, parent_path + "/Library Manager", "library manager")
+    return libman_obj
+
+def resolve_global_libmgr():
+    _libmgr = None
+    try:
+        _libmgr = librarymanager
+    except NameError:
+        pass
+    if _libmgr is None:
+        try:
+            _libmgr = script_engine.librarymanager
+        except AttributeError:
+            pass
+    return _libmgr
+`;
+
+    const ADD_LIBRARY_SCRIPT_TEMPLATE = `
+import sys, scriptengine as script_engine, os, traceback
+${ENSURE_PROJECT_OPEN_PYTHON_SNIPPET}
+${FIND_OBJECT_BY_PATH_PYTHON_SNIPPET}
+${RESOLVE_LIBMAN_PYTHON_SNIPPET}
+LIBRARY_NAME = "{LIBRARY_NAME}"
+LIBRARY_VERSION = "{LIBRARY_VERSION}"
+PARENT_PATH = "{PARENT_PATH}"
+
+try:
+    primary_project = ensure_project_open(PROJECT_FILE_PATH)
+    if not LIBRARY_NAME: raise ValueError("Library name empty.")
+
+    libman_obj = resolve_libman(primary_project, PARENT_PATH)
+    if libman_obj is None or not hasattr(libman_obj, 'add_library'):
+        raise ValueError("Could not find a Library Manager under '%s'." % PARENT_PATH)
+
+    _libmgr = resolve_global_libmgr()
+    if _libmgr is None:
+        raise ValueError("Could not access the global 'librarymanager' from the scripting scope.")
+
+    # ManagedLib.title is the bare name (e.g. 'Util'); displayname is 'Name, Version (Company)'.
+    candidates = []
+    try:
+        for lib in _libmgr.get_all_libraries():
+            nm = getattr(lib, 'title', None)
+            if nm == LIBRARY_NAME:
+                candidates.append(lib)
+    except Exception as enum_err:
+        print("WARN: get_all_libraries failed: %s" % enum_err)
+
+    if LIBRARY_VERSION:
+        candidates = [l for l in candidates if str(getattr(l, 'version', '')) == LIBRARY_VERSION]
+
+    managed = None
+    if candidates:
+        try:
+            managed = sorted(candidates, key=lambda l: str(getattr(l, 'version', '')))[-1]
+        except Exception:
+            managed = candidates[0]
+
+    if managed is None:
+        raise ValueError("Library '%s'%s not found in any repository." % (LIBRARY_NAME, (" v" + LIBRARY_VERSION) if LIBRARY_VERSION else ""))
+
+    libman_obj.add_library(managed)
+    try:
+        primary_project.save()
+    except Exception as save_err:
+        print("WARN: save failed: %s" % save_err)
+
+    print("Added library: %s version %s" % (getattr(managed, 'title', '?'), getattr(managed, 'version', '?')))
+    print("SCRIPT_SUCCESS: Library added.")
+    sys.exit(0)
+except Exception as e:
+    detailed_error = traceback.format_exc()
+    error_message = "Error adding library '%s' to '%s': %s\\n%s" % (LIBRARY_NAME, PROJECT_FILE_PATH, e, detailed_error)
+    print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
+`;
+
+    const LIST_LIBRARIES_SCRIPT_TEMPLATE = `
+import sys, scriptengine as script_engine, os, traceback
+${ENSURE_PROJECT_OPEN_PYTHON_SNIPPET}
+${FIND_OBJECT_BY_PATH_PYTHON_SNIPPET}
+${RESOLVE_LIBMAN_PYTHON_SNIPPET}
+PARENT_PATH = "{PARENT_PATH}"
+
+try:
+    primary_project = ensure_project_open(PROJECT_FILE_PATH)
+    libman_obj = resolve_libman(primary_project, PARENT_PATH)
+    if libman_obj is None:
+        raise ValueError("Could not find a Library Manager under '%s'." % PARENT_PATH)
+
+    print("\\n--- LIBRARIES START ---")
+    refs = None
+    try:
+        refs = libman_obj.references
+    except Exception:
+        refs = None
+    if refs:
+        for r in refs:
+            try:
+                nm = getattr(r, 'name', '?')
+                ns = getattr(r, 'namespace', '')
+                ph = " [placeholder]" if getattr(r, 'is_placeholder', False) else ""
+                print("- %s%s%s" % (nm, (" (namespace: %s)" % ns) if ns else "", ph))
+            except Exception as r_err:
+                print("- <error reading reference: %s>" % r_err)
+    else:
+        try:
+            for nm in libman_obj.get_libraries(False):
+                print("- %s" % nm)
+        except Exception as gl_err:
+            print("WARN: get_libraries failed: %s" % gl_err)
+    print("--- LIBRARIES END ---\\n")
+    print("SCRIPT_SUCCESS: Libraries listed.")
+    sys.exit(0)
+except Exception as e:
+    detailed_error = traceback.format_exc()
+    error_message = "Error listing libraries in '%s': %s\\n%s" % (PROJECT_FILE_PATH, e, detailed_error)
+    print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
+`;
+
+    const REMOVE_LIBRARY_SCRIPT_TEMPLATE = `
+import sys, scriptengine as script_engine, os, traceback
+${ENSURE_PROJECT_OPEN_PYTHON_SNIPPET}
+${FIND_OBJECT_BY_PATH_PYTHON_SNIPPET}
+${RESOLVE_LIBMAN_PYTHON_SNIPPET}
+LIBRARY_NAME = "{LIBRARY_NAME}"
+PARENT_PATH = "{PARENT_PATH}"
+
+try:
+    primary_project = ensure_project_open(PROJECT_FILE_PATH)
+    if not LIBRARY_NAME: raise ValueError("Library name empty.")
+    libman_obj = resolve_libman(primary_project, PARENT_PATH)
+    if libman_obj is None or not hasattr(libman_obj, 'remove_library'):
+        raise ValueError("Could not find a Library Manager under '%s'." % PARENT_PATH)
+
+    libman_obj.remove_library(LIBRARY_NAME)
+    try:
+        primary_project.save()
+    except Exception as save_err:
+        print("WARN: save failed: %s" % save_err)
+
+    print("Removed library: %s" % LIBRARY_NAME)
+    print("SCRIPT_SUCCESS: Library removed.")
+    sys.exit(0)
+except Exception as e:
+    detailed_error = traceback.format_exc()
+    error_message = "Error removing library '%s' from '%s': %s\\n%s" % (LIBRARY_NAME, PROJECT_FILE_PATH, e, detailed_error)
+    print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
+`;
+
     // --- End Python Script Templates ---
 
     // --- Zod Schemas (moved for clarity before usage) ---
@@ -1415,6 +1576,204 @@ except Exception as e:
                 return { content: [{ type: "text", text: message }], isError: isError };
             } catch (e:any) {
                 console.error(`Error compile_project ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "get_pou_code", // Tool Name
+        "Reads the declaration and implementation text of a POU, Method, Property, GVL, or DUT (data type) by path.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file (e.g., 'C:/Projects/MyPLC.project')."),
+            pouPath: z.string().describe("Full relative path to the target object (e.g., 'Application/MyPOU', 'Application/MyGVL', 'Application/MyDUT').")
+        },
+        async (args) => { // Handler
+            const { projectFilePath, pouPath } = args;
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            const sanPouPath = pouPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            console.error(`Tool call: get_pou_code: Target='${sanPouPath}', Project='${absPath}'`);
+            try {
+                const escProjPath = absPath.replace(/\\/g, '\\\\');
+                let script = GET_POU_CODE_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
+                script = script.replace("{POU_FULL_PATH}", sanPouPath);
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                let codeText = `Error retrieving code for object '${sanPouPath}' in project '${absPath}'.\n\n${result.output}`;
+                let isError = !result.success;
+                if (result.success && result.output.includes("SCRIPT_SUCCESS")) {
+                    const declStartMarker = "### POU DECLARATION START ###";
+                    const declEndMarker = "### POU DECLARATION END ###";
+                    const implStartMarker = "### POU IMPLEMENTATION START ###";
+                    const implEndMarker = "### POU IMPLEMENTATION END ###";
+                    const declStartIdx = result.output.indexOf(declStartMarker);
+                    const declEndIdx = result.output.indexOf(declEndMarker);
+                    const implStartIdx = result.output.indexOf(implStartMarker);
+                    const implEndIdx = result.output.indexOf(implEndMarker);
+                    let declaration = "/* Declaration not found in output */";
+                    let implementation = "";
+                    if (declStartIdx !== -1 && declEndIdx !== -1 && declStartIdx < declEndIdx) {
+                        declaration = result.output.substring(declStartIdx + declStartMarker.length, declEndIdx).replace(/\\n/g, '\n').trim();
+                    }
+                    if (implStartIdx !== -1 && implEndIdx !== -1 && implStartIdx < implEndIdx) {
+                        implementation = result.output.substring(implStartIdx + implStartMarker.length, implEndIdx).replace(/\\n/g, '\n').trim();
+                    }
+                    codeText = `// ----- Declaration -----\n${declaration}\n\n// ----- Implementation -----\n${implementation}`;
+                    isError = false;
+                } else { isError = true; }
+                return { content: [{ type: "text", text: codeText }], isError: isError };
+            } catch (e: any) {
+                console.error(`Error get_pou_code ${sanPouPath} in ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "get_project_structure", // Tool Name
+        "Returns the object tree (POUs, GVLs, DUTs, folders) of a CODESYS project as text.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file (e.g., 'C:/Projects/MyPLC.project').")
+        },
+        async (args) => { // Handler
+            const { projectFilePath } = args;
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            console.error(`Tool call: get_project_structure: ${absPath}`);
+            try {
+                const escapedPathForPython = absPath.replace(/\\/g, '\\\\');
+                const scriptContent = GET_PROJECT_STRUCTURE_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escapedPathForPython);
+                const result = await executeCodesysScript(scriptContent, codesysExePath, codesysProfileName);
+                let structureText = `Error retrieving structure for ${absPath}.\n\n${result.output}`;
+                let isError = !result.success;
+                if (result.success && result.output.includes("SCRIPT_SUCCESS")) {
+                    const startMarker = "--- PROJECT STRUCTURE START ---";
+                    const endMarker = "--- PROJECT STRUCTURE END ---";
+                    const startIndex = result.output.indexOf(startMarker);
+                    const endIndex = result.output.indexOf(endMarker);
+                    if (startIndex !== -1 && endIndex !== -1 && startIndex < endIndex) {
+                        structureText = result.output.substring(startIndex + startMarker.length, endIndex).replace(/\\n/g, '\n').trim();
+                        isError = false;
+                    } else {
+                        structureText = `Could not parse structure markers in output for ${absPath}.\n\nOutput:\n${result.output}`;
+                        isError = true;
+                    }
+                } else { isError = true; }
+                return { content: [{ type: "text", text: structureText }], isError: isError };
+            } catch (e: any) {
+                console.error(`Error get_project_structure ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "add_library", // Tool Name
+        "Adds (references) a library into the project's Library Manager. Optionally pin a specific version.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file (e.g., 'C:/Projects/MyPLC.project')."),
+            libraryName: z.string().describe("Library display name as shown in the repository (e.g., 'Util', 'Standard', 'CAA File')."),
+            version: z.string().optional().describe("Specific version to reference (e.g., '3.5.22.0'). If omitted, the highest available version is used."),
+            parentPath: z.string().optional().describe("Path to the object that holds the Library Manager (default 'Application').")
+        },
+        async (args) => { // Handler
+            const { projectFilePath, libraryName, version, parentPath } = args;
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            const sanLibName = (libraryName ?? "").trim();
+            const sanVersion = (version ?? "").trim();
+            const sanParent = (parentPath ?? "Application").replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            if (!sanLibName) {
+                return { content: [{ type: "text", text: "Error: libraryName cannot be empty." }], isError: true };
+            }
+            console.error(`Tool call: add_library: Name='${sanLibName}', Version='${sanVersion}', Parent='${sanParent}', Project='${absPath}'`);
+            try {
+                const escProjPath = absPath.replace(/\\/g, '\\\\');
+                const escLib = sanLibName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                const escVer = sanVersion.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                const escParent = sanParent.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                let script = ADD_LIBRARY_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
+                script = script.replace("{LIBRARY_NAME}", escLib);
+                script = script.replace("{LIBRARY_VERSION}", escVer);
+                script = script.replace("{PARENT_PATH}", escParent);
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
+                return { content: [{ type: "text", text: success ? `Library '${sanLibName}'${sanVersion ? (' v' + sanVersion) : ''} added to '${sanParent}' in ${absPath}. Project saved.` : `Failed to add library '${sanLibName}'. Output:\n${result.output}` }], isError: !success };
+            } catch (e: any) {
+                console.error(`Error add_library ${sanLibName} in ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "list_libraries", // Tool Name
+        "Lists the libraries currently referenced in the project's Library Manager.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file (e.g., 'C:/Projects/MyPLC.project')."),
+            parentPath: z.string().optional().describe("Path to the object that holds the Library Manager (default 'Application').")
+        },
+        async (args) => { // Handler
+            const { projectFilePath, parentPath } = args;
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            const sanParent = (parentPath ?? "Application").replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            console.error(`Tool call: list_libraries: Parent='${sanParent}', Project='${absPath}'`);
+            try {
+                const escProjPath = absPath.replace(/\\/g, '\\\\');
+                const escParent = sanParent.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                let script = LIST_LIBRARIES_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
+                script = script.replace("{PARENT_PATH}", escParent);
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                let listText = `Error listing libraries for ${absPath}.\n\n${result.output}`;
+                let isError = !result.success;
+                if (result.success && result.output.includes("SCRIPT_SUCCESS")) {
+                    const startMarker = "--- LIBRARIES START ---";
+                    const endMarker = "--- LIBRARIES END ---";
+                    const startIndex = result.output.indexOf(startMarker);
+                    const endIndex = result.output.indexOf(endMarker);
+                    if (startIndex !== -1 && endIndex !== -1 && startIndex < endIndex) {
+                        listText = result.output.substring(startIndex + startMarker.length, endIndex).replace(/\\n/g, '\n').trim();
+                        if (!listText) listText = "(no libraries referenced)";
+                        isError = false;
+                    } else {
+                        listText = `Could not parse library markers in output for ${absPath}.\n\nOutput:\n${result.output}`;
+                        isError = true;
+                    }
+                } else { isError = true; }
+                return { content: [{ type: "text", text: listText }], isError: isError };
+            } catch (e: any) {
+                console.error(`Error list_libraries ${absPath}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    server.tool(
+        "remove_library", // Tool Name
+        "Removes a referenced library from the project's Library Manager by name.", // Tool Description
+        { // Input Schema
+            projectFilePath: z.string().describe("Path to the project file (e.g., 'C:/Projects/MyPLC.project')."),
+            libraryName: z.string().describe("Name of the library reference to remove (as shown by list_libraries)."),
+            parentPath: z.string().optional().describe("Path to the object that holds the Library Manager (default 'Application').")
+        },
+        async (args) => { // Handler
+            const { projectFilePath, libraryName, parentPath } = args;
+            let absPath = path.normalize(path.isAbsolute(projectFilePath) ? projectFilePath : path.join(WORKSPACE_DIR, projectFilePath));
+            const sanLibName = (libraryName ?? "").trim();
+            const sanParent = (parentPath ?? "Application").replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            if (!sanLibName) {
+                return { content: [{ type: "text", text: "Error: libraryName cannot be empty." }], isError: true };
+            }
+            console.error(`Tool call: remove_library: Name='${sanLibName}', Parent='${sanParent}', Project='${absPath}'`);
+            try {
+                const escProjPath = absPath.replace(/\\/g, '\\\\');
+                const escLib = sanLibName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                const escParent = sanParent.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                let script = REMOVE_LIBRARY_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escProjPath);
+                script = script.replace("{LIBRARY_NAME}", escLib);
+                script = script.replace("{PARENT_PATH}", escParent);
+                const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
+                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
+                return { content: [{ type: "text", text: success ? `Library '${sanLibName}' removed from '${sanParent}' in ${absPath}. Project saved.` : `Failed to remove library '${sanLibName}'. Output:\n${result.output}` }], isError: !success };
+            } catch (e: any) {
+                console.error(`Error remove_library ${sanLibName} in ${absPath}: ${e}`);
                 return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
             }
         }
