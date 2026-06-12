@@ -851,13 +851,81 @@ try:
          raise TypeError("Selected object '%s' is not an application or doesn't support build()." % app_name)
 
     # Execute the build
-    target_app.build();
+    target_app.build()
     print("DEBUG: Build command executed for application '%s'." % app_name)
 
-    # Check messages is harder without direct access to message store from script.
-    # Rely on CODESYS UI or log output for now.
-    print("Compile Initiated For Application: %s" % app_name); print("In Project: %s" % project_name)
-    print("SCRIPT_SUCCESS: Application compilation initiated."); sys.exit(0)
+    # --- Collect build messages from the message store ---
+    _sys = None
+    try:
+        _sys = system
+    except NameError:
+        try:
+            _sys = script_engine.system
+        except Exception:
+            _sys = None
+
+    SCRIPT_MSG_CAT = "194b48a9"  # toolkit's own ScriptMessage category; skip it
+    def _esc(s):
+        try:
+            return unicode(s).encode('unicode_escape')
+        except Exception:
+            try:
+                return str(s)
+            except Exception:
+                return "?"
+
+    build_errors = []; build_warnings = []; nerr = 0; nwarn = 0
+    if _sys is not None:
+        try:
+            cats = _sys.get_message_categories(False)
+        except Exception:
+            cats = []
+        for c in cats:
+            try:
+                if SCRIPT_MSG_CAT in str(c).lower():
+                    continue
+                ms = _sys.get_message_objects(c)
+            except Exception:
+                continue
+            if not ms:
+                continue
+            for m in ms:
+                try:
+                    sev = getattr(m, 'severity', None)
+                    sevname = str(sev).split('.')[-1] if sev is not None else ''
+                    if sevname not in ('Error', 'FatalError', 'Warning'):
+                        continue
+                    txt = getattr(m, 'text', '') or ''
+                    objn = ''
+                    try:
+                        o = m.object
+                        if o is not None:
+                            objn = o.get_name() or ''
+                    except Exception:
+                        pass
+                    pos = ''
+                    try:
+                        pos = getattr(m, 'position_text', '') or ''
+                    except Exception:
+                        pass
+                    line = "[%s] %s%s :: %s" % (sevname, _esc(objn) if objn else "(no object)", (" @ " + _esc(pos)) if pos else "", _esc(txt))
+                    if sevname == 'Warning':
+                        nwarn += 1; build_warnings.append(line)
+                    else:
+                        nerr += 1; build_errors.append(line)
+                except Exception:
+                    pass
+
+    print("--- BUILD RESULT START ---")
+    print("ERRORS: %d, WARNINGS: %d" % (nerr, nwarn))
+    for _l in build_errors:
+        print(_l)
+    for _l in build_warnings:
+        print(_l)
+    print("--- BUILD RESULT END ---")
+    print("Compiled application: %s" % app_name)
+    print("SCRIPT_SUCCESS: Build finished with %d error(s), %d warning(s)." % (nerr, nwarn))
+    sys.exit(0)
 except Exception as e:
     detailed_error = traceback.format_exc()
     error_message = "Error initiating compilation for project %s: %s\\n%s" % (PROJECT_FILE_PATH, e, detailed_error)
@@ -1562,16 +1630,28 @@ except Exception as e:
                 const escapedPath = absPath.replace(/\\/g, '\\\\');
                 const script = COMPILE_PROJECT_SCRIPT_TEMPLATE.replace("{PROJECT_FILE_PATH}", escapedPath);
                 const result = await executeCodesysScript(script, codesysExePath, codesysProfileName);
-                const success = result.success && result.output.includes("SCRIPT_SUCCESS");
-                // Check for actual compile errors in the output log
-                const hasCompileErrors = result.output.includes("Compile complete --") && !/ 0 error\(s\),/.test(result.output);
-                let message = success ? `Compilation initiated for application in ${absPath}. Check CODESYS messages for results.` : `Failed initiating compilation for ${absPath}. Output:\n${result.output}`;
-                let isError = !success; // Base error status on script success
-                if (success && hasCompileErrors) {
-                    message += " WARNING: Build command reported errors in the output log.";
-                    console.warn("Compile project reported build errors in the output.");
-                    // Report as error if compile fails, even if script technically succeeded
-                    isError = true;
+                const scriptOk = result.success && result.output.includes("SCRIPT_SUCCESS");
+                // Decode python unicode_escape (\uXXXX, \xXX) back to real chars (e.g. localized compiler messages)
+                const pydecode = (s: string) => s
+                    .replace(/\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})/g, (mm, u, x) => String.fromCharCode(parseInt(u || x, 16)))
+                    .replace(/\\r\\n|\\r|\\n/g, ' ')
+                    .replace(/\\t/g, ' ')
+                    .replace(/\\(['"\\])/g, '$1');
+                const startM = "--- BUILD RESULT START ---";
+                const endM = "--- BUILD RESULT END ---";
+                const si = result.output.indexOf(startM);
+                const ei = result.output.indexOf(endM);
+                let message: string;
+                let isError: boolean;
+                if (scriptOk && si !== -1 && ei !== -1 && si < ei) {
+                    const decoded = pydecode(result.output.substring(si + startM.length, ei).trim());
+                    const mc = decoded.match(/ERRORS:\s*(\d+),\s*WARNINGS:\s*(\d+)/);
+                    const nerr = mc ? parseInt(mc[1], 10) : 0;
+                    message = `Build result for ${absPath}:\n${decoded}`;
+                    isError = nerr > 0;
+                } else {
+                    message = `Compilation ran but no result block was found for ${absPath}.\n\n${result.output}`;
+                    isError = !scriptOk;
                 }
                 return { content: [{ type: "text", text: message }], isError: isError };
             } catch (e:any) {
