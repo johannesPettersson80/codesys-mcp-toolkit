@@ -1858,6 +1858,75 @@ except Exception as e:
             }
         }
     );
+
+    server.tool(
+        "get_library_content", // Tool Name
+        "Lists the objects (function blocks, functions, structs, etc.) inside an installed CODESYS library, with their descriptions, by reading the library's browse cache. Does not require the library to be referenced in a project and does not launch CODESYS. NOTE: input/output parameter signatures are not available as structured data (though documented libraries often include them in the description).", // Tool Description
+        {
+            libraryName: z.string().describe("Library name as shown in the repository (e.g., 'Util', 'Standard', 'CAA File')."),
+            version: z.string().optional().describe("Specific version (e.g., '3.5.22.0'). Defaults to the highest installed version."),
+            filter: z.string().optional().describe("Only return objects whose name or description contains this text (case-insensitive).")
+        },
+        async (args) => { // Handler
+            const fs = require('fs');
+            const { libraryName, version, filter } = args;
+            const libName = (libraryName ?? "").trim();
+            if (!libName) {
+                return { content: [{ type: "text", text: "Error: libraryName cannot be empty." }], isError: true };
+            }
+            console.error(`Tool call: get_library_content: Name='${libName}', Version='${version || ''}', Filter='${filter || ''}'`);
+            try {
+                const base = path.join(process.env.ProgramData || "C:\\ProgramData", "CODESYS", "Managed Libraries");
+                let found: { file: string; vendor: string; version: string } | null = null;
+                if (fs.existsSync(base)) {
+                    for (const vendor of fs.readdirSync(base)) {
+                        const libDir = path.join(base, vendor, libName);
+                        let st: any;
+                        try { st = fs.statSync(libDir); } catch (e) { continue; }
+                        if (!st.isDirectory()) continue;
+                        const versions = fs.readdirSync(libDir).filter((v: string) => fs.existsSync(path.join(libDir, v, "browsercache")));
+                        if (!versions.length) continue;
+                        const ver = (version && versions.indexOf(version) !== -1) ? version : versions.sort().reverse()[0];
+                        found = { file: path.join(libDir, ver, "browsercache"), vendor, version: ver };
+                        break;
+                    }
+                }
+                if (!found) {
+                    return { content: [{ type: "text", text: `Library '${libName}'${version ? (" v" + version) : ""} not found under ${base}. (Name must match the repository folder, e.g. 'Util', 'CAA File'.)` }], isError: true };
+                }
+                const xml = fs.readFileSync(found.file, "utf8");
+                const decodeXml = (s: string) => String(s).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#x([0-9a-fA-F]+);/g, (_m, h) => String.fromCharCode(parseInt(h, 16))).replace(/&#(\d+);/g, (_m, d) => String.fromCharCode(parseInt(d, 10))).replace(/&amp;/g, "&");
+                const nodeRe = /<Node\s+([^>]*?)\/>/g;
+                const attrRe = /(\w+)="([^"]*)"/g;
+                const nodes: any[] = [];
+                let mm: RegExpExecArray | null;
+                while ((mm = nodeRe.exec(xml))) {
+                    const at: any = {};
+                    let a: RegExpExecArray | null;
+                    while ((a = attrRe.exec(mm[1]))) at[a[1]] = decodeXml(a[2]);
+                    if (at.Name) nodes.push(at);
+                }
+                const documented = nodes.filter((n: any) => n.Comment && n.Comment.trim());
+                let shown: any[];
+                if (filter && filter.trim()) {
+                    const f = filter.trim().toLowerCase();
+                    shown = nodes.filter((n: any) => (n.Name && n.Name.toLowerCase().indexOf(f) !== -1) || (n.Comment && n.Comment.toLowerCase().indexOf(f) !== -1));
+                } else {
+                    shown = documented.length ? documented : nodes;
+                }
+                const lines = shown.map((n: any) => {
+                    const cm = (n.Comment && n.Comment.trim()) ? (" :: " + n.Comment.trim().replace(/\s+/g, " ")) : "";
+                    return "- " + n.Name + cm;
+                });
+                let header = `Library '${libName}' v${found.version} (${found.vendor}): ${nodes.length} objects, ${documented.length} documented`;
+                if (filter && filter.trim()) header += `, ${shown.length} matching '${filter.trim()}'`;
+                return { content: [{ type: "text", text: header + ":\n" + lines.join("\n") }], isError: false };
+            } catch (e: any) {
+                console.error(`Error get_library_content ${libName}: ${e}`);
+                return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
     // --- End Tools ---
 
     console.error("SERVER.TS: Resources and Tools defined.");
