@@ -25,3 +25,10 @@ yarn-error.log
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Local-only material
+_v1-local/
+# CODESYS scripting API reference (CODESYS Group documentation, not redistributable)
+docs/script_documentation.txt
+# Test/runtime scratch
+/test-output/

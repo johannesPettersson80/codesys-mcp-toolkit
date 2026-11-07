@@ -1,0 +1,1 @@
+METHOD Reset : BOOL

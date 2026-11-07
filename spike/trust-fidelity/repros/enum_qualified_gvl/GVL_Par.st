@@ -1,0 +1,5 @@
+NAMESPACE GVL_Par
+VAR_GLOBAL
+    eMode : E_Mode := E_Mode.AUTO;
+END_VAR
+END_NAMESPACE

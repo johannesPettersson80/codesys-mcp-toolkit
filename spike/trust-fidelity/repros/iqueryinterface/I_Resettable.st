@@ -1,0 +1,4 @@
+INTERFACE I_Resettable EXTENDS __System.IQueryInterface
+METHOD Reset : BOOL
+END_METHOD
+END_INTERFACE

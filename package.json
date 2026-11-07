@@ -1,27 +1,37 @@
 {
   "name": "@codesys/mcp-toolkit",
-  "version": "1.1.16",
-  "description": "Model Context Protocol (MCP) server for CODESYS automation platform",
+  "version": "2.0.0-alpha.0",
+  "description": "MCP server for CODESYS V3.5: read, write and compile Structured Text through a persistent CODESYS session",
+  "type": "module",
   "main": "dist/server.js",
   "bin": {
-    "codesys-mcp-tool": "./dist/bin.js"
+    "codesys-mcp-tool": "dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "watcher/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc",
-    "start": "node ./dist/server.js"
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:live": "vitest run test/live",
+    "start": "node dist/cli.js"
   },
   "keywords": [
     "codesys",
     "mcp",
     "modelcontextprotocol",
     "plc",
-    "automation",
-    "programming"
+    "iec-61131-3",
+    "structured-text"
   ],
-  "author": "Your Name <your.email@example.com>",
+  "author": "Johannes Pettersson",
   "license": "MIT",
-  "type": "commonjs",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/johannesPettersson80/codesys-mcp-toolkit.git"
@@ -31,18 +41,19 @@
     "url": "https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
+  "os": [
+    "win32"
+  ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.10.2",
-    "axios": "^1.6.8",
-    "commander": "^11.1.0",
-    "yargs": "^17.7.2",
-    "zod": "^3.24.3"
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.2.0"
   },
   "devDependencies": {
-    "@types/node": "^20.14.1",
-    "@types/yargs": "^17.0.33",
-    "typescript": "^5.5.3"
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
   }
 }

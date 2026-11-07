@@ -1,0 +1,17 @@
+[simulation]
+enabled = true
+seed = 42
+time_scale = 1
+plant_step_ms = 10
+plant_trace_capacity = 1000
+
+[[plants]]
+id = "T101"
+model = "gravity_tank"
+command_sources = ["%QL0"]
+feedback_targets = ["%IL0"]
+initial_state = [0.2]
+
+[plants.parameters]
+area_m2 = 1.0
+outflow_coefficient_m2_sqrt_m_per_s = 0.03

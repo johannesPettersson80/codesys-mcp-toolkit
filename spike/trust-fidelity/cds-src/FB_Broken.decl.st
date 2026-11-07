@@ -1,0 +1,4 @@
+FUNCTION_BLOCK FB_Broken
+VAR
+    x : INT;
+END_VAR
