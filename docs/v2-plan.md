@@ -1,6 +1,6 @@
 # codesys-mcp-toolkit v2 — Step 0 findings and rewrite plan
 
-Status (2026-11-07): Phase 0 spike done, Phase 1 core done, Phase 2 simulation (text) done. Phases 3-4 (panel) not started.
+Status (2026-11-07): Phase 0 spike done, Phase 1 core done, Phase 2 simulation (text) done, Phase 3 read-only panel done. Phase 4 (interactive panel) not started.
 
 ## 1. Summary
 
@@ -188,6 +188,11 @@ dut/gvl), `delete_object`, `rename_object`, `search_code`,
 | 3 Panel (read-only) | MCP App: code + current line, P&ID, trends, polling, supersession | Panel shows a live experiment |
 | 4 Panel (interactive) | Breakpoint gutter, step/continue, forcing, plant params, "pause Claude", model-context updates | Full acceptance demo |
 
+Phases 0–3 are done. The rest is re-planned in section 10: the one-screen
+panel works for the tank example but not for a real project, so the next
+phases are tools that help Claude write better programs, then a CODESYS-style
+workspace, then interaction.
+
 ## 6. Housekeeping
 - Keep the unpushed 1.1.4 refactor on a branch for reference; v2 starts on a
   fresh branch.
@@ -272,7 +277,223 @@ Decisions made while building it:
 
 New truST gaps: B11-B19 in TRUST-GAPS.md.
 
-## 9. Open questions for you
+## 9. Phase 3 results (2026-11-07)
+
+Done: `open_sim_panel` shows a live, read-only panel (MCP App). A live
+experiment animates the tank and fills the trend. A breakpoint stop
+highlights the line in the CODESYS code. Checked in the dev host
+(`scripts/dev-host/`, which embeds the panel with the ext-apps AppBridge like a
+real host) in light and dark themes, plus `test/panel.test.ts` and panel
+checks in `test/sim-trust.test.ts`.
+
+Decisions:
+- **Vanilla TypeScript + esbuild, no Vite or CodeMirror.** A read-only code
+  view with a gutter is a few lines of DOM. The single-file panel is 415 kB,
+  mostly the ext-apps App class and its protocol code. zod's non-English
+  locales are stubbed out, which saves 250 kB.
+- **Polling at 4 Hz while something runs, 1 Hz otherwise.** The panel tools are
+  read-only towards truST: they never drain stop records or change the run
+  state, so they are safe while a model tool runs.
+- **Supersession on the server.** The newest `open_sim_panel` id wins, and
+  older panels get `current: false` and stop. (BroadcastChannel is unreliable
+  across sandboxed iframes.)
+- **Trend recorder in the controller.** It samples at the end of every run,
+  at every experiment sample, and on live polls. Each fresh start begins a new
+  epoch.
+- **The P&ID is generic, built from `plant.toml`:** a tank for tank models;
+  valves and pumps recognised from `[[feedback]]` names (`XV…`, `P101`).
+  `display = { max, unit, label }` sets the scale.
+- **App-only tools are disabled** for clients without the
+  `io.modelcontextprotocol/ui` capability.
+- **Code shown as written in CODESYS:** the mirror's `E#X` is mapped back to
+  `E.X` for display.
+
+Not checked: inside Claude Desktop itself. That needs the user's Claude
+Desktop pointed at this build.
+
+## 10. Revised roadmap (2026-11-07)
+
+### Why
+
+The Phase 3 panel puts code, plant and I/O on one screen. That works for the
+tank example (5 objects, 6 signals). A real project has hundreds of POUs,
+several tasks and thousands of I/O points. Two audiences need different
+things:
+
+- **The user**, who watches and reviews:
+  - where Claude is working (a project tree);
+  - what Claude changed (a diff per object);
+  - whether the code does the right thing (live values in the code, a scoped
+    watch list);
+  - how the process behaves (plant, trends), on demand.
+- **Claude**, who writes the program from a prompt:
+  - the project's structure without reading every file (outline,
+    cross-references, interfaces, task assignment);
+  - fast proof that the code works (unit tests and regression scenarios);
+  - real library signatures;
+  - a change set with checkpoints;
+  - what the user is looking at.
+
+Both should read the same facts: the symbol table, test results, the change
+log, and the live values of a chosen set of variables.
+
+### Phase 5: tools for Claude
+
+| Tool | What it gives | Source |
+| --- | --- | --- |
+| `get_outline` | Per POU: kind, interface (inputs, outputs, in-outs), methods and properties with signatures, task | mirror + trust-lsp document symbols, or a parse of the export |
+| `find_references` | Where a variable, FB or method is declared, read, written and called, in CODESYS paths and lines | trust-lsp references on the mirror |
+| `get_call_graph` | Who calls whom, from the tasks down | references |
+| `run_tests` | Unit tests for FBs in simulation: pass/fail with the failing assertion | truST test programs, if supported (see 10.1) |
+| `run_scenarios` | Saved experiments and interlock checks, rerun after every change, with regressions flagged | experiments stored with the project |
+| `get_library_api` | Real signatures of library FBs and functions | CODESYS library manager (scripting) |
+| `get_changes` / `revert_object` / checkpoints | What changed in this session, per object, with revert | snapshots of the exported ST (the mirror's git history covers the simulation side) |
+| `get_io_list` | I/O with comments, units and ranges; later the device I/O mapping | declarations, then the CODESYS device tree |
+
+Tool results stay compact (summaries, paging), because a large project must
+not flood the model's context.
+
+### Phase 6: workspace
+
+- **An in-chat card** (the current panel, slimmed down): what Claude is doing,
+  the current object, the last test and experiment result, a few key signals,
+  and "Open workspace".
+- **A full-screen workspace** with the CODESYS layout:
+  - **Left:** the project tree, with badges for changed, compile error,
+    breakpoint, stopped here, not simulated, and Claude editing now.
+  - **Center:** editor tabs, with declaration above implementation, live
+    values inline (like CODESYS online mode) and a diff toggle against the
+    session start.
+  - **Right inspector:** watch list, locals and call stack, breakpoints, I/O
+    scoped to the open POU.
+  - **Bottom tabs:** trend (chosen signals, experiment overlays), plant,
+    tests, activity (what Claude did, in order), problems.
+- **"Follow Claude" toggle:** the view follows where Claude works, or stays
+  where the user is reading.
+- **Lazy loading:** the tree first, sources per object when opened, values
+  only for visible and pinned variables.
+- **Model context:** the panel tells Claude what the user selected
+  (MCP Apps model-context update), so "fix this" refers to what is on screen.
+- **To check:** whether Claude Desktop supports the MCP Apps full-screen
+  display mode. If not, the workspace works inline with collapsible regions.
+
+### Phase 7: interaction (the old Phase 4)
+
+On top of the workspace:
+- clicking the gutter sets a breakpoint;
+- step and continue buttons;
+- forcing from the watch list;
+- plant sliders;
+- "pause Claude";
+- accept or revert per object from the diff.
+
+### 10.1 Checks before Phase 5
+
+1. Does truST run test programs (`TEST_PROGRAM` / `TEST_FUNCTION_BLOCK`
+   appear in its parser), and how are results reported?
+2. Does `trust-lsp` give document symbols, references and types for the mirror
+   under the CODESYS profile, and can it be driven headless over stdio?
+
+Results: 10.2.
+
+### 10.2 Check results (2026-11-07)
+
+**truST unit tests: usable now.**
+- `trust-dev test --project <mirror> --output json` ran 4 tests on the tank
+  mirror in about 1 s.
+- Results come per test as `passed`/`failed`, with messages such as
+  `ASSERT_EQUAL failed: expected 1, actual 2`.
+- Supported: `TEST_PROGRAM`, `TEST_FUNCTION_BLOCK`, `ASSERT_EQUAL`,
+  `ASSERT_NEAR`, `ASSERT_TRUE` and so on. FB tests, property writes and calls
+  through an interface all worked.
+
+Limits:
+- Time is frozen inside a test (T1), so a TON never finishes.
+- A failure points at the test, not at the assertion (T2).
+
+What this means for Phase 5:
+- **`run_tests`** covers logic without time: calculations, state machines
+  stepped by inputs, interlock conditions. The toolkit reports results by
+  test name and maps lines back where it can.
+- **Time-dependent behaviour** (timers, ramps, PI loops) goes through
+  **`run_scenarios`** on the simulation (`run_scans`, forces, reads), which
+  already steps time exactly. When truST adds time control in tests (T1),
+  scenarios can become plain tests.
+- **Where tests live:** CODESYS can't hold `TEST_PROGRAM`, so tests live next
+  to the project (`<Project>.tests/*.st`) and versioned with it. The mirror
+  copies them in at sync.
+
+**trust-lsp: good for structure, not yet for globals.**
+- It runs headless over stdio with no client configuration. Its capabilities
+  include references, call hierarchy, symbols, hover, definitions and inline
+  values.
+- On the mirror:
+  - **Outline:** the FB with its methods and properties.
+  - **Types:** hover (`fbPI : FB_PI`).
+  - **Navigation:** go-to-definition across files, and workspace symbol
+    search.
+  - **References:** locals and FB types across files.
+  - **Calls:** incoming calls to an FB, including from tests.
+- Missing:
+  - references to qualified GVL members (L1);
+  - method references and calls, including through interfaces (L2);
+  - variables in the outline (L3).
+
+What this means for Phase 5:
+- **`get_outline`** parses the exported declarations itself: interface
+  sections and types are simple to read from the ST headers, and that's
+  reliable today. trust-lsp adds hover types where useful.
+- **`find_references` / `get_call_graph`** use trust-lsp for locals, FB types
+  and FB calls. For GVL members and methods the toolkit falls back to a
+  token-aware text search (qualified names like `GVL_IO.lrLevel` are
+  distinctive). The answer is labelled as such until L1 and L2 are fixed in
+  truST.
+
+### 10.3 Agreed with truST (2026-11-07)
+
+truST confirmed all six gaps and will implement:
+- **Multi-cycle tests (T1).** The test body runs every cycle at a declared
+  interval on simulated time until `TEST_FINISHED()` or a cycle budget (as in
+  TcUnit and CfUnit). There's no `ADVANCE_TIME()`, because blocks measure time
+  between calls. The toolkit asked for:
+  - a per-test interval and budget, where exceeding the budget fails the test;
+  - a cold restart and simulated time from 0 per test;
+  - an optional plant in the loop;
+  - tests that call programs, not only FBs;
+  - failures with the assertion's line and text, the cycle and simulated time,
+    and typed actual and expected values (T2).
+- **The `{attribute 'test'}` marker** on an ordinary `PROGRAM` under the
+  CODESYS profiles, plus a small `ASSERT_*` library for the CODESYS side.
+  Tests then live in the CODESYS project itself, and CODESYS doesn't compile
+  them because nothing calls them.
+- **Language server (L1-L3):** references taken from the names type checking
+  resolved, which covers qualified GVL members, members across files and
+  method calls (also in the call hierarchy). The outline becomes a tree with
+  variable sections. The toolkit also asked for the access kind (read, write,
+  call) on each reference, like the CODESYS cross-reference list.
+
+Changes to Phase 5:
+- **Tests live in the CODESYS project** as programs marked
+  `{attribute 'test'}`, not in a sidecar folder. Until truST accepts the
+  marker, the mirror rewrites such a `PROGRAM` to `TEST_PROGRAM` (and
+  `FUNCTION_BLOCK` to `TEST_FUNCTION_BLOCK`). `run_tests` keeps its interface
+  when multi-cycle tests arrive.
+- **`get_outline` and `find_references` are built on trust-lsp** after the
+  fix, with no text-search fallback. Until then the outline is parsed from the
+  declarations.
+- **`run_scenarios` stays** for experiments and closed-loop regressions until
+  tests can run with a plant in the loop.
+
+Order for Phase 5 (most value first):
+1. `run_tests`
+2. `get_outline`
+3. `find_references` / `get_call_graph`
+4. `run_scenarios`
+5. `get_changes` / checkpoints
+6. `get_library_api`
+7. `get_io_list`
+
+## 11. Open questions for you
 Answered: the spike used a copy of `PumpControl.project` plus the tank demo;
 truST gaps get fixed in truST (TRUST-GAPS.md), not worked around here.
 

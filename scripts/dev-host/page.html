@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulation panel · dev host</title>
+<style>
+:root {
+  --page: #f4f3f1;
+  --card: #ffffff;
+  --fg: #1c1917;
+  --fg2: #6b6560;
+  --line: #e4e1dd;
+  --hover: #f1efec;
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.10);
+  --ok: #16a34a;
+  --bad: #dc2626;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --page: #141413;
+  --card: #1c1b1a;
+  --fg: #f5f5f4;
+  --fg2: #a29d98;
+  --line: #34322f;
+  --hover: #262523;
+  --accent: #60a5fa;
+  --accent-soft: rgba(96, 165, 250, 0.14);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--fg); font: 13px/1.4 var(--font); }
+button { font: inherit; color: inherit; }
+svg { flex: none; }
+
+.top {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 20px;
+  background: color-mix(in srgb, var(--page) 85%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.logo { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.brand h1 { margin: 0; font-size: 14px; font-weight: 600; }
+.brand p { margin: 0; font-size: 11px; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spacer { flex: 1; }
+
+.status { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); color: var(--fg2); white-space: nowrap; }
+.status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.status.busy { color: var(--fg); }
+.status.busy .dot { background: var(--accent); animation: pulse 1s infinite; }
+.status.error .dot { background: var(--bad); }
+@keyframes pulse { 50% { opacity: 0.3; } }
+
+.seg { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--hover); border: 1px solid var(--line); }
+.seg button { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent; color: var(--fg2); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--card); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+
+.ghost { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); cursor: pointer; }
+.ghost:hover { background: var(--hover); }
+
+.wrap { max-width: 900px; margin: 0 auto; padding: 18px 20px 40px; }
+.scenarios { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.scenarios .label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg2); margin-right: 4px; }
+.step {
+  position: relative; display: inline-flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 12px 0 6px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--card); cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.step:hover { background: var(--hover); }
+.step .n { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 600; background: var(--hover); color: var(--fg2); }
+.step.running { border-color: var(--accent); background: var(--accent-soft); }
+.step.running .n { background: var(--accent); color: #fff; }
+.step.done .n { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.step.queued { border-style: dashed; }
+
+.embed { background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+.embed .bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--fg2); }
+.embed .bar code { font: 12px ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--fg); }
+iframe { display: block; border: 0; width: 100%; height: 900px; background: transparent; }
+.hint { margin-top: 10px; font-size: 11px; color: var(--fg2); }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="logo"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="2.5" width="10" height="11" rx="2"/><path d="M3.8 9.5h8.4" /><path d="M5 11.5h6" opacity=".5"/></svg></div>
+    <div><h1>Simulation panel</h1><p>Dev host · tank fixture · real truST</p></div>
+  </div>
+  <div class="spacer"></div>
+  <span id="status" class="status"><span class="dot"></span><span id="statusText">Idle</span></span>
+  <div class="seg" role="group" aria-label="Theme">
+    <button data-theme="light" aria-pressed="true" title="Light"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9 13 13M13 3l-1.1 1.1M4.1 11.9 3 13"/></svg>Light</button>
+    <button data-theme="dark" aria-pressed="false" title="Dark"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 9.6A5.5 5.5 0 0 1 6.4 2.5a5.5 5.5 0 1 0 7.1 7.1Z"/></svg>Dark</button>
+  </div>
+  <button id="reopen" class="ghost" title="Mount a new panel, like a second open_sim_panel call"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>Reopen</button>
+</header>
+
+<main class="wrap">
+  <div class="scenarios">
+    <span class="label">Demo</span>
+    <button class="step" data-s="start"><span class="n">1</span>Start</button>
+    <button class="step" data-s="experiment"><span class="n">2</span>Experiment</button>
+    <button class="step" data-s="tuned"><span class="n">3</span>Tuned run</button>
+    <button class="step" data-s="breakpoint"><span class="n">4</span>Interlock breakpoint</button>
+    <button class="step" data-s="release"><span class="n">5</span>Release</button>
+  </div>
+  <section class="embed">
+    <div class="bar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 4 1.5 8 5 12M11 4l3.5 4L11 12"/></svg><code>open_sim_panel</code><span>· CODESYS simulation</span></div>
+    <iframe id="panel" sandbox="allow-scripts" title="Simulation panel"></iframe>
+  </section>
+  <p class="hint">Steps run in order through the real MCP tools; the panel only reads, like in Claude Desktop.</p>
+</main>
+<script src="/host.js"></script>
+</body>
+</html>

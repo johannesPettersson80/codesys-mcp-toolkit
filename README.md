@@ -173,9 +173,65 @@ BOOL, an integer type, REAL or LREAL.
 | `read_vars` / `write_var` / `force_var` / `unforce_var` | Read, write or force variables (e.g. a sensor fault). |
 | `set_plant_param` | Change a plant parameter for this session. The simulation restarts, because truST applies plant changes only on restart. |
 | `run_experiment` / `experiment_log` | Repeatable runs from a fresh start: settings, a setpoint step, faults over time. Returns overshoot, rise and settling time, steady-state error and IAE, compared with the previous run of the same name. |
+| `run_tests` | Run the project's unit tests in truST and report pass/fail per test (below). |
+| `open_sim_panel` | Show the live panel (below). |
+
+### Unit tests
+
+Tests live in the CODESYS project. A test is an ordinary `PROGRAM` (or
+`FUNCTION_BLOCK`) whose declaration starts with `{attribute 'test'}`:
+
+```iecst
+{attribute 'test'}
+PROGRAM T_PI_Proportional
+VAR
+    fb : FB_PI;
+END_VAR
+
+fb.Kp := 10.0;
+fb(bEnable := TRUE, rPV := 0.5, rSP := 1.0);
+ASSERT_NEAR(EXPECTED := 5.0, ACTUAL := fb.rY, DELTA := 0.2);
+```
+
+Nothing calls a test, so CODESYS doesn't compile it and the project builds
+as before. `run_tests` syncs the mirror and runs the tests with truST's
+`trust-dev test` (installed next to `trust-runtime`). It reports each test
+by its CODESYS path, e.g. `FAIL Tests/T_Interlock: ASSERT_EQUAL failed:
+expected 1, actual 2`.
+
+Assertions: `ASSERT_EQUAL`, `ASSERT_NOT_EQUAL`, `ASSERT_NEAR`, `ASSERT_TRUE`,
+`ASSERT_FALSE`, `ASSERT_GREATER`, `ASSERT_LESS`, `ASSERT_GREATER_OR_EQUAL`,
+`ASSERT_LESS_OR_EQUAL`.
+
+For now a test runs once from a cold start, and time doesn't advance inside
+it. Test logic, not timers; use `run_experiment` or `run_scans` for
+time-dependent behaviour. Multi-cycle tests on simulated time are coming in
+truST.
 
 Paths are CODESYS paths: `PRG_Tank.nTrips`, `GVL_IO.rLevel`,
 `PRG_Tank.fbPI.rY`, and `FB_PI/Reset` for breakpoints in a method.
+
+### Live panel
+
+`open_sim_panel` opens a live view of the simulation inside the chat, in
+clients that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps)
+(Claude Desktop does):
+
+- **Status:** running or paused, scan, simulated time, speed, and what
+  Claude is doing right now (e.g. "Experiment 'level step': 120 of 300 s").
+- **Code:** the program, with the current line highlighted and breakpoints
+  marked. Line numbers and text are as in CODESYS.
+- **Plant:** a P&ID drawn from `plant.toml`: the tank level, valves and pumps
+  with their state, and forced values marked F.
+- **I/O and trend:** live values, plus a trend strip of the plant signals that
+  fills in during runs and experiments.
+- **Experiments and events:** each run's metrics, compared with the previous
+  run (green when better), and a log of what happened.
+
+The panel is read-only for now; Claude drives the simulation through the tools.
+In clients without MCP Apps, `open_sim_panel` returns a text snapshot instead.
+Add `display = { max = 2.5, unit = "m" }` to a `[[plant]]` to fix the tank's
+scale.
 
 ### How the mirror works
 
@@ -256,8 +312,22 @@ Each session folder keeps `watcher.log` for troubleshooting.
 npm install
 npm test                                    # unit + bridge + tool tests (no CODESYS needed)
 CODESYS_LIVE=1 npx vitest run test/live     # end-to-end against your CODESYS
-npm run build
+npm run build                               # server + the single-file panel (dist/panel)
 ```
+
+Set `TRUST_RUNTIME` to run the truST integration tests as well; without it
+they are skipped.
+
+To work on the panel without Claude Desktop, run the dev host. It serves the
+panel through the MCP Apps bridge, with the tank fixture as the CODESYS side
+and a real `trust-runtime`:
+
+```bash
+npm run build:panel && TRUST_RUNTIME=<path>/trust-runtime.exe node scripts/dev-host/run.mjs 5199
+```
+
+Then open http://localhost:5199. The numbered demo steps run in order, and the
+Light/Dark switch changes the host theme the way Claude Desktop would.
 
 The normal tests run the **real watcher** under CPython 3 against a fake
 `scriptengine` (`test/fake/`). This exercises the file queue, heartbeat,

@@ -67,6 +67,21 @@ The v2 toolkit works around each of these. The workaround is named so it can be 
 | B18 | **Each resume costs at least ~15 ms of wall time on Windows** | `resume` → 10 scans → harness breakpoint took 15 ms at time scale 100 (1 ms of scan time). Control requests themselves take 0.15 ms. This looks like the default Windows timer resolution in the scheduler's sleep. It caps sampled experiments at about 65 samples per second. **Ask:** a high-resolution timer (`timeBeginPeriod(1)` or a waitable timer) in simulation mode. |
 | B19 | **`eval` reads only variable paths, not expressions** | `eval "GVL_IO.lrLevel > 0.3"` → `unknown identifier`. Together with B1 this is why the toolkit evaluates breakpoint conditions itself (it reads each variable, then computes in TypeScript), which costs a round trip per hit. Fixing B1 removes the need. |
 
+### Unit tests and the language server (found while planning Phase 5)
+
+Checked on the tank mirror with `trust-dev test --output json` and `trust-lsp`
+driven headless over stdio. Both are useful already; these gaps decide how
+much the toolkit can lean on them.
+
+| # | Gap | Detail |
+|---|-----|--------|
+| T1 | **Time doesn't advance inside a test** | A `TON` called 1000 times in a `TEST_PROGRAM` never sets `Q`: one test is one execution with frozen time. Most PLC logic is time-dependent (debounce, timeouts, ramps, PI loops). **Ask:** a way for a test to advance simulated time, e.g. `ADVANCE_TIME(T#100ms)` or a cycle-driven test (`TEST_CYCLES n`, `CYCLE_TIME`), with timers and plant models stepping in lockstep. |
+| T2 | **A failure reports the test, not the assertion** | JSON gives `line` and `source` of the `TEST_PROGRAM` header, not of the failing `ASSERT_*` (the tutorial says it does). **Ask:** the failing assertion's line and text, plus the actual and expected values as typed JSON. |
+| T3 | **Test file paths carry the `\\?\` prefix on Windows** | `"file": "\\\\?\\C:\\...\\tests.st"`. Prefer a project-relative path such as `src/tests.st`. |
+| L1 | **References to qualified GVL members aren't found** | Inside `NAMESPACE GVL_IO`, `textDocument/references` for `lrLT101_Level` returns only the declaration, whether asked at the declaration or at a use such as `GVL_IO.lrLT101_Level` in another file. Locals and FB types work. Global variables are what a PLC cross-reference is mostly for. **Ask:** resolve qualified namespace (GVL) member access in references, rename and call hierarchy. |
+| L2 | **Method references and incoming calls are empty** | `references` from `METHOD Reset` → `[]`; `callHierarchy/incomingCalls` on the method → `[]`. The calls exist: `fb.Reset()` in a test, and `itfReset.Reset()` through an interface. Incoming calls to the FB itself work. **Ask:** method (and property) references, including calls through an interface variable, which implementations of the interface method could receive. |
+| L3 | **The outline leaves out variables** | `documentSymbol` for an FB gives the FB, its methods and its properties, but not its `VAR_INPUT`, `VAR_OUTPUT`, `VAR_IN_OUT` or locals. An interface outline needs those with types. **Ask:** variables as child symbols, with section (input, output, in-out, local) and type in `detail`, and children nested under the FB (`hierarchicalDocumentSymbolSupport`). |
+
 ## C. Differences the v2 mirror handles (no truST change needed)
 
 | CODESYS | truST | Mirror does |

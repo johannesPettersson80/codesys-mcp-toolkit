@@ -19,7 +19,8 @@ export type EventKind =
   | "var_forced"
   | "var_unforced"
   | "plant_param"
-  | "experiment";
+  | "experiment"
+  | "tests";
 
 export interface SimEvent {
   seq: number;

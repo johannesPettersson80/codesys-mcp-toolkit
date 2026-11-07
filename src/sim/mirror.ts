@@ -68,6 +68,10 @@ export interface Composition {
   /** Human-readable notes: skipped objects, rewrites, warnings. */
   notes: string[];
   warnings: string[];
+  /** Enum types whose E.X literals were rewritten to E#X. */
+  enums: string[];
+  /** POUs marked {attribute 'test'}, run by run_tests and never by a task. */
+  tests: { name: string; path: string; kind: "program" | "function_block" }[];
 }
 
 export class MirrorError extends Error {}
@@ -102,6 +106,24 @@ function headerKeyword(decl: string | undefined): string {
   const stripped = (decl ?? "").replace(/\(\*[\s\S]*?\*\)/g, " ").replace(/\/\/[^\n]*/g, " ").replace(/\{[^}]*\}/g, " ");
   const m = /^\s*([A-Za-z_]+)/.exec(stripped);
   return m ? m[1]!.toUpperCase() : "";
+}
+
+const LEADING = String.raw`((?:\s|\{[^}]*\}|//[^\n]*(?:\n|$)|\(\*[\s\S]*?\*\))*)`;
+
+/** True when a POU declaration carries `{attribute 'test'}` before its header. */
+export function isTestPou(decl: string | undefined): boolean {
+  const lead = new RegExp(`^${LEADING}`).exec(decl ?? "")?.[1] ?? "";
+  return /\{\s*attribute\s+'test'\s*\}/i.test(lead);
+}
+
+/**
+ * `{attribute 'test'} PROGRAM X` -> `{attribute 'test'} TEST_PROGRAM X` (and
+ * FUNCTION_BLOCK -> TEST_FUNCTION_BLOCK), the form truST 0.33 runs as a test.
+ * truST will accept the attribute itself under the CODESYS profile; until
+ * then the mirror rewrites the header.
+ */
+export function toTestHeader(decl: string): string {
+  return decl.replace(new RegExp(`^${LEADING}(PROGRAM|FUNCTION_BLOCK)\\b`, "i"), (_m, lead: string, kw: string) => `${lead}TEST_${kw.toUpperCase()}`);
 }
 
 const isEmptyVar = (decl: string | undefined) => /^\s*(VAR\s+END_VAR\s*)?$/i.test(decl ?? "");
@@ -264,10 +286,14 @@ export function composeMirror(nodes: TreeNode[], tasks: TaskInfo[], opts: Compos
 
   // CODESYS writes enum values as E.X; truST needs E#X (TRUST-GAPS A1).
   const enums = new Map<string, Set<string>>();
+  const enumNames: string[] = [];
   for (const n of nodes) {
     if (n.kind !== "dut") continue;
     const e = enumMembers(n.declaration ?? "");
-    if (e) enums.set(e.name.toLowerCase(), new Set(e.members.map((m) => m.toLowerCase())));
+    if (e) {
+      enums.set(e.name.toLowerCase(), new Set(e.members.map((m) => m.toLowerCase())));
+      enumNames.push(e.name);
+    }
   }
   let enumRewrites = 0;
   const st = (s: string | undefined) => {
@@ -322,6 +348,7 @@ export function composeMirror(nodes: TreeNode[], tasks: TaskInfo[], opts: Compos
   const files: MirrorFile[] = [];
   const hashes: Record<string, string> = {};
   const usedNames = new Set<string>();
+  const tests: Composition["tests"] = [];
   const nonSt: string[] = [];
   const unqualifiedGvls = tops.filter((t) => t.kind === "gvl" && !/\{\s*attribute\s+'qualified_only'\s*\}/i.test(decl.get(t.path) ?? "")).map((t) => t.name);
 
@@ -336,12 +363,18 @@ export function composeMirror(nodes: TreeNode[], tasks: TaskInfo[], opts: Compos
 
     if (o.kind === "pou") {
       const kw = headerKeyword(d);
-      const end = ({ PROGRAM: "END_PROGRAM", FUNCTION_BLOCK: "END_FUNCTION_BLOCK", FUNCTION: "END_FUNCTION" } as Record<string, string>)[kw];
+      let end = ({ PROGRAM: "END_PROGRAM", FUNCTION_BLOCK: "END_FUNCTION_BLOCK", FUNCTION: "END_FUNCTION" } as Record<string, string>)[kw];
       if (!end) {
         warnings.push(`${o.path}: unsupported POU header '${kw || "(none)"}'; skipped`);
         continue;
       }
-      out.add(d, o.path, "decl");
+      let header = d;
+      if (isTestPou(d) && (kw === "PROGRAM" || kw === "FUNCTION_BLOCK")) {
+        header = toTestHeader(d);
+        end = `END_TEST_${kw}`;
+        tests.push({ name: o.name, path: o.path, kind: kw === "PROGRAM" ? "program" : "function_block" });
+      }
+      out.add(header, o.path, "decl");
       out.add(impl(o), o.path, "impl");
       for (const m of childrenOf(o, "method")) {
         if (m.st === false) {
@@ -418,7 +451,10 @@ export function composeMirror(nodes: TreeNode[], tasks: TaskInfo[], opts: Compos
 
   // ---- tasks and configuration
   const composedTasks: ComposedTask[] = [];
-  const programNames = new Map(tops.filter((t) => t.kind === "pou" && t.sub === "program" && t.st !== false).map((t) => [t.name.toLowerCase(), t.name] as const));
+  const testNames = new Set(tests.map((t) => t.name.toLowerCase()));
+  const programNames = new Map(
+    tops.filter((t) => t.kind === "pou" && t.sub === "program" && t.st !== false && !testNames.has(t.name.toLowerCase())).map((t) => [t.name.toLowerCase(), t.name] as const),
+  );
   for (const t of tasks) {
     const kind = (t.kind ?? "cyclic").toLowerCase();
     if (/event|status|extern/.test(kind)) {
@@ -435,6 +471,7 @@ export function composeMirror(nodes: TreeNode[], tasks: TaskInfo[], opts: Compos
       const base = p.split(".").pop()!;
       const prog = programNames.get(base.toLowerCase());
       if (prog) programs.push(prog);
+      else if (testNames.has(base.toLowerCase())) warnings.push(`Task ${t.name} calls the test ${p}; tests only run with run_tests, so it is left out of the simulation`);
       else warnings.push(`Task ${t.name} calls ${p}, which is not an ST program in the mirror; skipped`);
     }
     const prio = Number(t.priority);
@@ -474,7 +511,7 @@ export function composeMirror(nodes: TreeNode[], tasks: TaskInfo[], opts: Compos
   cfg.push("END_RESOURCE", "END_CONFIGURATION");
   files.push({ path: "src/Configuration.st", text: cfg.join("\n") + "\n", map: cfg.map(() => null) });
 
-  return { files, hashes, tasks: composedTasks, clockTask: clock.name, cycleMs: clock.intervalMs, harnessLine0, addresses, notes, warnings };
+  return { files, hashes, tasks: composedTasks, clockTask: clock.name, cycleMs: clock.intervalMs, harnessLine0, addresses, notes, warnings, enums: enumNames, tests };
 }
 
 /** Map a CODESYS object line to a mirror file and 0-based line. */

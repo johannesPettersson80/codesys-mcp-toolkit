@@ -16,11 +16,12 @@
   ],
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run clean && tsc -p tsconfig.json && node scripts/build-panel.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p panel/tsconfig.json",
     "test": "vitest run",
     "test:live": "vitest run test/live",
-    "start": "node dist/cli.js"
+    "start": "node dist/cli.js",
+    "build:panel": "node scripts/build-panel.mjs"
   },
   "keywords": [
     "codesys",
@@ -47,6 +48,7 @@
     "win32"
   ],
   "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^2.0.4",
     "@modelcontextprotocol/server": "^2.4.0",
     "smol-toml": "^1.9.1",
     "zod": "^4.2.0"
@@ -54,6 +56,7 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.4.0",
     "@types/node": "^22.0.0",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   }

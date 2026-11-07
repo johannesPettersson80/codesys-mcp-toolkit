@@ -32,3 +32,4 @@ _v1-local/
 docs/script_documentation.txt
 # Test/runtime scratch
 /test-output/
+scripts/dev-host/.build/

@@ -18,11 +18,13 @@ import { basename, dirname, join } from "node:path";
 import type { TreeNode } from "../codesys/st.js";
 import { evaluateCondition, parseExpr } from "./expr.js";
 import { Journal } from "./journal.js";
+import { Recorder, type TrendPoint } from "./recorder.js";
+import type { PanelLocation, PanelState, SignalRole, SourceView } from "./panel-types.js";
 import { composeMirror, fromMirror, HARNESS, HARNESS_FILE, partLines, toMirror, type TaskInfo } from "./mirror.js";
 import { readManifest, writeMirror, type Manifest, type SyncResult } from "./mirror-store.js";
 import { applyOverride, parsePlantConfig, simulationToml, type ParamOverride, type PlantConfig } from "./plant.js";
 import { TrustError } from "./control.js";
-import { findTrustRuntime, TrustRuntime, TESTED_TRUST_VERSION, type Diagnostic } from "./runtime.js";
+import { findTrustRuntime, TrustRuntime, TESTED_TRUST_VERSION, type Diagnostic, type TestRun } from "./runtime.js";
 import { formatValue, numeric, parseTrustValue, toTrustLiteral, type StValue } from "./values.js";
 
 /** Read-only view of the CODESYS project: the only CODESYS access the simulation has. */
@@ -113,6 +115,13 @@ export class SimController {
   timeScale = 10;
   private experiments: ExperimentResult[] = [];
   private forced = new Set<string>();
+  /** Trend samples for the panel. */
+  readonly recorder = new Recorder();
+  /** What the simulation is busy with right now (for the panel). */
+  activity?: string;
+  /** Signals of the experiment that is running (shown in the panel). */
+  private experimentSignals: string[] = [];
+  private trustVersion?: string;
 
   constructor(
     private readonly codesys: CodesysSource,
@@ -194,6 +203,13 @@ export class SimController {
     return h.digest("hex");
   }
 
+  /** Mirror text as the user wrote it in CODESYS: E#X enum literals back to E.X. */
+  private asCodesys(line: string): string {
+    const enums = new Set((this.manifest?.enums ?? []).map((e) => e.toLowerCase()));
+    if (!enums.size) return line;
+    return line.replace(/\b([A-Za-z_][A-Za-z0-9_]*)#([A-Za-z_][A-Za-z0-9_]*)\b/g, (m, e: string, x: string) => (enums.has(e.toLowerCase()) ? `${e}.${x}` : m));
+  }
+
   private async sourceLines(file: string): Promise<string[]> {
     let l = this.sourceCache.get(file);
     if (!l && this.mirrorDir) {
@@ -251,6 +267,7 @@ export class SimController {
     const rt = this.getRuntime();
     if (this.running) await this.stop();
     const version = await rt.version();
+    this.trustVersion = version;
     if (version !== TESTED_TRUST_VERSION) notes.push(`Note: trust-runtime ${version}; this toolkit was tested with ${TESTED_TRUST_VERSION}.`);
     const tc = await rt.toolchain();
     if (!tc.installed) {
@@ -322,6 +339,8 @@ export class SimController {
     this.forced.clear();
     await this.setTimeScale(this.timeScale);
     await this.pushAllBreakpoints();
+    this.recorder.reset();
+    await this.record();
     return this.scan();
   }
 
@@ -399,7 +418,7 @@ export class SimController {
     for (let i = Math.max(0, loc.line0 - 2); i <= Math.min(src.length - 1, loc.line0 + 2); i++) {
       const o = fromMirror(this.files(), loc.file, i);
       if (!o || o.obj !== loc.obj || o.part !== loc.part) continue;
-      out.push(`${i === loc.line0 ? ">" : " "} ${String(o.line).padStart(4)} | ${src[i]}`);
+      out.push(`${i === loc.line0 ? ">" : " "} ${String(o.line).padStart(4)} | ${this.asCodesys(src[i] ?? "")}`);
     }
     try {
       const st = await this.ctl().request<{ stack_frames: { name: string; line: number; source?: { path?: string } }[] }>("debug.stack");
@@ -480,10 +499,24 @@ export class SimController {
 
   async runScans(n: number): Promise<string> {
     if (!Number.isInteger(n) || n < 1) throw new SimError("bad_args", "n must be a positive whole number of scans.");
-    const { loc, ran } = await this.runScansRaw(n);
-    const early = loc && !loc.harness;
-    this.journal.add(early ? "stopped" : "ran", early ? `Stopped after ${ran} scan(s)` : `Ran ${ran} scan(s)`, { ran });
-    return `${early ? `Stopped early after ${ran} of ${n} scan(s).` : `Ran ${ran} scan(s) (${fmtS(ran * this.manifest!.cycleMs)} simulated).`}\n${await this.where(loc, { locals: !!early })}`;
+    return this.busy(`Running ${n} scan(s) (${fmtS(n * (this.manifest?.cycleMs ?? 0))} simulated)`, async () => {
+      const { loc, ran } = await this.runScansRaw(n);
+      const early = loc && !loc.harness;
+      this.journal.add(early ? "stopped" : "ran", early ? `Stopped after ${ran} scan(s)` : `Ran ${ran} scan(s)`, { ran, ...(early ? { obj: loc.obj, line: loc.line } : {}) });
+      await this.record();
+      return `${early ? `Stopped early after ${ran} of ${n} scan(s).` : `Ran ${ran} scan(s) (${fmtS(ran * this.manifest!.cycleMs)} simulated).`}\n${await this.where(loc, { locals: !!early })}`;
+    });
+  }
+
+  /** Mark what the simulation is busy with (shown in the panel) while fn runs. */
+  private async busy<T>(text: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.activity;
+    this.activity = text;
+    try {
+      return await fn();
+    } finally {
+      this.activity = prev;
+    }
   }
 
   async setTimeScale(speed: number): Promise<void> {
@@ -499,16 +532,21 @@ export class SimController {
   }
 
   async cont(timeoutMs: number): Promise<string> {
-    const c = this.ctl();
-    await c.request("debug.stops");
-    await c.request("resume");
-    const loc = await this.waitForStop(timeoutMs, true);
-    if (!loc) {
-      await this.ensurePaused();
-      return `No breakpoint was hit within ${fmtS(timeoutMs)} of wall time; paused.\n${await this.where(undefined)}`;
-    }
-    this.journal.add("stopped", `Stopped at ${loc.obj ?? loc.file}:${loc.line ?? loc.line0 + 1}`, { reason: loc.reason, obj: loc.obj, line: loc.line });
-    return this.where(loc);
+    return this.busy("Running until a breakpoint", async () => {
+      const c = this.ctl();
+      await c.request("debug.stops");
+      await c.request("resume");
+      const loc = await this.waitForStop(timeoutMs, true);
+      if (!loc) {
+        await this.ensurePaused();
+        await this.record();
+        const scan = await this.scan();
+        return `No breakpoint was hit within ${fmtS(timeoutMs)} of wall time; paused at scan ${scan} (sim time ${fmtS(scan * this.manifest!.cycleMs)}).`;
+      }
+      this.journal.add("stopped", `Stopped at ${loc.obj ?? loc.file}:${loc.line ?? loc.line0 + 1}`, { reason: loc.reason, obj: loc.obj, line: loc.line });
+      await this.record();
+      return this.where(loc);
+    });
   }
 
   async step(kind: "step_over" | "step_in" | "step_out"): Promise<string> {
@@ -518,7 +556,7 @@ export class SimController {
     await c.request("debug.stops");
     await c.request(kind);
     const loc = await this.waitForStop(10_000, false);
-    this.journal.add("stepped", `${kind} -> ${loc?.obj ?? loc?.file ?? "?"}:${loc?.line ?? ""}`);
+    this.journal.add("stepped", `${kind} -> ${loc?.obj ?? loc?.file ?? "?"}:${loc?.line ?? ""}`, { obj: loc?.obj, line: loc?.line });
     if (loc?.harness) return `The scan ended; ${await this.where(loc)}`;
     return this.where(loc);
   }
@@ -669,7 +707,12 @@ export class SimController {
 
   async runExperiment(spec: ExperimentSpec): Promise<string> {
     if (!(spec.duration_s > 0)) throw new SimError("bad_args", "duration_s must be > 0");
-    const c = this.ctl();
+    this.ctl();
+    return this.busy(`Experiment "${spec.name ?? `experiment ${this.experiments.length + 1}`}" starting`, () => this.experimentImpl(spec));
+  }
+
+  private async experimentImpl(spec: ExperimentSpec): Promise<string> {
+    const label = spec.name ?? `experiment ${this.experiments.length + 1}`;
     const cycle = this.manifest!.cycleMs;
     const total = Math.max(1, Math.round((spec.duration_s * 1000) / cycle));
     const samples = Math.min(Math.max(spec.samples ?? 200, 10), 2000);
@@ -696,11 +739,14 @@ export class SimController {
       }
       events.sort((a, b) => a.at - b.at);
 
-      const watched = [...new Set([spec.pv, spec.sp?.var, ...(spec.watch ?? [])].filter((x): x is string => !!x))];
+      const own = [...new Set([spec.pv, spec.sp?.var, ...(spec.watch ?? [])].filter((x): x is string => !!x))];
+      this.experimentSignals = own;
+      const watched = [...new Set([...own, ...this.panelSignals().map((s) => s.name)])];
       const rows: { t: number; values: Record<string, number | null>; raw: Record<string, string> }[] = [];
       const sample = async (scan: number) => {
         const values: Record<string, number | null> = {};
         const raw: Record<string, string> = {};
+        this.activity = `Experiment "${label}": ${((scan * cycle) / 1000).toFixed(0)} of ${spec.duration_s} s simulated`;
         for (const w of watched) {
           try {
             const v = await this.readValue(w);
@@ -711,11 +757,13 @@ export class SimController {
             raw[w] = "?";
           }
         }
-        rows.push({ t: (scan * cycle) / 1000, values, raw });
+        rows.push({ t: (scan * cycle) / 1000, values: Object.fromEntries(own.map((w) => [w, values[w] ?? null])), raw });
+        this.recorder.add(((startScan + scan) * cycle) / 1000, values);
       };
 
       let scan = 0;
       let lastScan = await this.scan();
+      const startScan = lastScan;
       const runEvents = async () => {
         while (events.length && events[0]!.at <= scan) await events.shift()!.run();
       };
@@ -748,10 +796,196 @@ export class SimController {
       if (this.mirrorDir) await appendFile(join(this.mirrorDir, "experiments.jsonl"), JSON.stringify({ ...result, samples: undefined }) + "\n", "utf8").catch(() => undefined);
       return summary;
     } finally {
+      this.experimentSignals = [];
       await this.setHarnessBreakpoint(0).catch(() => undefined);
       await this.setTimeScale(prevScale).catch(() => undefined);
       await this.silenceBreakpoints(false).catch(() => undefined);
     }
+  }
+
+  // ------------------------------------------------------------ tests
+
+  private lastTests?: PanelState["tests"];
+
+  /**
+   * Run the project's tests (POUs marked {attribute 'test'}) in truST.
+   * Separate from the simulation: it doesn't stop or change a running one.
+   */
+  async runTests(o: { filter?: string; sync?: boolean; timeoutS?: number } = {}): Promise<{ text: string; ok: boolean; run?: TestRun }> {
+    if (o.sync !== false) await this.sync();
+    else if (!this.manifest) {
+      const dir = this.mirrorFolder();
+      this.manifest = await readManifest(dir);
+      if (!this.manifest) throw new SimError("no_mirror", "No mirror yet. Call sync_mirror first.");
+      this.mirrorDir = dir;
+    }
+    const declared = this.manifest!.tests ?? [];
+    if (!declared.length) {
+      return {
+        ok: true,
+        text: [
+          "No tests in the project. A test is a PROGRAM (or FUNCTION_BLOCK) whose declaration starts with {attribute 'test'}, for example:",
+          "  {attribute 'test'}",
+          "  PROGRAM T_PI_Proportional",
+          "  VAR fb : FB_PI; END_VAR",
+          "  fb(bEnable := TRUE, rPV := 0.5, rSP := 1.0);",
+          "  ASSERT_NEAR(EXPECTED := 25.0, ACTUAL := fb.rY, DELTA := 0.5);",
+          "Nothing calls it, so CODESYS doesn't compile it; run_tests runs it in truST.",
+        ].join("\n"),
+      };
+    }
+    const run = await this.busy("Running tests", () => this.getRuntime().test(this.mirrorDir!, { filter: o.filter, timeoutS: o.timeoutS }));
+    if (!run.ran) {
+      const mapped = run.diagnostics.length ? await this.mapDiagnostics(run.diagnostics) : [run.output.split("\n").slice(-15).join("\n")];
+      this.journal.add("tests", "Tests could not be built", { errors: mapped.length });
+      return { ok: false, run, text: `The tests could not be built:\n${mapped.join("\n")}` };
+    }
+    const objOf = (t: TestRun["tests"][number]) => {
+      const byName = declared.find((d) => d.name.toLowerCase() === t.name.toLowerCase());
+      if (byName) return byName.path;
+      return t.file && t.line ? (fromMirror(this.files(), t.file, t.line - 1)?.obj ?? t.name) : t.name;
+    };
+    const failing = run.tests.filter((t) => t.status !== "passed");
+    const lines = [
+      `Tests: ${run.passed} passed, ${run.failed} failed${run.errors ? `, ${run.errors} error(s)` : ""} (${run.total} total, ${fmtS(run.durationMs)}).${o.filter ? ` Filter: "${o.filter}".` : ""}`,
+      ...failing.map((t) => `FAIL ${objOf(t)}: ${t.message ?? t.status}`),
+      ...run.tests.filter((t) => t.status === "passed").map((t) => `pass ${objOf(t)}`),
+    ];
+    if (failing.length) lines.push("Note: truST reports the test, not the failing assertion line yet (TRUST-GAPS T2), and time doesn't advance inside a test (T1).");
+    this.lastTests = { at: new Date().toISOString(), total: run.total, passed: run.passed, failed: run.failed + run.errors, failing: failing.map(objOf) };
+    this.journal.add("tests", `Tests: ${run.passed} passed, ${run.failed + run.errors} failed`, { total: run.total, failing: this.lastTests.failing });
+    return { ok: failing.length === 0, run, text: lines.join("\n") };
+  }
+
+  // ------------------------------------------------------------ panel (read-only)
+
+  /** The signals the panel shows: plant wiring, device feedback, the running experiment. */
+  panelSignals(): { name: string; role: SignalRole; plant?: string }[] {
+    const out = new Map<string, { name: string; role: SignalRole; plant?: string }>();
+    const plant = this.effectivePlant();
+    for (const p of plant?.plants ?? []) {
+      for (const v of p.outputs) out.set(v.toLowerCase(), { name: v, role: "plant_out", plant: p.id });
+      for (const v of p.inputs) out.set(v.toLowerCase(), { name: v, role: "plant_in", plant: p.id });
+    }
+    for (const f of plant?.feedback ?? []) {
+      if (!out.has(f.follows.toLowerCase())) out.set(f.follows.toLowerCase(), { name: f.follows, role: "command" });
+      out.set(f.signal.toLowerCase(), { name: f.signal, role: "feedback" });
+    }
+    for (const v of this.experimentSignals) if (!out.has(v.toLowerCase())) out.set(v.toLowerCase(), { name: v, role: "experiment" });
+    return [...out.values()];
+  }
+
+  /** Record one trend sample of the panel signals (best effort). */
+  private async record(values?: Record<string, number | null>): Promise<void> {
+    if (!this.running || !this.manifest) return;
+    try {
+      const scan = await this.scan();
+      if (!values) {
+        values = {};
+        for (const s of this.panelSignals()) {
+          try {
+            values[s.name] = numeric(await this.readValue(s.name)) ?? null;
+          } catch {
+            values[s.name] = null;
+          }
+        }
+      }
+      this.recorder.add((scan * this.manifest.cycleMs) / 1000, values);
+    } catch {
+      /* the panel's trend is best effort */
+    }
+  }
+
+  /**
+   * A snapshot for the panel. Read-only towards the runtime: it never drains
+   * stop records or changes the run state, so it is safe while a tool runs.
+   */
+  async panelState(): Promise<Omit<PanelState, "current">> {
+    const plant = this.effectivePlant();
+    const base: Omit<PanelState, "current"> = {
+      status: "stopped",
+      project: this.codesys.projectPath(),
+      trust: this.trustVersion,
+      scan: 0,
+      simTime: 0,
+      timeScale: this.timeScale,
+      cycleMs: this.manifest?.cycleMs,
+      activity: this.activity,
+      breakpoints: [...this.breakpoints.values()].map((b) => ({ id: b.id, obj: b.obj, line: b.line, ...(b.condition ? { condition: b.condition } : {}) })),
+      signals: this.panelSignals().map((s) => ({ ...s, address: this.ioAddress(s.name), forced: this.forced.has(s.name) })),
+      plants: (plant?.plants ?? []).map((p) => ({ id: p.id, model: p.model, inputs: p.inputs, outputs: p.outputs, ...(p.display ? { display: p.display } : {}) })),
+      feedback: plant?.feedback ?? [],
+      experiments: this.experiments.map((e) => ({ n: e.n, name: e.name, at: e.at, metrics: e.metrics })),
+      ...(this.lastTests ? { tests: this.lastTests } : {}),
+      journalSeq: this.journal.last,
+      trendEpoch: this.recorder.epoch,
+      warnings: this.manifest?.warnings ?? [],
+      ...(this.runtime?.exitInfo && !this.running ? { exitInfo: this.runtime.exitInfo } : {}),
+    };
+    if (!base.project) return { ...base, status: "no_project" };
+    if (!this.manifest) return { ...base, status: "no_mirror" };
+    if (!this.running) return base;
+    try {
+      const st = await this.ctl().request<{ paused: boolean; last_stop?: { path?: string; line?: number; reason: string } | null }>("debug.state");
+      const scan = await this.scan();
+      const values: Record<string, number | null> = {};
+      for (const s of base.signals) {
+        try {
+          const v = await this.readValue(s.name);
+          s.value = formatValue(v);
+          s.num = numeric(v) ?? null;
+        } catch {
+          s.value = "?";
+          s.num = null;
+        }
+        values[s.name] = s.num ?? null;
+      }
+      if (!st.paused) this.recorder.add((scan * this.manifest.cycleMs) / 1000, values);
+      let location: PanelLocation | undefined;
+      if (st.paused && st.last_stop) {
+        const l = this.locate(st.last_stop);
+        location = { reason: l.reason, harness: l.harness, ...(l.obj ? { obj: l.obj, part: l.part, line: l.line } : {}), ...(l.breakpoint ? { breakpoint: l.breakpoint.id } : {}) };
+      }
+      return { ...base, status: st.paused ? "paused" : "running", scan, simTime: (scan * this.manifest.cycleMs) / 1000, location, trendEpoch: this.recorder.epoch };
+    } catch {
+      return base;
+    }
+  }
+
+  /** The mirror file holding an object (or the current stop, or the first program), as CODESYS lines. */
+  async sourceView(obj?: string): Promise<SourceView | undefined> {
+    if (!this.manifest) return undefined;
+    const files = this.files().filter((f) => f.path !== HARNESS_FILE && f.path !== "src/Configuration.st");
+    let file: (typeof files)[number] | undefined;
+    if (obj) {
+      const key = obj.toLowerCase();
+      file = files.find((f) => f.map.some((o) => o?.obj.toLowerCase() === key));
+    }
+    if (!file) {
+      // Default: the first program a task runs (from the generated configuration).
+      const cfg = await this.sourceLines("src/Configuration.st");
+      const progs = cfg.map((l) => /^\s*PROGRAM\s+(\w+)\s+WITH/i.exec(l)?.[1]).filter((p): p is string => !!p && p !== HARNESS);
+      for (const p of progs) {
+        file = files.find((f) => f.map.some((o) => o?.obj.toLowerCase() === p.toLowerCase()));
+        if (file) break;
+      }
+    }
+    file ??= files.find((f) => f.map.some((o) => o?.part === "impl"));
+    if (!file) return undefined;
+    const text = await this.sourceLines(file.path);
+    const title = file.map.find((o) => o)?.obj.split("/")[0] ?? file.path;
+    return {
+      file: file.path,
+      title,
+      lines: text.slice(0, text.at(-1) === "" ? -1 : undefined).map((t, i) => {
+        const o = file!.map[i];
+        return o ? { text: this.asCodesys(t), obj: o.obj, part: o.part, line: o.line } : { text: t };
+      }),
+    };
+  }
+
+  trend(epoch: number, since: number): { epoch: number; points: TrendPoint[]; reset: boolean } {
+    return this.recorder.since(epoch, since);
   }
 
   experimentLog(): string {

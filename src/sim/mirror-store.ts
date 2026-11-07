@@ -26,6 +26,8 @@ export interface Manifest {
   addresses: Record<string, string>;
   notes: string[];
   warnings: string[];
+  enums?: string[];
+  tests?: { name: string; path: string; kind: "program" | "function_block" }[];
 }
 
 export interface SyncResult {
@@ -93,6 +95,8 @@ export async function writeMirror(dir: string, c: Composition, simulationToml: s
     addresses: Object.fromEntries(c.addresses),
     notes: c.notes,
     warnings: c.warnings,
+    enums: c.enums,
+    tests: c.tests,
   };
   await writeFile(join(dir, MANIFEST), JSON.stringify(manifest, null, 1), "utf8");
   const result: SyncResult = { manifest, changed: changedObjects(prev?.hashes, c.hashes), added, removed };

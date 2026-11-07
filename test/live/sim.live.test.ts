@@ -19,7 +19,7 @@ import { SimController } from "../../src/sim/controller.js";
 import { findTrustRuntime } from "../../src/sim/runtime.js";
 import { codesysSource } from "../../src/sim/tools.js";
 import type { AppContext } from "../../src/tools.js";
-import { LINES, PRG_TANK_IMPL, TANK_PLANT, tankNodes } from "../fixtures/tank.js";
+import { LINES, PRG_TANK_IMPL, TANK_PLANT, tankNodes, tankTestNodes } from "../fixtures/tank.js";
 import { tempDir, WATCHER } from "../helpers.js";
 
 const LONG = 600_000;
@@ -98,6 +98,23 @@ describe.skipIf(!findTrustRuntime())("live CODESYS + truST simulation", () => {
     expect(r).toMatch(/paused at the start of scan/);
     expect(await ok("run_for", { seconds: 3 })).toMatch(/Ran \d+ scan\(s\) \(3\.00 s simulated\)/);
     expect(await ok("read_vars", { names: ["GVL_IO.xXV101_Opened", "PLC_PRG.sStatus"] })).toMatch(/GVL_IO\.xXV101_Opened = TRUE\nPLC_PRG\.sStatus = 'OK'/);
+    // 3. the panel (text side; the UI itself is checked with scripts/dev-host)
+    expect(await ok("open_sim_panel")).toMatch(/Panel opened\. Simulation: paused, scan \d+[\s\S]*GVL_IO\.lrLT101_Level = /);
+  }, LONG);
+
+  it("unit tests live in the CODESYS project and run in truST", async () => {
+    await ok("create_object", { kind: "folder", name: "Tests" });
+    for (const t of tankTestNodes({ failing: true }).filter((n) => n.kind === "pou")) {
+      await ok("create_object", { parent: "Tests", kind: "program", name: t.name, declaration: t.declaration, implementation: t.implementation });
+    }
+    // Nothing calls the tests, so CODESYS doesn't compile them: the project still builds clean.
+    expect(await ok("compile")).toMatch(/Build: 0 error\(s\)/);
+    const r = await call("run_tests");
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toMatch(/^Tests: 3 passed, 1 failed \(4 total/);
+    expect(r.text).toMatch(/FAIL Tests\/T_Deliberately_Failing: ASSERT_EQUAL failed: expected 1, actual 2/);
+    await ok("delete_object", { path: "Tests/T_Deliberately_Failing" });
+    expect(await ok("run_tests")).toMatch(/^Tests: 3 passed, 0 failed/);
   }, LONG);
 
   let baseline = "";

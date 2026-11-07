@@ -30,6 +30,12 @@ Rewrite. See README "Migrating from v1".
 - `plant.toml`: truST plant models wired to ST variables by name, plus simple
   simulated device feedback (valve limit switches, pump running).
 - Options `--trust-runtime`, `--mirror-dir`, `--no-sim`.
+- `run_tests`: unit tests that live in the CODESYS project as programs marked
+  `{attribute 'test'}`, run in truST, with results by CODESYS object.
+- `open_sim_panel`: a live, read-only simulation panel (MCP App) with the
+  code and current line, a P&ID from `plant.toml`, I/O, trends, experiments
+  and events. App-only tools `get_sim_state`, `get_events`, `get_source`,
+  `get_trend` are hidden from clients without MCP Apps support.
 
 ### Fixed
 - `compile` returns errors and warnings with object, line and code (#10).

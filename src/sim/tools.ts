@@ -207,6 +207,32 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
   );
 
   server.registerTool(
+    "run_tests",
+    {
+      description: [
+        "Run the project's unit tests in truST and report pass/fail per test, by CODESYS object. Syncs the mirror from CODESYS first.",
+        "A test is a PROGRAM (or FUNCTION_BLOCK) in the CODESYS project whose declaration starts with {attribute 'test'}; nothing calls it, so CODESYS doesn't compile it.",
+        "Assertions: ASSERT_EQUAL(EXPECTED := .., ACTUAL := ..), ASSERT_NOT_EQUAL, ASSERT_NEAR(EXPECTED, ACTUAL, DELTA), ASSERT_TRUE(IN := ..), ASSERT_FALSE, ASSERT_GREATER, ASSERT_LESS, ASSERT_GREATER_OR_EQUAL, ASSERT_LESS_OR_EQUAL.",
+        "Each test runs once from a cold start, and time does not advance inside it, so test logic, not timers; use run_experiment or run_scans for time-dependent behaviour.",
+      ].join(" "),
+      inputSchema: z.object({
+        filter: z.string().optional().describe("Only tests whose name contains this (case-insensitive)"),
+        sync: z.boolean().optional().describe("Re-export from CODESYS first (default true)"),
+      }),
+    },
+    async ({ filter, sync }) => {
+      try {
+        const r = await sim.runTests({ filter, sync });
+        return text(r.text, !r.ok && !r.run?.ran);
+      } catch (e) {
+        return run(async () => {
+          throw e;
+        });
+      }
+    },
+  );
+
+  server.registerTool(
     "experiment_log",
     { description: "List the experiments run in this session with their metrics.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
     async () => run(async () => sim.experimentLog()),

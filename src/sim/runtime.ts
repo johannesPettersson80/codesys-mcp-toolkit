@@ -11,7 +11,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, openSync, closeSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import net from "node:net";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import { parse as parseToml } from "smol-toml";
@@ -29,6 +29,78 @@ export function findTrustRuntime(explicit?: string): string | undefined {
     if (dir) candidates.push(join(dir, process.platform === "win32" ? "trust-runtime.exe" : "trust-runtime"));
   }
   return candidates.find((c) => existsSync(c));
+}
+
+/** trust-dev (test runner): next to trust-runtime, else TRUST_DEV, else PATH. */
+export function findTrustDev(runtimeExe: string): string | undefined {
+  const name = process.platform === "win32" ? "trust-dev.exe" : "trust-dev";
+  const candidates = [join(dirname(runtimeExe), name)];
+  if (process.env.TRUST_DEV) candidates.push(process.env.TRUST_DEV);
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) if (dir) candidates.push(join(dir, name));
+  return candidates.find((c) => existsSync(c));
+}
+
+export interface TestCase {
+  name: string;
+  kind: string;
+  status: string;
+  message: string | null;
+  /** Project-relative file, e.g. src/T_Tank.st. */
+  file?: string;
+  /** 1-based line truST reports (today the test's header line, TRUST-GAPS T2). */
+  line?: number;
+  durationMs?: number;
+}
+
+export interface TestRun {
+  /** False when the tests could not be compiled or run at all. */
+  ran: boolean;
+  total: number;
+  passed: number;
+  failed: number;
+  errors: number;
+  durationMs: number;
+  tests: TestCase[];
+  diagnostics: Diagnostic[];
+  output: string;
+}
+
+/** Parse `trust-dev test --output json`. */
+export function parseTestJson(stdout: string, projectDir: string): TestRun | undefined {
+  const start = stdout.indexOf("{");
+  if (start < 0) return undefined;
+  let doc: { summary?: Record<string, number>; tests?: Record<string, unknown>[] };
+  try {
+    doc = JSON.parse(stdout.slice(start, stdout.lastIndexOf("}") + 1));
+  } catch {
+    return undefined;
+  }
+  if (!doc.summary || !Array.isArray(doc.tests)) return undefined;
+  const root = projectDir.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const rel = (f: unknown) => {
+    if (typeof f !== "string") return undefined;
+    const p = f.replace(/^\\\\\?\\/, "").replace(/\\/g, "/");
+    return p.toLowerCase().startsWith(root + "/") ? p.slice(root.length + 1) : p;
+  };
+  return {
+    ran: true,
+    total: doc.summary.total ?? doc.tests.length,
+    passed: doc.summary.passed ?? 0,
+    failed: doc.summary.failed ?? 0,
+    errors: doc.summary.errors ?? 0,
+    durationMs: doc.summary.duration_ms ?? 0,
+    tests: doc.tests.map((t) => ({
+      name: String(t.name),
+      kind: String(t.kind ?? ""),
+      status: String(t.status),
+      message: typeof t.message === "string" ? t.message : null,
+      file: rel(t.file),
+      line: typeof t.line === "number" ? t.line : undefined,
+      durationMs: typeof t.duration_ms === "number" ? t.duration_ms : undefined,
+    })),
+    diagnostics: [],
+    output: "",
+  };
 }
 
 export interface Diagnostic {
@@ -173,6 +245,29 @@ export class TrustRuntime {
     }
   }
 
+  /** Run the project's tests with trust-dev (a separate process; the simulation can keep running). */
+  async test(dir: string, o: { filter?: string; timeoutS?: number } = {}): Promise<TestRun> {
+    const dev = findTrustDev(this.exe);
+    if (!dev) throw new TrustError("no_trust_dev", `trust-dev (the truST test runner) was not found next to ${this.exe} or on PATH.`);
+    const args = ["test", "--project", dir, "--output", "json", "--timeout", String(o.timeoutS ?? 10)];
+    if (o.filter) args.push("--filter", o.filter);
+    let stdout = "";
+    let stderr = "";
+    try {
+      const r = await exec(dev, args, { windowsHide: true, maxBuffer: 32 << 20, timeout: 900_000 });
+      stdout = r.stdout;
+      stderr = r.stderr;
+    } catch (e) {
+      const err = e as { stdout?: string; stderr?: string; message: string };
+      stdout = err.stdout ?? "";
+      stderr = err.stderr ?? err.message;
+    }
+    const parsed = parseTestJson(stdout, dir);
+    if (parsed) return { ...parsed, output: stderr.trim() };
+    const output = `${stdout}\n${stderr}`.trim();
+    return { ran: false, total: 0, passed: 0, failed: 0, errors: 0, durationMs: 0, tests: [], diagnostics: parseDiagnostics(output), output };
+  }
+
   async build(dir: string): Promise<BuildResult> {
     const t0 = Date.now();
     try {
@@ -208,7 +303,7 @@ export class TrustRuntime {
       if (this.child === child) {
         this.control?.close();
         this.control = undefined;
-        this.onExit?.(this.exitInfo);
+        if (!this.stopping) this.onExit?.(this.exitInfo);
       }
     });
     const control = new TrustControl({ host: "127.0.0.1", port, token, timeoutMs: 10_000 });
@@ -242,6 +337,17 @@ export class TrustRuntime {
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
+    try {
+      await this.stopInner();
+    } finally {
+      this.stopping = false;
+    }
+  }
+
+  private stopping = false;
+
+  private async stopInner(): Promise<void> {
     const child = this.child;
     if (!child || child.exitCode !== null) {
       this.child = undefined;

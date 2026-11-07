@@ -166,3 +166,25 @@ signal = "GVL_IO.xP101_Running"
 follows = "GVL_IO.xP101_Run"
 delay_ms = 500
 `;
+
+/** Unit tests for the tank, as CODESYS programs marked {attribute 'test'}. */
+export function tankTestNodes(o: { failing?: boolean } = {}): TreeNode[] {
+  const t = (name: string, decl: string, impl: string): TreeNode => ({
+    path: `Tests/${name}`,
+    name,
+    kind: "pou",
+    sub: "program",
+    st: true,
+    depth: 1,
+    declaration: `{attribute 'test'}\nPROGRAM ${name}\n${decl}`,
+    implementation: impl,
+  });
+  const nodes: TreeNode[] = [
+    { path: "Tests", name: "Tests", kind: "folder", depth: 0 },
+    t("T_PI_Proportional", "VAR\n    fb : FB_PI;\nEND_VAR", "fb.Kp := 10.0;\nfb(bEnable := TRUE, rPV := 0.5, rSP := 1.0);\nASSERT_NEAR(EXPECTED := 5.0, ACTUAL := fb.rY, DELTA := 0.2);"),
+    t("T_PI_ResetViaInterface", "VAR\n    fb : FB_PI;\n    itf : I_Resettable;\nEND_VAR", "fb(bEnable := TRUE, rPV := 0.0, rSP := 1.0);\nitf := fb;\nitf.Reset();\nASSERT_EQUAL(EXPECTED := 0.0, ACTUAL := fb.rY);"),
+    t("T_Mode_DefaultsToAuto", "", "ASSERT_TRUE(IN := GVL_Par.eMode = E_TankMode.AUTO);\nASSERT_FALSE(IN := GVL_Par.eMode = E_TankMode.INTERLOCKED);"),
+  ];
+  if (o.failing) nodes.push(t("T_Deliberately_Failing", "", "ASSERT_EQUAL(EXPECTED := 1, ACTUAL := 2);"));
+  return nodes;
+}

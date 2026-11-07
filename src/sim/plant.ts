@@ -19,6 +19,7 @@
  *   [plant.parameters]
  *   area_m2 = 1.0
  *   outflow_coefficient_m2_sqrt_m_per_s = 0.03
+ *   display = { max = 2.5, unit = "m" }   # optional, for the panel only
  *   # any other truST plant keys (actuator, noise, events, ...) pass through unchanged
  *
  *   [[feedback]]
@@ -36,8 +37,17 @@ export interface PlantDef {
   outputs: string[];
   initial_state?: number[];
   parameters?: Record<string, unknown>;
+  /** Panel hints (not passed to truST): scale and unit of the first output. */
+  display?: PlantDisplay;
   /** Other truST plant keys, passed through to simulation.toml. */
   extra: Record<string, unknown>;
+}
+
+export interface PlantDisplay {
+  max?: number;
+  min?: number;
+  unit?: string;
+  label?: string;
 }
 
 export interface FeedbackDef {
@@ -87,7 +97,7 @@ export function parsePlantConfig(text: string): PlantConfig {
   if (!Array.isArray(plants)) throw new PlantConfigError("use [[plant]] (an array of tables) for plants");
   const ids = new Set<string>();
   for (const p of plants) {
-    const { id, model, inputs, outputs, initial_state, parameters, command_sources, feedback_targets, ...extra } = p;
+    const { id, model, inputs, outputs, initial_state, parameters, command_sources, feedback_targets, display, ...extra } = p;
     if (typeof id !== "string" || !ID.test(id)) throw new PlantConfigError("every [[plant]] needs an id (letters, digits, _ or -)");
     if (ids.has(id)) throw new PlantConfigError(`duplicate plant id '${id}'`);
     ids.add(id);
@@ -103,6 +113,17 @@ export function parsePlantConfig(text: string): PlantConfig {
     if (parameters !== undefined) {
       if (typeof parameters !== "object" || parameters === null || Array.isArray(parameters)) throw new PlantConfigError(`plant ${id}: [plant.parameters] must be a table`);
       def.parameters = parameters as Record<string, unknown>;
+    }
+    if (display !== undefined) {
+      if (typeof display !== "object" || display === null || Array.isArray(display)) throw new PlantConfigError(`plant ${id}: display must be a table, e.g. display = { max = 2.5, unit = "m" }`);
+      const d = display as Record<string, unknown>;
+      for (const k of Object.keys(d)) if (!["max", "min", "unit", "label"].includes(k)) throw new PlantConfigError(`plant ${id}: unknown display key '${k}' (max, min, unit, label)`);
+      def.display = {
+        ...(typeof d.max === "number" ? { max: d.max } : {}),
+        ...(typeof d.min === "number" ? { min: d.min } : {}),
+        ...(typeof d.unit === "string" ? { unit: d.unit } : {}),
+        ...(typeof d.label === "string" ? { label: d.label } : {}),
+      };
     }
     cfg.plants.push(def);
   }

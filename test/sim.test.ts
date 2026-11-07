@@ -7,15 +7,15 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { analyse, SimController } from "../src/sim/controller.js";
 import { assertLoopback, TrustControl } from "../src/sim/control.js";
 import { evaluate, evaluateCondition, ExprError, parseExpr } from "../src/sim/expr.js";
-import { composeMirror, declaredType, enumMembers, fromMirror, HARNESS_FILE, injectAddress, parseIntervalMs, partLines, propertyHeader, rewriteEnumLiterals, stripQueryInterface, toMirror, usedAddressEnd } from "../src/sim/mirror.js";
+import { composeMirror, declaredType, enumMembers, fromMirror, HARNESS_FILE, injectAddress, isTestPou, parseIntervalMs, partLines, propertyHeader, rewriteEnumLiterals, stripQueryInterface, toMirror, toTestHeader, usedAddressEnd } from "../src/sim/mirror.js";
 import { readManifest, writeMirror } from "../src/sim/mirror-store.js";
 import { applyOverride, parsePlantConfig, PlantConfigError, simulationToml } from "../src/sim/plant.js";
-import { assertSimulationOnly, parseDiagnostics, runtimeToml } from "../src/sim/runtime.js";
+import { assertSimulationOnly, parseDiagnostics, parseTestJson, runtimeToml } from "../src/sim/runtime.js";
 import { SIM_CODESYS_OPS } from "../src/sim/tools.js";
 import { formatValue, parseTrustValue, toTrustLiteral, type StValue } from "../src/sim/values.js";
 import { createServer } from "../src/server.js";
 import type { AppContext } from "../src/tools.js";
-import { LINES, TANK_PLANT, tankNodes, tankTasks } from "./fixtures/tank.js";
+import { LINES, TANK_PLANT, tankNodes, tankTasks, tankTestNodes } from "./fixtures/tank.js";
 import { fakeBridge, fakeProjectFile, ROOT, tempDir } from "./helpers.js";
 
 const compose = () => composeMirror(tankNodes(), tankTasks(), { plant: parsePlantConfig(TANK_PLANT) });
@@ -113,6 +113,23 @@ describe("mirror composition", () => {
     expect(file(c, "PRG_Tank").text).not.toMatch(/E_TankMode\.(AUTO|INTERLOCKED)/);
     expect(file(c, "GVL_Par").text).toContain("eMode : E_TankMode := E_TankMode#AUTO;");
     expect(c.notes.join("\n")).toMatch(/Rewrote enum literals E\.X to E#X in 2 text/);
+  });
+
+  it("turns {attribute 'test'} programs into truST tests and keeps them out of the tasks", () => {
+    expect(isTestPou("{attribute 'test'}\nPROGRAM T_X")).toBe(true);
+    expect(isTestPou("// comment\n{attribute 'hide'}\n{ attribute 'test' }\nFUNCTION_BLOCK T_Y")).toBe(true);
+    expect(isTestPou("PROGRAM P\nVAR {attribute 'test'} x : INT; END_VAR")).toBe(false);
+    expect(toTestHeader("{attribute 'test'}\nPROGRAM T_X\nVAR\nEND_VAR")).toBe("{attribute 'test'}\nTEST_PROGRAM T_X\nVAR\nEND_VAR");
+    expect(toTestHeader("{attribute 'test'}\nfunction_block T_Y")).toBe("{attribute 'test'}\nTEST_FUNCTION_BLOCK T_Y");
+    const tasks = [...tankTasks(), { name: "Bad", interval: "t#100ms", kind: "Cyclic", pous: ["T_PI_Proportional"] }];
+    const c = composeMirror([...tankNodes(), ...tankTestNodes()], tasks, { plant: parsePlantConfig(TANK_PLANT) });
+    const f = file(c, "T_PI_Proportional").text;
+    expect(f).toMatch(/^\{attribute 'test'\}\nTEST_PROGRAM T_PI_Proportional\n/);
+    expect(f.trimEnd().endsWith("END_TEST_PROGRAM")).toBe(true);
+    expect(file(c, "T_Mode_DefaultsToAuto").text).toContain("GVL_Par.eMode = E_TankMode#AUTO");
+    expect(c.tests.map((t) => t.path)).toEqual(["Tests/T_PI_Proportional", "Tests/T_PI_ResetViaInterface", "Tests/T_Mode_DefaultsToAuto"]);
+    expect(c.files.find((x) => x.path === "src/Configuration.st")!.text).not.toMatch(/T_PI/);
+    expect(c.warnings.join("\n")).toMatch(/Task Bad calls the test T_PI_Proportional; tests only run with run_tests/);
   });
 
   it("strips AT %I* placeholders", () => {
@@ -269,6 +286,23 @@ describe("truST output parsing", () => {
   });
 });
 
+describe("truST test results", () => {
+  it("parses trust-dev JSON and makes file paths project-relative", () => {
+    const json = JSON.stringify({
+      summary: { duration_ms: 952, errors: 0, failed: 1, passed: 1, total: 2 },
+      tests: [
+        { duration_ms: 0, file: "\\\\?\\C:\\m\\Tank-1\\src\\T_A.st", kind: "TEST_PROGRAM", line: 2, message: null, name: "T_A", status: "passed" },
+        { duration_ms: 1, file: "\\\\?\\C:\\m\\Tank-1\\src\\T_B.st", kind: "TEST_PROGRAM", line: 2, message: "ASSERT_EQUAL failed: expected 1, actual 2", name: "T_B", status: "failed" },
+      ],
+      version: 1,
+    });
+    const r = parseTestJson(`${json}\nError: 1 ST test(s) failed`, "C:\\m\\Tank-1")!;
+    expect(r).toMatchObject({ ran: true, total: 2, passed: 1, failed: 1, durationMs: 952 });
+    expect(r.tests[1]).toEqual({ name: "T_B", kind: "TEST_PROGRAM", status: "failed", message: "ASSERT_EQUAL failed: expected 1, actual 2", file: "src/T_B.st", line: 2, durationMs: 1 });
+    expect(parseTestJson("Error: src/T_A.st: expected ';' at 10..12", "C:\\m")).toBeUndefined();
+  });
+});
+
 describe("simulation safety (never a controller)", () => {
   it("only connects to loopback", () => {
     expect(() => assertLoopback("192.168.0.10")).toThrow(/only connects to a local trust-runtime/);
@@ -397,7 +431,7 @@ describe("simulation tools over MCP (fake CODESYS, no truST)", () => {
 
   it("registers the simulation tools", async () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
-    for (const n of ["sync_mirror", "sim_start", "sim_stop", "sim_status", "run_scans", "run_for", "set_breakpoint", "clear_breakpoint", "continue", "step_over", "step_in", "step_out", "read_vars", "write_var", "force_var", "unforce_var", "set_plant_param", "run_experiment", "experiment_log"]) {
+    for (const n of ["sync_mirror", "sim_start", "sim_stop", "sim_status", "run_scans", "run_for", "set_breakpoint", "clear_breakpoint", "continue", "step_over", "step_in", "step_out", "read_vars", "write_var", "force_var", "unforce_var", "set_plant_param", "run_experiment", "experiment_log", "run_tests"]) {
       expect(names).toContain(n);
     }
   });
