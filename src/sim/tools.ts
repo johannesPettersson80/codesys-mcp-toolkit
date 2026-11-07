@@ -13,13 +13,17 @@ import { ScenarioError } from "./scenarios.js";
 /** CODESYS ops the simulation may use. Read-only; nothing that writes or goes online. */
 export const SIM_CODESYS_OPS = ["export", "tasks.list"] as const;
 
-export function codesysSource(bridge: CodesysBridge, project: () => string | undefined, startWaitMs: number): CodesysSource {
+export function codesysSource(bridge: CodesysBridge, project: () => string | undefined, startWaitMs: number, onExport?: (nodes: TreeNode[]) => void): CodesysSource {
   const call = async <T>(op: (typeof SIM_CODESYS_OPS)[number]): Promise<T> => {
     if (!(await bridge.waitReady(startWaitMs))) throw new SimError("codesys_starting", "CODESYS is still starting; try again shortly (codesys_status shows progress).");
     return bridge.call<T>(op, {}, { timeoutMs: 120_000 });
   };
   return {
-    exportSt: async () => (await call<{ nodes: TreeNode[] }>("export")).nodes,
+    exportSt: async () => {
+      const nodes = (await call<{ nodes: TreeNode[] }>("export")).nodes;
+      onExport?.(nodes);
+      return nodes;
+    },
     tasks: async () => (await call<{ tasks: TaskInfo[] }>("tasks.list")).tasks,
     projectPath: project,
   };

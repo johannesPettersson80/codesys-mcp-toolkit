@@ -218,23 +218,47 @@ Paths are CODESYS paths: `PRG_Tank.nTrips`, `GVL_IO.rLevel`,
 
 ### Live panel
 
-`open_sim_panel` opens a live view of the simulation inside the chat, in
-clients that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps)
-(Claude Desktop does):
+`open_sim_panel` opens a live view inside the chat, in clients that support
+[MCP Apps](https://modelcontextprotocol.io/extensions/apps) (Claude Desktop
+does).
 
-- **Status:** running or paused, scan, simulated time, speed, and what
-  Claude is doing right now (e.g. "Experiment 'level step': 120 of 300 s").
-- **Code:** the program, with the current line highlighted and breakpoints
-  marked. Line numbers and text are as in CODESYS.
-- **Plant:** a P&ID drawn from `plant.toml`: the tank level, valves and pumps
-  with their state, and forced values marked F.
-- **I/O and trend:** live values, plus a trend strip of the plant signals that
-  fills in during runs and experiments.
-- **Experiments and events:** each run's metrics, compared with the previous
-  run (green when better), and a log of what happened.
+In the chat it is a compact card:
+- the simulation status and what Claude is doing;
+- the object Claude is working on;
+- how many objects changed this session, the last compile, the test results
+  and the last experiment (compared with the previous run);
+- a small plant view and trend.
 
-The panel is read-only for now; Claude drives the simulation through the tools.
-In clients without MCP Apps, `open_sim_panel` returns a text snapshot instead.
+**Open workspace** switches to full screen, or expands in place where the
+client has no full screen. The workspace is laid out like CODESYS:
+
+- **Project tree** with badges: changed since the session started (A/M),
+  compile errors, breakpoints, where the simulation stopped (▶), test
+  results (✓/✗) and what Claude touched last (✦). There's a filter box.
+- **Editor tabs** with the declaration above the implementation. Line
+  numbers and text are as in CODESYS. The current line is highlighted,
+  breakpoints are marked, and live values show next to the code while
+  stopped. **Diff** shows the changes since the session started.
+- **Inspector:**
+  - a watch list you can add variables to;
+  - locals and the call stack;
+  - breakpoints;
+  - plant I/O.
+- **Bottom tabs:**
+  - the trend;
+  - the plant (a P&ID drawn from `plant.toml`);
+  - tests;
+  - problems: the last compile and simulation warnings;
+  - activity.
+- **Follow Claude** (on by default) opens whatever Claude edits, and the
+  place where the simulation stops.
+
+When you open or select something, the panel tells Claude, so "fix this"
+refers to what is on your screen.
+
+The panel only reads: Claude drives everything through its tools. It never
+calls CODESYS itself, because the tools keep a project cache current as they
+work. In clients without MCP Apps, `open_sim_panel` returns a text snapshot.
 Add `display = { max = 2.5, unit = "m" }` to a `[[plant]]` to fix the tank's
 scale.
 

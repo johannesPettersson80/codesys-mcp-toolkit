@@ -20,14 +20,23 @@ import { createServer } from "../../src/server.js";
 import { SimController } from "../../src/sim/controller.js";
 import { PANEL_URI } from "../../src/sim/panel.js";
 import type { AppContext } from "../../src/tools.js";
-import { LINES, TANK_PLANT, tankNodes, tankTasks } from "../../test/fixtures/tank.js";
+import { LINES, TANK_PLANT, tankNodes, tankTasks, tankTestNodes } from "../../test/fixtures/tank.js";
+import { ProjectCache } from "../../src/codesys/cache.js";
+import { ChangeStore } from "../../src/codesys/changes.js";
 
 export async function startDevHost(port: number, hostJs: string, pageHtml: string): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "cmcp-devhost-"));
   const project = join(root, "Tank.project");
   writeFileSync(join(root, "Tank.plant.toml"), TANK_PLANT.replace('initial_state = [0.2]', 'initial_state = [0.2]\ndisplay = { max = 2.5, unit = "m", label = "T101" }'));
-  const sim = new SimController({ exportSt: async () => tankNodes(), tasks: async () => tankTasks(), projectPath: () => project }, { mirrorRoot: join(root, "mirrors"), log: (m) => console.error(m) });
-  const ctx = { bridge: {} as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, sim } as AppContext;
+  const sim = new SimController({ exportSt: async () => structuredClone(cache.nodes ?? tankNodes()), tasks: async () => tankTasks(), projectPath: () => project }, { mirrorRoot: join(root, "mirrors"), log: (m) => console.error(m) });
+  // The dev host has no CODESYS: feed the workspace cache from the fixture, as the CODESYS tools would.
+  const cache = new ProjectCache();
+  const changes = new ChangeStore(join(root, "checkpoints"));
+  const nodes = [...tankNodes(), ...tankTestNodes()];
+  cache.reset(project);
+  cache.setAll(structuredClone(nodes));
+  await changes.sessionStart(project, async () => nodes);
+  const ctx = { bridge: {} as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes, project: { path: project } } as AppContext;
   const server = createServer(ctx);
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
@@ -59,6 +68,17 @@ export async function startDevHost(port: number, hostJs: string, pageHtml: strin
       await step("unforce_var", { name: "GVL_IO.lrLT101_Level" });
       await step("clear_breakpoint", { all: true });
       await step("run_for", { seconds: 2 });
+    } else if (which === "edit") {
+      // What write_object does to the cache: Claude changes FB_PI's anti-windup.
+      const fb = cache.get("FB_PI")!;
+      cache.upsert({ ...fb, implementation: fb.implementation!.replace("rI := LIMIT(0.0, rI + _rKp * rE * rCycleS / _rTi, 100.0);", "IF rY > 0.0 AND rY < 100.0 THEN // anti-windup\n        rI := LIMIT(0.0, rI + _rKp * rE * rCycleS / _rTi, 100.0);\n    END_IF") });
+      cache.touch("FB_PI", "write");
+    } else if (which === "compile") {
+      cache.setCompile({ at: new Date().toISOString(), errors: 1, warnings: 1, messages: [
+        { severity: "error", text: "Identifier 'rIntegral' not defined", object: "FB_PI", position: "Line 4, Column 9 (Impl)", code: "C0077" },
+        { severity: "warning", text: "Unused variable 'rE'", object: "FB_PI", position: "Line 14, Column 5 (Decl)", code: "C0373" },
+      ] });
+      await step("run_tests");
     }
   };
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { ChangeStore, diffObjects, formatDiff, lineDiff, snapshot } from "../src/codesys/changes.js";
+import { ProjectCache } from "../src/codesys/cache.js";
 import { parseDeclaration, signature } from "../src/codesys/decl.js";
 import { buildOutline, ioList } from "../src/codesys/outline.js";
 import type { TreeNode } from "../src/codesys/st.js";
@@ -191,7 +192,7 @@ describe("project tools over MCP (fake CODESYS)", () => {
   };
 
   beforeAll(async () => {
-    ctx = { bridge: fakeBridge(), autosave: true, workspace: tempDir(), startWaitMs: 20_000, changes: new ChangeStore(tempDir("cmcp-cps-")) };
+    ctx = { bridge: fakeBridge(), autosave: true, workspace: tempDir(), startWaitMs: 20_000, changes: new ChangeStore(tempDir("cmcp-cps-")), cache: new ProjectCache() };
     const server = createServer(ctx);
     const [a, b] = InMemoryTransport.createLinkedPair();
     await server.connect(a);
@@ -227,6 +228,36 @@ describe("project tools over MCP (fake CODESYS)", () => {
     expect((await call("read_objects", { paths: ["PLC_PRG"] })).text).toBe(before);
     expect((await call("checkpoint")).text).toMatch(/session-start/);
     expect((await call("get_changes", { since: "nope" })).text).toMatch(/No checkpoint 'nope'\. Checkpoints: session-start/);
+  });
+
+  it("keeps the workspace cache current as a side effect of the tools", async () => {
+    const cache = ctx.cache!;
+    expect(cache.project).toMatch(/Sample\.project$/);
+    expect(cache.get("PLC_PRG")).toBeDefined();
+    let v = cache.version;
+    await call("write_object", { path: "PLC_PRG", implementation: "y := 7;" });
+    expect(cache.get("PLC_PRG")!.implementation).toBe("y := 7;");
+    expect(cache.focus).toMatchObject({ path: "PLC_PRG", action: "write" });
+    expect(cache.version).toBeGreaterThan(v);
+    await call("create_object", { kind: "function_block", name: "FB_Cache" });
+    expect(cache.get("FB_Cache")).toMatchObject({ kind: "pou", sub: "function_block" });
+    await call("rename_object", { path: "FB_Cache", newName: "FB_Cache2" });
+    expect(cache.get("FB_Cache")).toBeUndefined();
+    expect(cache.get("FB_Cache2")).toBeDefined();
+    await call("delete_object", { path: "FB_Cache2" });
+    expect(cache.get("FB_Cache2")).toBeUndefined();
+    expect(cache.focus).toMatchObject({ path: "FB_Cache2", action: "delete" });
+    await call("write_object", { path: "PLC_PRG", implementation: "ERROR_HERE" });
+    v = cache.version;
+    await call("compile");
+    expect(cache.compile).toMatchObject({ errors: 1 });
+    expect(cache.compile!.messages[0]).toMatchObject({ severity: "error", object: expect.stringMatching(/PLC_PRG/) });
+    expect(cache.version).toBeGreaterThan(v);
+    await call("revert_object", { path: "PLC_PRG" });
+    expect(cache.focus).toMatchObject({ path: "PLC_PRG", action: "revert" });
+    await call("close_project");
+    expect(cache.nodes).toBeUndefined();
+    await call("open_project", { path: cache.project ?? fakeProjectFile() });
   });
 
   it("reports library reading as unavailable where CODESYS has no library manager", async () => {

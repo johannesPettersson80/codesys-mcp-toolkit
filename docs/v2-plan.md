@@ -377,6 +377,30 @@ not flood the model's context.
 - **To check:** whether Claude Desktop supports the MCP Apps full-screen
   display mode. If not, the workspace works inline with collapsible regions.
 
+**Status (2026-11-07): done, read-only.** One panel with two layouts, picked
+from the host's display mode:
+- **In the chat:** a compact card.
+- **Full screen:** the workspace. Where the host has no full screen, it
+  expands inline instead.
+
+Verified in the dev host, which acts as a full-screen-capable host through
+the ext-apps AppBridge:
+- a breakpoint stop opens `PRG_Tank` at line 11 with inline values;
+- Claude's edit of `FB_PI` opens with an M badge and a correct diff;
+- compile problems link to their objects;
+- clicking a line sends "the user selected FB_PI implementation line 5: …"
+  as model context.
+
+Design decision: **the panel never calls CODESYS.** The bridge is serial, so
+panel polling would stall the model's tools. Instead the tools keep a
+`ProjectCache` current as a side effect of their own calls (open, export,
+read, write, create, delete, rename, revert, compile, and the simulation's
+sync), and the workspace reads that. The cache carries a version, so polling
+is cheap when nothing changed.
+
+Not verified: Claude Desktop's own full-screen support. The panel falls back
+to expanding inline.
+
 ### Phase 7: interaction (the old Phase 4)
 
 On top of the workspace:

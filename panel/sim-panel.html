@@ -3,21 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CODESYS simulation</title>
+<title>CODESYS workspace</title>
 <style>
 :root {
   --bg: var(--color-background-primary, #ffffff);
-  --bg2: var(--color-background-secondary, #f5f5f4);
+  --bg2: var(--color-background-secondary, #f6f5f3);
+  --bg3: var(--color-background-tertiary, #efede9);
   --fg: var(--color-text-primary, #1c1917);
-  --fg2: var(--color-text-secondary, #57534e);
-  --line: var(--color-border-primary, #e7e5e4);
+  --fg2: var(--color-text-secondary, #6b6560);
+  --line: var(--color-border-primary, #e4e1dd);
   --accent: var(--color-text-info, #2563eb);
+  --accent-soft: rgba(37, 99, 235, 0.10);
   --ok: #16a34a;
   --warn: #d97706;
   --bad: #dc2626;
   --water: #3b82f6;
-  --water-bg: rgba(59, 130, 246, 0.12);
-  --hl: rgba(250, 204, 21, 0.28);
+  --water-bg: rgba(59, 130, 246, 0.14);
+  --hl: rgba(250, 204, 21, 0.30);
+  --add: rgba(22, 163, 74, 0.12);
+  --del: rgba(220, 38, 38, 0.10);
   --font: var(--font-sans, system-ui, -apple-system, "Segoe UI", sans-serif);
   --mono: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
   --radius: var(--border-radius-md, 8px);
@@ -25,101 +29,198 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: var(--color-background-primary, #1c1b1a);
-    --bg2: var(--color-background-secondary, #262523);
-    --fg: var(--color-text-primary, #f5f5f4);
-    --fg2: var(--color-text-secondary, #a8a29e);
-    --line: var(--color-border-primary, #3a3835);
-    --hl: rgba(250, 204, 21, 0.18);
+    --bg: var(--color-background-primary, #1c1b1a); --bg2: var(--color-background-secondary, #242321); --bg3: var(--color-background-tertiary, #2c2a28);
+    --fg: var(--color-text-primary, #f5f5f4); --fg2: var(--color-text-secondary, #a29d98); --line: var(--color-border-primary, #3a3835);
+    --accent: var(--color-text-info, #60a5fa); --accent-soft: rgba(96, 165, 250, 0.14); --hl: rgba(250, 204, 21, 0.18);
   }
 }
 :root[data-theme="dark"] {
-  --bg: var(--color-background-primary, #1c1b1a);
-  --bg2: var(--color-background-secondary, #262523);
-  --fg: var(--color-text-primary, #f5f5f4);
-  --fg2: var(--color-text-secondary, #a8a29e);
-  --line: var(--color-border-primary, #3a3835);
-  --hl: rgba(250, 204, 21, 0.18);
+  --bg: var(--color-background-primary, #1c1b1a); --bg2: var(--color-background-secondary, #242321); --bg3: var(--color-background-tertiary, #2c2a28);
+  --fg: var(--color-text-primary, #f5f5f4); --fg2: var(--color-text-secondary, #a29d98); --line: var(--color-border-primary, #3a3835);
+  --accent: var(--color-text-info, #60a5fa); --accent-soft: rgba(96, 165, 250, 0.14); --hl: rgba(250, 204, 21, 0.18);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 var(--font); }
-body { padding: 10px; }
-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; background: var(--bg2); font-weight: 600; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg2); }
+button { font: inherit; color: inherit; }
+.hidden { display: none !important; }
+.muted { color: var(--fg2); }
+.mono { font-family: var(--mono); }
+
+/* shared bits */
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; background: var(--bg2); font-weight: 600; white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg2); flex: none; }
 .pill.running .dot { background: var(--ok); animation: pulse 1s infinite; }
 .pill.paused .dot { background: var(--warn); }
-.pill.stopped .dot { background: var(--fg2); }
 @keyframes pulse { 50% { opacity: 0.35; } }
-.meta { color: var(--fg2); font-variant-numeric: tabular-nums; }
-.activity { color: var(--accent); flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.badge { margin-left: auto; font-size: 11px; color: var(--fg2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.badge { font-size: 11px; color: var(--fg2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .badge.warn { color: var(--warn); border-color: var(--warn); cursor: help; }
-.grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; }
-@media (max-width: 680px) { .grid { grid-template-columns: minmax(0, 1fr); } }
-.card { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
-.card h2 { margin: 0; padding: 6px 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg2); background: var(--bg2); border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
-.card h2 .sub { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.code { font: 12px/1.5 var(--mono); overflow: auto; height: 330px; padding: 4px 0; }
-.ln { display: grid; grid-template-columns: 14px 34px minmax(0, 1fr); white-space: pre; }
-.ln .bp { color: var(--bad); text-align: center; }
-.ln .no { color: var(--fg2); text-align: right; padding-right: 10px; user-select: none; }
-.ln .tx { padding-right: 10px; }
-.ln.decl .tx { color: var(--fg2); }
-.ln.gen .tx { color: var(--fg2); font-style: italic; }
-.ln.cur { background: var(--hl); }
-.ln.cur .no { color: var(--fg); font-weight: 700; }
-.sect { font: 600 11px var(--font); color: var(--accent); padding: 6px 10px 2px 48px; }
-.right { display: grid; gap: 10px; grid-template-rows: auto 1fr; min-height: 0; }
-.pid svg { display: block; width: 100%; height: 200px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--bg2); }
+.btn.primary { border-color: var(--accent); color: var(--accent); }
+.btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.empty { color: var(--fg2); padding: 10px 12px; }
+.banner { display: none; padding: 8px 10px; border-radius: var(--radius); background: var(--bg2); color: var(--fg2); margin: 8px; }
+body.superseded .banner { display: block; }
+body.superseded #card, body.superseded #ws { opacity: 0.45; pointer-events: none; }
+
+/* ---------------- card (inline in the chat) */
+#card { padding: 10px; }
+.card-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.card-top .meta { color: var(--fg2); font-variant-numeric: tabular-nums; }
+.card-top .activity { color: var(--accent); flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0; }
+.fact { display: flex; gap: 6px; align-items: baseline; }
+.fact b { font-weight: 600; }
+.good { color: var(--ok); } .bad { color: var(--bad); } .warnc { color: var(--warn); }
+.card-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 10px; }
+@media (max-width: 560px) { .card-body { grid-template-columns: minmax(0, 1fr); } }
+.box { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--bg); }
+.box h3 { margin: 0; padding: 5px 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg2); background: var(--bg2); border-bottom: 1px solid var(--line); }
+.pid svg { display: block; width: 100%; height: 170px; }
 .pid text { font: 11px var(--font); fill: var(--fg); }
 .pid .small { font-size: 10px; fill: var(--fg2); }
+canvas.trend { display: block; width: 100%; height: 60px; }
+
+/* ---------------- workspace */
+#ws { display: grid; grid-template-rows: auto minmax(0, 1fr) var(--bottom-h, 220px); height: var(--ws-h, 100vh); min-height: 520px; }
+body.inline-expanded #ws { --ws-h: 780px; }
+.ws-top { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--bg2); flex-wrap: wrap; }
+.ws-top .meta { color: var(--fg2); font-variant-numeric: tabular-nums; }
+.ws-top .activity { color: var(--accent); flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-main { display: grid; grid-template-columns: var(--tree-w, 250px) minmax(0, 1fr) var(--insp-w, 290px); min-height: 0; }
+@media (max-width: 900px) { .ws-main { grid-template-columns: 200px minmax(0, 1fr); } .inspector { display: none; } }
+.pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--line); }
+.pane:last-child { border-right: 0; }
+.pane-head { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--bg2); min-height: 32px; }
+.pane-head .title { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg2); }
+.scroll { overflow: auto; min-height: 0; flex: 1; }
+
+/* tree */
+.filter { flex: 1; min-width: 0; height: 24px; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; background: var(--bg); color: var(--fg); font: inherit; }
+.tree { padding: 4px 0; font-size: 12.5px; }
+.tn { display: flex; align-items: center; gap: 5px; height: 24px; padding-right: 8px; cursor: pointer; white-space: nowrap; }
+.tn:hover { background: var(--bg2); }
+.tn.sel { background: var(--accent-soft); }
+.tn .tw { width: 14px; text-align: center; color: var(--fg2); flex: none; font-size: 10px; }
+.tn .ic { width: 20px; height: 16px; border-radius: 4px; display: grid; place-items: center; font: 600 9px var(--mono); flex: none; background: var(--bg3); color: var(--fg2); }
+.ic.k-program { background: rgba(37,99,235,.12); color: #2563eb; }
+.ic.k-function_block { background: rgba(147,51,234,.12); color: #9333ea; }
+.ic.k-function { background: rgba(8,145,178,.12); color: #0891b2; }
+.ic.k-gvl { background: rgba(217,119,6,.12); color: #d97706; }
+.ic.k-dut { background: rgba(22,163,74,.12); color: #16a34a; }
+.ic.k-interface { background: rgba(219,39,119,.12); color: #db2777; }
+.ic.k-test { background: rgba(101,163,13,.14); color: #65a30d; }
+.tn .nm { overflow: hidden; text-overflow: ellipsis; }
+.tn.dim .nm { color: var(--fg2); }
+.tn .marks { margin-left: auto; display: flex; gap: 4px; align-items: center; flex: none; }
+.mk { font-size: 10px; font-weight: 700; line-height: 1; }
+.mk.A { color: var(--ok); } .mk.M { color: var(--warn); }
+.mk.err { color: #fff; background: var(--bad); border-radius: 8px; padding: 2px 5px; }
+.mk.bp { color: var(--bad); }
+.mk.here { color: var(--warn); }
+.mk.claude { color: var(--accent); animation: pulse 1.2s infinite; }
+.mk.fail { color: var(--bad); }
+.removed { padding: 6px 10px; font-size: 12px; color: var(--fg2); border-top: 1px solid var(--line); }
+
+/* editor */
+.tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: thin; flex: 1; min-width: 0; }
+.tab { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px 0 10px; border-radius: 6px 6px 0 0; border: 1px solid transparent; border-bottom: 0; cursor: pointer; white-space: nowrap; color: var(--fg2); }
+.tab.active { background: var(--bg); border-color: var(--line); color: var(--fg); }
+.tab .x { border: 0; background: none; cursor: pointer; color: var(--fg2); padding: 0 3px; border-radius: 4px; }
+.tab .x:hover { background: var(--bg3); }
+.editor { font: 12.5px/1.55 var(--mono); padding: 4px 0 20px; }
+.part { font: 600 11px var(--font); color: var(--fg2); padding: 8px 12px 2px 64px; letter-spacing: 0.03em; text-transform: uppercase; }
+.ln { display: grid; grid-template-columns: 16px 40px minmax(0, 1fr); white-space: pre; cursor: default; }
+.ln:hover { background: var(--bg2); }
+.ln .bp { color: var(--bad); text-align: center; }
+.ln .no { color: var(--fg2); text-align: right; padding-right: 12px; user-select: none; }
+.ln .tx { padding-right: 12px; }
+.ln.cur { background: var(--hl); }
+.ln.cur .no { color: var(--fg); font-weight: 700; }
+.ln.sel { box-shadow: inset 3px 0 0 var(--accent); }
+.ln.add { background: var(--add); }
+.ln.del { background: var(--del); }
+.ln.del .tx { text-decoration: line-through; color: var(--fg2); }
+.ln .val { display: inline-block; margin-left: 12px; padding: 0 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: 11px; }
+.kw { color: #9333ea; } .ty { color: #0891b2; } .cm { color: var(--fg2); font-style: italic; } .st { color: #16a34a; } .nu { color: #d97706; }
+:root[data-theme="dark"] .kw { color: #c084fc; } :root[data-theme="dark"] .ty { color: #22d3ee; } :root[data-theme="dark"] .st { color: #4ade80; } :root[data-theme="dark"] .nu { color: #fbbf24; }
+.edit-tools { display: flex; gap: 6px; align-items: center; margin-left: auto; }
+
+/* inspector + bottom */
+.seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--bg3); gap: 2px; overflow-x: auto; max-width: 100%; }
+.seg button { height: 22px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--fg2); cursor: pointer; white-space: nowrap; }
+.seg button[aria-pressed="true"] { background: var(--bg); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 td { padding: 3px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: top; }
-td .r { font-size: 10px; }
 td.v { text-align: right; font-family: var(--mono); }
-td.r { color: var(--fg2); font-size: 11px; }
+td .r { font-size: 10px; color: var(--fg2); }
 tr:last-child td { border-bottom: 0; }
-.io { overflow: auto; max-height: 150px; }
 .forced { color: var(--warn); font-weight: 700; font-size: 10px; margin-left: 4px; }
-.trend { margin-top: 10px; }
-.trend canvas { display: block; width: 100%; height: 60px; }
-.bottom { margin-top: 10px; }
-.list { overflow: auto; max-height: 150px; }
-.list div { padding: 3px 10px; border-bottom: 1px solid var(--line); }
+.add-watch { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.pinbtn { border: 0; background: none; color: var(--fg2); cursor: pointer; padding: 0 2px; }
+.bottom { display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--line); }
+.list div.row { padding: 4px 10px; border-bottom: 1px solid var(--line); }
 .list .t { color: var(--fg2); font-variant-numeric: tabular-nums; margin-right: 6px; }
-.exp b { font-weight: 600; }
-.exp .m { color: var(--fg2); }
-.better { color: var(--ok); }
-.worse { color: var(--bad); }
-.empty { color: var(--fg2); padding: 10px; }
-.banner { display: none; padding: 8px 10px; margin-bottom: 8px; border-radius: var(--radius); background: var(--bg2); color: var(--fg2); }
-body.superseded .banner { display: block; }
-body.superseded main { opacity: 0.45; pointer-events: none; }
+.list .err { color: var(--bad); font-weight: 600; } .list .wrn { color: var(--warn); font-weight: 600; }
+.bottom canvas { display: block; width: 100%; }
+.bottom .pid svg { height: 190px; }
 </style>
 </head>
 <body>
-<div class="banner">A newer simulation panel is open; this one stopped updating.</div>
-<header>
-  <span id="status" class="pill stopped"><span class="dot"></span><span id="statusText">Connecting</span></span>
-  <span id="meta" class="meta"></span>
-  <span id="activity" class="activity"></span>
-  <span id="badge" class="badge">Simulated in truST</span>
-</header>
-<main>
-  <div class="grid">
-    <section class="card"><h2>Code <span id="codeTitle" class="sub"></span></h2><div id="code" class="code"><div class="empty">No code yet.</div></div></section>
-    <div class="right">
-      <section class="card pid"><h2>Plant</h2><div id="pid"></div></section>
-      <section class="card"><h2>I/O</h2><div id="io" class="io"></div></section>
-    </div>
+<div class="banner">A newer panel is open; this one stopped updating.</div>
+
+<section id="card" class="hidden">
+  <div class="card-top">
+    <span id="c-status" class="pill"><span class="dot"></span><span id="c-statusText">Connecting</span></span>
+    <span id="c-meta" class="meta"></span>
+    <span id="c-activity" class="activity"></span>
+    <button id="c-open" class="btn primary" title="Open the full workspace">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/></svg>Open workspace</button>
   </div>
-  <section class="card trend"><h2>Trend <span id="trendInfo" class="sub"></span></h2><canvas id="trend" height="150"></canvas></section>
-  <div class="grid bottom">
-    <section class="card"><h2>Experiments</h2><div id="exps" class="list"><div class="empty">No experiments yet.</div></div></section>
-    <section class="card"><h2>Events</h2><div id="events" class="list"><div class="empty">No events yet.</div></div></section>
+  <div id="c-facts" class="facts"></div>
+  <div class="card-body">
+    <div class="box pid"><h3>Plant</h3><div id="c-pid"></div></div>
+    <div class="box"><h3>Trend</h3><canvas id="c-trend" class="trend"></canvas></div>
   </div>
-</main>
+</section>
+
+<section id="ws" class="hidden">
+  <div class="ws-top">
+    <span id="w-status" class="pill"><span class="dot"></span><span id="w-statusText">Connecting</span></span>
+    <span id="w-meta" class="meta"></span>
+    <span id="w-activity" class="activity"></span>
+    <button id="w-follow" class="btn" aria-pressed="true" title="Open what Claude works on, and where the simulation stops">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="2.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"/></svg>Follow Claude</button>
+    <span id="w-badge" class="badge">Simulated in truST</span>
+    <button id="w-close" class="btn" title="Back to the compact view">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5 14 2M6.5 9.5 2 14"/></svg>Compact</button>
+  </div>
+  <div class="ws-main">
+    <section class="pane">
+      <div class="pane-head"><input id="w-filter" class="filter" placeholder="Filter objects" aria-label="Filter objects"></div>
+      <div id="w-tree" class="scroll tree"><div class="empty">Open a project to see its tree.</div></div>
+    </section>
+    <section class="pane">
+      <div class="pane-head">
+        <div id="w-tabs" class="tabs"></div>
+        <div class="edit-tools"><button id="w-diff" class="btn" aria-pressed="false" title="Show changes since the session started">Diff</button></div>
+      </div>
+      <div id="w-editor" class="scroll editor"><div class="empty">Select an object in the tree.</div></div>
+    </section>
+    <section class="pane inspector">
+      <div class="pane-head"><div class="seg" id="w-insp-tabs">
+        <button data-t="watch" aria-pressed="true">Watch</button><button data-t="locals" aria-pressed="false">Locals</button><button data-t="bps" aria-pressed="false">Breakpoints</button><button data-t="io" aria-pressed="false">I/O</button>
+      </div></div>
+      <div id="w-insp" class="scroll"></div>
+    </section>
+  </div>
+  <section class="bottom">
+    <div class="pane-head"><div class="seg" id="w-bottom-tabs">
+      <button data-t="trend" aria-pressed="true">Trend</button><button data-t="plant" aria-pressed="false">Plant</button><button data-t="tests" aria-pressed="false">Tests</button><button data-t="problems" aria-pressed="false">Problems</button><button data-t="activity" aria-pressed="false">Activity</button>
+    </div><span id="w-bottom-info" class="muted" style="margin-left:auto;font-size:11px"></span></div>
+    <div id="w-bottom" class="scroll"></div>
+  </section>
+</section>
 <script>/*PANEL_SCRIPT*/</script>
 </body>
 </html>

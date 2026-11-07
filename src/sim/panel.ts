@@ -16,6 +16,9 @@ import { getUiCapability, registerAppResource, registerAppTool, RESOURCE_MIME_TY
 import * as z from "zod/v4";
 import type { SimController } from "./controller.js";
 import type { PanelState } from "./panel-types.js";
+import type { ProjectCache } from "../codesys/cache.js";
+import { diffObjects, snapshot, type ChangeStore, type SnapObject } from "../codesys/changes.js";
+import { parseDeclaration } from "../codesys/decl.js";
 
 export const PANEL_URI = "ui://codesys/sim-panel.html";
 
@@ -34,7 +37,14 @@ let latestPanel: string | undefined;
 
 const json = (data: object) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }], structuredContent: data as Record<string, unknown> });
 
-export function registerPanel(server: McpServer, sim: SimController): void {
+/** What the workspace reads besides the simulation. */
+export interface WorkspaceDeps {
+  cache?: ProjectCache;
+  changes?: ChangeStore;
+  project: () => string | undefined;
+}
+
+export function registerPanel(server: McpServer, sim: SimController, ws: WorkspaceDeps = { project: () => undefined }): void {
   registerAppResource(
     server,
     "CODESYS simulation panel",
@@ -129,6 +139,127 @@ export function registerPanel(server: McpServer, sim: SimController): void {
         _meta: appOnly,
       },
       async ({ epoch, since }) => json(sim.trend(epoch, since)),
+    ),
+  );
+
+  // ---- workspace: project tree, objects, inspector
+
+  let baseline: { project: string; objects: Map<string, SnapObject> } | undefined;
+  const sessionBase = async (): Promise<Map<string, SnapObject> | undefined> => {
+    const project = ws.project();
+    if (!project || !ws.changes) return undefined;
+    if (baseline?.project !== project) {
+      const cp = await ws.changes.load(project, "session-start");
+      if (!cp) return undefined;
+      baseline = { project, objects: new Map(cp.objects.map((o) => [o.path.toLowerCase(), o] as const)) };
+    }
+    return baseline.objects;
+  };
+
+  tools.push(
+    registerAppTool(
+      server,
+      "get_workspace",
+      {
+        description: "Panel: the project tree with badges (changed since session start, compile errors), the last compile and what Claude touched last. Answers {unchanged} when version matches.",
+        inputSchema: z.object({ version: z.number().int().optional() }),
+        annotations: { readOnlyHint: true },
+        _meta: appOnly,
+      },
+      async ({ version }) => {
+        const cache = ws.cache;
+        if (!cache) return json({ version: 0, tree: null, reason: "no cache" });
+        if (version !== undefined && version === cache.version && cache.nodes) return json({ unchanged: true, version: cache.version });
+        if (!cache.nodes) return json({ version: cache.version, project: ws.project() ?? null, tree: null });
+        const base = await sessionBase();
+        const changes = base ? diffObjects([...base.values()], snapshot(cache.nodes)) : [];
+        const changeOf = new Map(changes.map((c) => [c.path.toLowerCase(), c.change] as const));
+        const problems = new Map<string, { errors: number; warnings: number }>();
+        for (const m of cache.compile?.messages ?? []) {
+          if (!m.object) continue;
+          const k = m.object.replace(/^\/+/, "").toLowerCase();
+          const p = problems.get(k) ?? { errors: 0, warnings: 0 };
+          if (m.severity === "error") p.errors++;
+          else p.warnings++;
+          problems.set(k, p);
+        }
+        const tree = cache.nodes.map((n) => {
+          const k = n.path.toLowerCase();
+          const ch = changeOf.get(k);
+          const pr = problems.get(k);
+          const attrs = parseDeclaration(n.declaration).header.attributes;
+          return {
+            path: n.path,
+            name: n.name,
+            kind: n.kind,
+            ...(n.sub ? { sub: n.sub } : {}),
+            depth: n.depth,
+            ...(n.st === false ? { st: false } : {}),
+            ...(ch ? { change: ch === "added" ? "A" : "M" } : {}),
+            ...(pr ? pr : {}),
+            ...(attrs.some((a) => a.toLowerCase() === "test") ? { test: true } : {}),
+          };
+        });
+        return json({
+          version: cache.version,
+          project: ws.project() ?? null,
+          tree,
+          removed: changes.filter((c) => c.change === "removed").map((c) => c.path),
+          changeCount: changes.length,
+          compile: cache.compile ?? null,
+          focus: cache.focus ?? null,
+        });
+      },
+    ),
+  );
+
+  tools.push(
+    registerAppTool(
+      server,
+      "get_object",
+      {
+        description: "Panel: one object's CODESYS text, and its text at session start for the diff view.",
+        inputSchema: z.object({ path: z.string() }),
+        annotations: { readOnlyHint: true },
+        _meta: appOnly,
+      },
+      async ({ path }) => {
+        const n = ws.cache?.get(path);
+        const base = (await sessionBase())?.get(path.toLowerCase());
+        if (!n && !base) return json({ object: null });
+        return json({
+          object: n ? { path: n.path, name: n.name, kind: n.kind, sub: n.sub ?? null, st: n.st ?? null, declaration: n.declaration ?? null, implementation: n.implementation ?? null } : null,
+          base: base ? { declaration: base.declaration ?? null, implementation: base.implementation ?? null } : null,
+        });
+      },
+    ),
+  );
+
+  tools.push(
+    registerAppTool(
+      server,
+      "get_locals",
+      {
+        description: "Panel: locals and call stack while the simulation is paused in user code.",
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: true },
+        _meta: appOnly,
+      },
+      async () => json(await sim.panelLocals().catch(() => ({ paused: false, stack: [], locals: [] }))),
+    ),
+  );
+
+  tools.push(
+    registerAppTool(
+      server,
+      "get_values",
+      {
+        description: "Panel: current values of watched variables.",
+        inputSchema: z.object({ names: z.array(z.string()).max(50) }),
+        annotations: { readOnlyHint: true },
+        _meta: appOnly,
+      },
+      async ({ names }) => json({ values: await sim.panelValues(names).catch(() => ({})) }),
     ),
   );
 

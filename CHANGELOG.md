@@ -39,10 +39,19 @@ Rewrite. See README "Migrating from v1".
   regression checks.
 - `run_tests`: unit tests that live in the CODESYS project as programs marked
   `{attribute 'test'}`, run in truST, with results by CODESYS object.
-- `open_sim_panel`: a live, read-only simulation panel (MCP App) with the
-  code and current line, a P&ID from `plant.toml`, I/O, trends, experiments
-  and events. App-only tools `get_sim_state`, `get_events`, `get_source`,
-  `get_trend` are hidden from clients without MCP Apps support.
+- `open_sim_panel`: a live, read-only panel (MCP App).
+  - **In the chat:** a compact card with status, what Claude is working on,
+    changes, compile, tests and experiments.
+  - **Full screen:** a CODESYS-style workspace with the project tree and
+    badges, editor tabs (current line, breakpoints, inline values, diff
+    against the session start), an inspector (watch, locals, breakpoints,
+    I/O), and trend, plant, tests, problems and activity tabs.
+  - **Follow Claude** opens what Claude edits and where the simulation stops.
+  - **Selections** are sent to Claude as model context.
+  - **Panel-only tools** (`get_sim_state`, `get_events`, `get_source`,
+    `get_trend`, `get_workspace`, `get_object`, `get_locals`, `get_values`)
+    are hidden from clients without MCP Apps support. They read a project
+    cache that the tools keep current, so the panel never calls CODESYS.
 
 ### Fixed
 - `compile` returns errors and warnings with object, line and code (#10).

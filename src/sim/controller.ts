@@ -973,6 +973,42 @@ export class SimController {
     }
   }
 
+  /**
+   * Locals and call stack while paused inside user code (read-only; for the
+   * workspace inspector and inline values).
+   */
+  async panelLocals(): Promise<{ paused: boolean; stack: { obj?: string; line?: number; name: string }[]; locals: { name: string; type: string; value: string; expandable: boolean }[] }> {
+    if (!this.running) return { paused: false, stack: [], locals: [] };
+    const c = this.ctl();
+    const st = await c.request<{ paused: boolean; last_stop?: { path?: string } | null }>("debug.state");
+    if (!st.paused || !st.last_stop || (st.last_stop.path ?? "").toLowerCase().endsWith(HARNESS_FILE.toLowerCase())) return { paused: st.paused, stack: [], locals: [] };
+    const frames = await c.request<{ stack_frames: { name: string; line: number; source?: { path?: string } }[] }>("debug.stack").catch(() => ({ stack_frames: [] }));
+    const stack = frames.stack_frames.map((f) => {
+      const o = f.source?.path ? fromMirror(this.files(), f.source.path, f.line) : undefined;
+      return o ? { obj: o.obj, line: o.line, name: f.name } : { name: f.name };
+    });
+    const sc = await c.request<{ scopes: { name: string; variablesReference: number }[] }>("debug.scopes", { frame_id: 1 }).catch(() => ({ scopes: [] }));
+    const ref = sc.scopes.find((s) => s.name === "Locals")?.variablesReference;
+    if (!ref) return { paused: true, stack, locals: [] };
+    const v = await c.request<{ variables: { name: string; type: string; value: string; variablesReference: number }[] }>("debug.variables", { variables_reference: ref });
+    return { paused: true, stack, locals: v.variables.map((x) => ({ name: x.name, type: x.type, value: this.asCodesys(x.value), expandable: x.variablesReference > 0 })) };
+  }
+
+  /** Values of chosen variables (watch list). */
+  async panelValues(names: string[]): Promise<Record<string, { value?: string; num?: number | null; error?: string }>> {
+    const out: Record<string, { value?: string; num?: number | null; error?: string }> = {};
+    if (!this.running) return out;
+    for (const n of names.slice(0, 50)) {
+      try {
+        const v = await this.readValue(n);
+        out[n] = { value: formatValue(v), num: numeric(v) ?? null };
+      } catch (e) {
+        out[n] = { error: /unknown identifier/i.test((e as Error).message) ? "unknown" : (e as Error).message };
+      }
+    }
+    return out;
+  }
+
   /** The mirror file holding an object (or the current stop, or the first program), as CODESYS lines. */
   async sourceView(obj?: string): Promise<SourceView | undefined> {
     if (!this.manifest) return undefined;

@@ -17,7 +17,7 @@ export function createServer(ctx: AppContext): McpServer {
   registerTools(server, ctx);
   if (ctx.sim) {
     registerSimTools(server, ctx.sim);
-    registerPanel(server, ctx.sim);
+    registerPanel(server, ctx.sim, { cache: ctx.cache, changes: ctx.changes, project: () => ctx.project?.path });
   }
   return server;
 }

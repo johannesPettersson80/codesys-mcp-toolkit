@@ -9,6 +9,7 @@ import type { SimController } from "./sim/controller.js";
 import { buildOutline, ioList, type OutlineTask } from "./codesys/outline.js";
 import { diffObjects, formatDiff, lineDiff, snapshot, type ChangeStore, type SnapObject } from "./codesys/changes.js";
 import { parseDeclaration } from "./codesys/decl.js";
+import type { ProjectCache } from "./codesys/cache.js";
 import { checkDeclaration, kindLabel, normalizeText, type CreateKind, type TreeNode } from "./codesys/st.js";
 
 export interface AppContext {
@@ -29,6 +30,8 @@ export interface AppContext {
   sim?: SimController;
   /** Checkpoints and change tracking (absent when disabled). */
   changes?: ChangeStore;
+  /** What the server knows about the open project, for the workspace panel. */
+  cache?: ProjectCache;
 }
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
@@ -108,10 +111,39 @@ export function formatBuild(messages: BuildMessage[]): { text: string; errors: n
 
 export function registerTools(server: McpServer, ctx: AppContext): void {
   const b = ctx.bridge;
-  /** Take the session-start checkpoint the first time a project is opened in this process. */
+  const cache = ctx.cache;
+  /** Export all ST (and keep the workspace cache current). */
+  const exportNodes = async (): Promise<TreeNode[]> => {
+    const nodes = (await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 })).nodes;
+    cache?.setAll(nodes);
+    return nodes;
+  };
+  /** Re-read one object into the cache after a change (best effort). */
+  const refresh = async (path: string, action: "write" | "create" | "revert") => {
+    if (!cache) return;
+    try {
+      const o = (await b.call<{ objects: (TreeNode & { error?: string })[] }>("objects.read", { paths: [path] })).objects[0];
+      if (o && !o.error) cache.upsert(o);
+    } catch {
+      /* the cache is best effort */
+    }
+    cache.touch(path, action);
+  };
+  /**
+   * After opening a project: fill the cache with one export, and take the
+   * session-start checkpoint from it the first time in this process.
+   */
   const sessionStart = async (project: string): Promise<string> => {
+    cache?.reset(project);
+    if (!cache && !ctx.changes) return "";
+    let nodes: TreeNode[];
+    try {
+      nodes = await exportNodes();
+    } catch {
+      return "";
+    }
     if (!ctx.changes) return "";
-    const taken = await ctx.changes.sessionStart(project, async () => (await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 })).nodes);
+    const taken = await ctx.changes.sessionStart(project, async () => nodes);
     return taken ? " Checkpoint 'session-start' saved (get_changes shows what changes from here)." : "";
   };
   const save = () => ({ save: ctx.autosave });
@@ -177,6 +209,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         if (t === "empty") {
           const r = await b.call<{ path: string; application?: string }>("project.create_empty", { path: target }, { timeoutMs: 120_000 });
           ctx.project = { path: r.path, application: r.application };
+          await sessionStart(r.path);
           return `Created empty project ${r.path}.`;
         }
         const src = t === "standard" ? (ctx.templatesDir ? join(ctx.templatesDir, "Standard.project") : "") : absPath(ctx, t);
@@ -205,6 +238,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       run(ctx, async () => {
         const r = await b.call<{ closed: boolean }>("project.close", { discard_changes: !!discardChanges });
         ctx.project = undefined;
+        cache?.reset();
         return r.closed ? "Project closed." : "No project was open.";
       }),
   );
@@ -239,6 +273,11 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     async ({ paths }) =>
       run(ctx, async () => {
         const r = await b.call<{ objects: (TreeNode & { error?: string })[] }>("objects.read", { paths });
+        if (cache) {
+          for (const o of r.objects) if (!o.error) cache.upsert(o);
+          const last = r.objects.filter((o) => !o.error).at(-1);
+          if (last) cache.touch(last.path, "read");
+        }
         return r.objects.map(formatObject).join("\n\n");
       }),
   );
@@ -264,6 +303,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
           if (problem) throw new Error(problem);
         }
         const r = await b.call<{ path: string; kind: string; saved?: boolean }>("object.write", { path, declaration, implementation, ...save() });
+        await refresh(r.path, "write");
         return `Updated ${r.path} (${[declaration !== undefined && "declaration", implementation !== undefined && "implementation"].filter(Boolean).join(" + ")}).${savedNote(r)}`;
       }),
   );
@@ -302,6 +342,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
           implementation: a.implementation,
           ...save(),
         });
+        await refresh(r.path, "create");
         return `Created ${a.kind} ${r.path}.${savedNote(r)}`;
       }),
   );
@@ -312,6 +353,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     async ({ path }) =>
       run(ctx, async () => {
         const r = await b.call<{ path: string; saved?: boolean }>("object.delete", { path, ...save() });
+        cache?.remove(r.path);
+        cache?.touch(r.path, "delete");
         return `Deleted ${r.path}.${savedNote(r)}`;
       }),
   );
@@ -325,6 +368,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     async ({ path, newName }) =>
       run(ctx, async () => {
         const r = await b.call<{ path: string; saved?: boolean }>("object.rename", { path, new_name: newName, ...save() });
+        cache?.rename(path.replace(/^\/+/, ""), newName);
+        cache?.touch(r.path, "rename");
         return `Renamed to ${r.path}.${savedNote(r)}`;
       }),
   );
@@ -344,7 +389,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     async ({ pattern, regex, caseSensitive, maxResults }) =>
       run(ctx, async () => {
         const re = new RegExp(regex ? pattern : pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseSensitive ? "" : "i");
-        const r = await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 });
+        const r = { nodes: await exportNodes() };
         const hits: string[] = [];
         const limit = maxResults ?? 50;
         let total = 0;
@@ -373,7 +418,17 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     async () =>
       run(ctx, async () => {
         const r = await b.call<{ messages: BuildMessage[] }>("build", {}, { timeoutMs: 600_000 });
-        return formatBuild(r.messages).text;
+        const f = formatBuild(r.messages);
+        if (cache) {
+          const counted = r.messages.filter((m) => /error|warning/i.test(m.severity));
+          cache.setCompile({
+            at: new Date().toISOString(),
+            errors: f.errors,
+            warnings: counted.length - f.errors,
+            messages: counted.map((m) => ({ severity: /error/i.test(m.severity) ? "error" : "warning", text: m.text, object: m.object, position: m.position, ...(m.prefix ? { code: `${m.prefix}${m.number ?? ""}` } : {}) })),
+          });
+        }
+        return f.text;
       }),
   );
 
@@ -428,7 +483,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     },
     async ({ path }) =>
       run(ctx, async () => {
-        const [e, t] = [await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 }), await b.call<{ tasks: OutlineTask[] }>("tasks.list")];
+        const [e, t] = [{ nodes: await exportNodes() }, await b.call<{ tasks: OutlineTask[] }>("tasks.list")];
         return buildOutline(e.nodes, t.tasks, { path });
       }),
   );
@@ -443,7 +498,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     },
     async ({ filter }) =>
       run(ctx, async () => {
-        const e = await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 });
+        const e = { nodes: await exportNodes() };
         let io = ioList(e.nodes);
         if (filter) {
           const f = filter.toLowerCase();
@@ -501,7 +556,6 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
 
   // ---------------------------------------------------------------- changes
 
-  const exportNodes = async () => (await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 })).nodes;
   const store = () => {
     if (!ctx.changes) throw new Error("Change tracking is not enabled.");
     if (!ctx.project) throw new Error("No project is open. Call open_project first.");
@@ -645,6 +699,10 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         if (ctx.autosave) {
           await b.call("project.save");
           saved = " Project saved.";
+        }
+        if (cache) {
+          await exportNodes().catch(() => undefined);
+          cache.touch(path.replace(/^\/+/, ""), "revert");
         }
         return `Reverted ${path} to '${name}' (${cp.at}): ${done.join(", ")}.${saved}`;
       }),

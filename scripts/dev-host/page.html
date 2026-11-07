@@ -85,6 +85,10 @@ svg { flex: none; }
 .embed .bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--fg2); }
 .embed .bar code { font: 12px ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--fg); }
 iframe { display: block; border: 0; width: 100%; height: 900px; background: transparent; }
+.embed.fullscreen { position: fixed; inset: 0; z-index: 10; border-radius: 0; border: 0; }
+.embed.fullscreen .bar { display: none; }
+.embed.fullscreen iframe { height: 100vh !important; }
+#ctx { font-family: ui-monospace, Consolas, monospace; }
 .hint { margin-top: 10px; font-size: 11px; color: var(--fg2); }
 </style>
 </head>
@@ -111,11 +115,14 @@ iframe { display: block; border: 0; width: 100%; height: 900px; background: tran
     <button class="step" data-s="tuned"><span class="n">3</span>Tuned run</button>
     <button class="step" data-s="breakpoint"><span class="n">4</span>Interlock breakpoint</button>
     <button class="step" data-s="release"><span class="n">5</span>Release</button>
+    <button class="step" data-s="edit"><span class="n">6</span>Claude edits FB_PI</button>
+    <button class="step" data-s="compile"><span class="n">7</span>Compile error + tests</button>
   </div>
   <section class="embed">
     <div class="bar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 4 1.5 8 5 12M11 4l3.5 4L11 12"/></svg><code>open_sim_panel</code><span>· CODESYS simulation</span></div>
     <iframe id="panel" sandbox="allow-scripts" title="Simulation panel"></iframe>
   </section>
+  <p id="ctx" class="hint">Model context from the panel appears here.</p>
   <p class="hint">Steps run in order through the real MCP tools; the panel only reads, like in Claude Desktop.</p>
 </main>
 <script src="/host.js"></script>

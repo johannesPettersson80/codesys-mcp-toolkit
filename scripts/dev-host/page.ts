@@ -45,10 +45,23 @@ function applyTheme(t: Theme) {
 async function mount() {
   await bridge?.close().catch(() => undefined);
   const html = await (await fetch("/panel.html")).text();
-  bridge = new AppBridge(null, { name: "dev-host", version: "1" }, { serverTools: {} }, { hostContext: { theme, displayMode: "inline" } });
+  const embed = iframe.closest(".embed")!;
+  embed.classList.remove("fullscreen");
+  bridge = new AppBridge(null, { name: "dev-host", version: "1" }, { serverTools: {}, updateModelContext: {} }, { hostContext: { theme, displayMode: "inline", availableDisplayModes: ["inline", "fullscreen"] } });
   bridge.oncalltool = async (params) => call(params.name, (params.arguments ?? {}) as Record<string, unknown>);
   bridge.onsizechange = ({ height }) => {
-    if (height) iframe.style.height = `${Math.ceil(height)}px`;
+    if (height && !embed.classList.contains("fullscreen")) iframe.style.height = `${Math.ceil(height)}px`;
+  };
+  bridge.onrequestdisplaymode = async ({ mode }) => {
+    const full = mode === "fullscreen";
+    embed.classList.toggle("fullscreen", full);
+    await bridge!.sendHostContextChange({ displayMode: full ? "fullscreen" : "inline" });
+    return { mode: full ? "fullscreen" : "inline" };
+  };
+  bridge.onupdatemodelcontext = async (p) => {
+    const text = (p.content ?? []).map((c) => ("text" in c ? c.text : "")).join(" ");
+    document.getElementById("ctx")!.textContent = `Model context: ${text}`;
+    return {};
   };
   bridge.oninitialized = async () => {
     const r = await call("open_sim_panel", {});
