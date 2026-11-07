@@ -38,3 +38,22 @@ const html = template.replace("/*PANEL_SCRIPT*/", () => js);
 await mkdir(join(root, "dist", "panel"), { recursive: true });
 await writeFile(join(root, "dist", "panel", "sim-panel.html"), html, "utf8");
 console.error(`panel: dist/panel/sim-panel.html (${(html.length / 1024).toFixed(0)} kB)`);
+
+// The browser viewer: a host page that embeds the panel (for chats that can't show MCP Apps).
+const viewer = await build({
+  entryPoints: [join(root, "panel", "src", "viewer-host.ts")],
+  bundle: true,
+  minify: true,
+  format: "iife",
+  target: "es2022",
+  platform: "browser",
+  write: false,
+  legalComments: "none",
+  logLevel: "warning",
+});
+const vjs = viewer.outputFiles[0].text.replace(/<\/script/gi, "<\/script");
+const vtemplate = await readFile(join(root, "panel", "viewer.html"), "utf8");
+if (!vtemplate.includes("/*VIEWER_SCRIPT*/")) throw new Error("viewer template has no /*VIEWER_SCRIPT*/ marker");
+const vhtml = vtemplate.replace("/*VIEWER_SCRIPT*/", () => vjs);
+await writeFile(join(root, "dist", "panel", "viewer.html"), vhtml, "utf8");
+console.error(`viewer: dist/panel/viewer.html (${(vhtml.length / 1024).toFixed(0)} kB)`);

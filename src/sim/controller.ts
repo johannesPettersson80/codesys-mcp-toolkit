@@ -922,12 +922,38 @@ export class SimController {
       ...run.tests.filter((t) => t.status === "passed").map((t) => `pass ${objOf(t)}`),
     ];
     if (failing.length) lines.push("Note: truST reports the test, not the failing assertion line yet (TRUST-GAPS T2), and time doesn't advance inside a test (T1).");
-    this.lastTests = { at: new Date().toISOString(), total: run.total, passed: run.passed, failed: run.failed + run.errors, failing: failing.map(objOf) };
+    this.lastTests = {
+      at: new Date().toISOString(),
+      total: run.total,
+      passed: run.passed,
+      failed: run.failed + run.errors,
+      failing: failing.map(objOf),
+      results: run.tests.map((t) => ({ name: t.name, obj: objOf(t), status: t.status, ...(t.message ? { message: t.message } : {}), ...(t.durationMs !== undefined ? { durationMs: t.durationMs } : {}) })),
+    };
     this.journal.add("tests", `Tests: ${run.passed} passed, ${run.failed + run.errors} failed`, { total: run.total, failing: this.lastTests.failing });
     return { ok: failing.length === 0, run, text: lines.join("\n") };
   }
 
   // ------------------------------------------------------------ panel (read-only)
+
+  /** Experiment runs with their step responses, for the panel's Tuning view. */
+  experimentRuns(maxPoints = 300): import("./panel-types.js").ExperimentRun[] {
+    return this.experiments.map((e) => {
+      const pv = e.spec.pv;
+      const step = Math.max(1, Math.ceil(e.samples.length / maxPoints));
+      const points = e.samples.filter((_, i) => i % step === 0 || i === e.samples.length - 1).map((s) => ({ t: s.t, pv: pv ? (s.values[pv] ?? null) : null }));
+      return {
+        n: e.n,
+        name: e.name,
+        at: e.at,
+        set: (e.spec.set ?? {}) as Record<string, string | number | boolean>,
+        ...(pv ? { pv } : {}),
+        ...(e.spec.sp ? { sp: e.spec.sp as { var: string; value: number | string; at_s?: number } } : {}),
+        metrics: e.metrics,
+        points,
+      };
+    });
+  }
 
   /** The signals the panel shows: plant wiring, device feedback, the running experiment. */
   panelSignals(): { name: string; role: SignalRole; plant?: string }[] {

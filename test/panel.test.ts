@@ -15,6 +15,7 @@ import { LINES, TANK_PLANT, tankNodes, tankTasks, tankTestNodes } from "./fixtur
 import { ProjectCache } from "../src/codesys/cache.js";
 import { ChangeStore, diffObjects, snapshot } from "../src/codesys/changes.js";
 import { Driver } from "../src/driver.js";
+import { annotatedTools } from "../src/annotations.js";
 import { tempDir } from "./helpers.js";
 
 const UI = { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } };
@@ -87,6 +88,8 @@ describe("panel data", () => {
     const { call, sim } = await connect(true);
     const open = await call("open_sim_panel");
     expect(open.content[0]!.text).toMatch(/Simulation: no_mirror[\s\S]*sync_mirror/);
+    // hosts that show only structuredContent still get the snapshot
+    expect(open.structuredContent).toMatchObject({ status: "no_mirror", snapshot: open.content[0]!.text });
     expect((await call<PanelState>("get_sim_state")).structuredContent!.status).toBe("no_mirror");
     await sim.sync();
     const s = (await call<PanelState>("get_sim_state")).structuredContent!;
@@ -229,6 +232,22 @@ describe("user actions (Phase 7)", () => {
     expect((await call<Obj>("get_object", { path: "FB_PI/Reset" })).structuredContent!.base!.implementation).toBe("rY := 1.0;");
     // session-start is untouched, so get_changes still shows Claude's whole session
     expect(diffObjects((await changes.load(project, "session-start"))!.objects, snapshot(cache.nodes!)).map((c) => c.path)).toEqual(["FB_PI/Reset"]);
+  });
+});
+
+describe("tool annotations", () => {
+  it("classify every tool, so clients can skip approvals for harmless ones", async () => {
+    const { client } = await connect(false);
+    const tools = (await client.listTools()).tools;
+    const known = new Set(annotatedTools());
+    for (const t of tools) {
+      expect(known.has(t.name), `${t.name} needs a kind in src/annotations.ts`).toBe(true);
+      expect(t.annotations?.openWorldHint, t.name).toBe(false);
+    }
+    const ann = (n: string) => tools.find((t) => t.name === n)!.annotations;
+    expect(ann("write_object")).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(ann("run_scans")).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(ann("read_objects")).toMatchObject({ readOnlyHint: true });
   });
 });
 

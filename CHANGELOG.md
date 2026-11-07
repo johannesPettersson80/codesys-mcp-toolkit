@@ -40,6 +40,18 @@ Rewrite. See README "Migrating from v1".
 - `run_tests`: unit tests that live in the CODESYS project as programs marked
   `{attribute 'test'}`, run in truST, with results by CODESYS object.
 - `open_sim_panel`: a live, read-only panel (MCP App).
+  - **Browser workspace:** opening or creating a project opens the same
+    workspace in the default browser, served on 127.0.0.1 with a token, for
+    chats that can't show MCP Apps. Options `--viewer-port`, `--no-viewer`.
+- Panel views that follow Claude's work: Code (live code with new lines
+  marked), Unit tests, Simulation, Tuning (experiment runs overlaid and
+  compared) and Review (accept or revert each changed object). New app-only
+  tool `get_experiments`.
+- Tool annotations (read-only, non-destructive, destructive; all local), so
+  clients can tell harmless tools from ones that overwrite project code.
+- Shared session: server processes started with the same options share one
+  background owner (one CODESYS, one simulation), so the panel shows the
+  project the chat works on. `--no-shared` runs in-process as before.
   - **In the chat:** a compact card with status, what Claude is working on,
     changes, compile, tests and experiments.
   - **Full screen:** a CODESYS-style workspace with the project tree and

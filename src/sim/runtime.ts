@@ -40,6 +40,22 @@ export function findTrustDev(runtimeExe: string): string | undefined {
   return candidates.find((c) => existsSync(c));
 }
 
+/** trust-control-studio (Control Studio's engine: tuning): next to trust-runtime, else PATH. */
+export function findControlStudio(runtimeExe: string): string | undefined {
+  const name = process.platform === "win32" ? "trust-control-studio.exe" : "trust-control-studio";
+  const candidates = [join(dirname(runtimeExe), name)];
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) if (dir) candidates.push(join(dir, name));
+  return candidates.find((c) => existsSync(c));
+}
+
+/** A Control Studio answer: `{result}` or `{failure}` (with --json). */
+export interface StudioAnswer<T = unknown> {
+  result?: T;
+  failure?: { cause?: string; message: string; nextAction?: string };
+  /** stderr, for diagnostics. */
+  log?: string;
+}
+
 export interface TestCase {
   name: string;
   kind: string;
@@ -214,6 +230,8 @@ export class TrustRuntime {
   dir?: string;
   exitInfo?: string;
   onExit?: (info: string) => void;
+  /** The running instance's control endpoint and token (Control Studio connects to it). */
+  endpoint?: { port: number; token: string };
 
   constructor(
     readonly exe: string,
@@ -268,6 +286,40 @@ export class TrustRuntime {
     return { ran: false, total: 0, passed: 0, failed: 0, errors: 0, durationMs: 0, tests: [], diagnostics: parseDiagnostics(output), output };
   }
 
+  /**
+   * Run a Control Studio verb (setup, identify, tune, validate, ...) against
+   * the project and, when it runs, this instance's control endpoint. Studio
+   * keeps its study and journals in the mirror, next to the project.
+   */
+  async studio<T = unknown>(dir: string, verb: string, args: string[] = [], o: { timeoutMs?: number } = {}): Promise<StudioAnswer<T>> {
+    const exe = findControlStudio(this.exe);
+    if (!exe) throw new TrustError("no_control_studio", `trust-control-studio (truST's tuning engine) was not found next to ${this.exe}. It ships in truST's VS Code extension package (truST 0.34 or later).`);
+    const full = [verb, "--project", dir, "--journal-dir", join(dir, ".control-studio"), "--json"];
+    if (this.running && this.endpoint) {
+      const tokenFile = join(dir, ".control-token");
+      await writeFile(tokenFile, this.endpoint.token, { encoding: "utf8", mode: 0o600 });
+      full.push("--endpoint", `tcp://127.0.0.1:${this.endpoint.port}`, "--token-file", tokenFile);
+    }
+    full.push(...args);
+    let stdout = "";
+    let stderr = "";
+    try {
+      const r = await exec(exe, full, { windowsHide: true, maxBuffer: 64 << 20, timeout: o.timeoutMs ?? 900_000, env: process.env });
+      stdout = r.stdout;
+      stderr = r.stderr;
+    } catch (e) {
+      const err = e as { stdout?: string; stderr?: string; message: string };
+      stdout = err.stdout ?? "";
+      stderr = err.stderr ?? err.message;
+    }
+    const first = stdout.indexOf("{");
+    try {
+      return { ...(JSON.parse(stdout.slice(first)) as StudioAnswer<T>), log: stderr.trim() };
+    } catch {
+      return { failure: { message: (stderr || stdout || "no answer").trim().split("\n").slice(-12).join("\n") }, log: stderr.trim() };
+    }
+  }
+
   async build(dir: string): Promise<BuildResult> {
     const t0 = Date.now();
     try {
@@ -306,6 +358,7 @@ export class TrustRuntime {
         if (!this.stopping) this.onExit?.(this.exitInfo);
       }
     });
+    this.endpoint = { port, token };
     const control = new TrustControl({ host: "127.0.0.1", port, token, timeoutMs: 10_000 });
     const deadline = Date.now() + (o.startTimeoutMs ?? 30_000);
     for (;;) {

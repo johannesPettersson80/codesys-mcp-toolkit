@@ -47,6 +47,8 @@ export interface WorkspaceDeps {
   driver?: Driver;
   /** Revert an object in CODESYS to a checkpoint (the revert_object logic). */
   revert?: (path: string, to: string) => Promise<string>;
+  /** The browser viewer, opened by open_sim_panel. */
+  viewer?: () => { url: string; open(force?: boolean): boolean } | undefined;
 }
 
 export function registerPanel(server: McpServer, sim: SimController, ws: WorkspaceDeps = { project: () => undefined }): void {
@@ -65,7 +67,7 @@ export function registerPanel(server: McpServer, sim: SimController, ws: Workspa
       description:
         "Show the live simulation panel to the user: code with the current line and breakpoints, the plant (P&ID), I/O values, trends, experiments and events. Read-only; drive the simulation with the other tools. Returns a text snapshot too.",
       inputSchema: z.object({}),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { resourceUri: PANEL_URI } },
     },
     async () => {
@@ -80,7 +82,16 @@ export function registerPanel(server: McpServer, sim: SimController, ws: Workspa
       if (s.status === "no_project") lines.push("Open a CODESYS project, then sync_mirror and sim_start.");
       else if (s.status === "no_mirror") lines.push("Call sync_mirror and sim_start to start the simulation.");
       else if (s.status === "stopped") lines.push("Call sim_start to start the simulation.");
-      return { content: [{ type: "text", text: lines.join("\n") }], structuredContent: { panelId } };
+      // A chat that can't show MCP Apps gets the same panel in the browser instead.
+      const v = ws.viewer?.();
+      if (v && !getUiCapability(server.server.getClientCapabilities())) {
+        v.open(true);
+        lines.push(`This chat can't show the panel, so it opened in the user's browser: ${v.url} (if they don't see it, give them this link).`);
+      }
+      // Some hosts show the model only structuredContent when it is present,
+      // so the snapshot goes there too, not just in content.
+      const snapshot = lines.join("\n");
+      return { content: [{ type: "text", text: snapshot }], structuredContent: { panelId, status: s.status, snapshot } };
     },
   );
 
@@ -103,6 +114,7 @@ export function registerPanel(server: McpServer, sim: SimController, ws: Workspa
           ...s,
           current: !panelId || !latestPanel || panelId === latestPanel,
           ...(ws.driver?.held ? { held: true, heldSince: ws.driver.since } : {}),
+          ...(ws.driver?.phase ? { phase: { view: ws.driver.phase.view, tool: ws.driver.phase.tool, quietMs: Date.now() - (ws.driver.lastCallAt ?? ws.driver.phase.at) } } : {}),
         };
         return json(state);
       },
@@ -241,6 +253,20 @@ export function registerPanel(server: McpServer, sim: SimController, ws: Workspa
           base: base ? { declaration: base.declaration ?? null, implementation: base.implementation ?? null } : null,
         });
       },
+    ),
+  );
+
+  tools.push(
+    registerAppTool(
+      server,
+      "get_experiments",
+      {
+        description: "Panel: experiment runs with their step responses (Tuning view).",
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: true },
+        _meta: appOnly,
+      },
+      async () => json({ runs: sim.experimentRuns() }),
     ),
   );
 

@@ -5,6 +5,7 @@ import { renderPid } from "./plant.js";
 import { highlight } from "./st.js";
 import { drawTrend } from "./trend.js";
 import { $, ago, esc, persist, segmented, show, store } from "./util.js";
+import { drawRuns, reviewView, tuningView, viewTabs, type ViewName } from "./views.js";
 
 const KIND_LABEL: Record<string, string> = {
   program: "PRG",
@@ -32,6 +33,12 @@ export interface WorkspaceHooks {
   context(text: string): void;
   /** Run a user action (an app-only ui_* tool); `what` describes it for the model. */
   act(tool: string, args: Record<string, unknown>, what: string): Promise<{ ok: boolean; message: string } | undefined>;
+  /** The user picked a view (stops following Claude). */
+  pickView(view: ViewName): void;
+  /** Follow Claude was switched. */
+  followChanged(): void;
+  /** Accept / Revert / show changes from a review list. */
+  review(kind: string, path: string, btn: HTMLElement): void;
 }
 
 export class Workspace {
@@ -51,6 +58,8 @@ export class Workspace {
   private lastFocusAt?: string;
   private lastStopKey?: string;
   private editorHtml = "";
+  /** The current view (set by main) and whether it follows Claude. */
+  view: ViewName = "code";
 
   constructor(private readonly hooks: WorkspaceHooks) {
     document.querySelector(".runbar")!.addEventListener("click", (e) => {
@@ -74,7 +83,11 @@ export class Workspace {
     $("w-follow").addEventListener("click", () => {
       this.follow = !this.follow;
       persist("ws-follow", this.follow);
-      this.renderTop();
+      hooks.followChanged();
+    });
+    $("w-views").addEventListener("click", (e) => {
+      const v = (e.target as HTMLElement).closest<HTMLElement>("[data-view]")?.dataset.view as ViewName | undefined;
+      if (v) hooks.pickView(v);
     });
     $("w-diff").addEventListener("click", () => {
       this.diff = !this.diff;
@@ -112,6 +125,16 @@ export class Workspace {
     $("w-bottom").addEventListener("click", (e) => {
       const t = e.target as HTMLElement;
       if (t.closest("[data-apply]")) return this.applyPlantParams(t.closest<HTMLElement>("[data-plant]")!);
+      const rv = t.closest<HTMLElement>("[data-rv]");
+      if (rv) {
+        const path = rv.closest<HTMLElement>("[data-path]")!.dataset.path!;
+        if (rv.dataset.rv === "diff") {
+          this.diff = true;
+          $("w-diff").setAttribute("aria-pressed", "true");
+          return this.open(path, true);
+        }
+        return this.hooks.review(rv.dataset.rv!, path, rv);
+      }
       const p = t.closest<HTMLElement>("[data-open]")?.dataset.open;
       if (p) this.open(p, true);
     });
@@ -160,6 +183,25 @@ export class Workspace {
     }
   }
 
+  /** Lay the workspace out for a view: the bottom tab, the diff, and what is open. */
+  applyView(v: ViewName): void {
+    this.view = v;
+    const bottom = ({ code: "problems", tests: "tests", simulation: "trend", tuning: "tuning", review: "review" } as const)[v];
+    this.bottom = bottom;
+    for (const b of $("w-bottom-tabs").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.t === bottom));
+    this.diff = v === "review";
+    $("w-diff").setAttribute("aria-pressed", String(this.diff));
+    if (v === "tests") {
+      const failing = model.state?.tests?.failing[0];
+      const first = failing ?? model.ws?.tree?.find((n) => n.test)?.path;
+      if (first) this.open(first, false);
+    } else if (v === "review") {
+      const changed = model.ws?.tree?.find((n) => n.change)?.path;
+      if (changed) this.open(changed, false);
+    }
+    this.render();
+  }
+
   // ------------------------------------------------------------ render
 
   render(): void {
@@ -183,6 +225,7 @@ export class Workspace {
     const touched = f && Date.now() - Date.parse(f.at) < 60_000 ? `Claude ${f.action === "read" ? "is reading" : f.action === "write" ? "edited" : f.action === "create" ? "created" : f.action === "delete" ? "deleted" : f.action === "revert" ? "reverted" : "renamed"} ${f.path}` : "";
     $("w-activity").textContent = s?.activity ?? (where || touched);
     $("w-follow").setAttribute("aria-pressed", String(this.follow));
+    $("w-views").innerHTML = viewTabs(this.view, this.follow);
     // run controls: what makes sense in the current state
     const sim = s?.status === "running" || s?.status === "paused";
     const busy = !!s?.activity;
@@ -444,6 +487,7 @@ export class Workspace {
     const info = $("w-bottom-info");
     const s = model.state;
     info.textContent = "";
+    if (this.bottom !== "tuning" && this.bottom !== "review") delete el.dataset.html;
     if (this.bottom === "trend") {
       if (!el.querySelector("canvas")) el.innerHTML = `<canvas id="w-trend"></canvas>`;
       if (s) info.textContent = drawTrend(el.querySelector("canvas")!, s, model.trend);
@@ -476,6 +520,22 @@ export class Workspace {
       el.innerHTML = `<div class="list">${testNodes
         .map((n) => `<div class="row"><span class="${!t ? "muted" : failing.has(n.path.toLowerCase()) ? "err" : "mk A"}">${!t ? "○" : failing.has(n.path.toLowerCase()) ? "✗" : "✓"}</span> <a href="#" data-open="${esc(n.path)}">${esc(n.path)}</a></div>`)
         .join("")}</div>`;
+    } else if (this.bottom === "tuning") {
+      const html = tuningView();
+      if (el.dataset.html !== html) {
+        el.innerHTML = `<div class="vpad">${html}</div>`;
+        el.dataset.html = html;
+      }
+      const c = el.querySelector<HTMLCanvasElement>("canvas.runs");
+      if (c) drawRuns(c);
+      return;
+    } else if (this.bottom === "review") {
+      const html = reviewView();
+      if (el.dataset.html !== html) {
+        el.innerHTML = `<div class="vpad">${html}</div>`;
+        el.dataset.html = html;
+      }
+      return;
     } else if (this.bottom === "problems") {
       const c = model.ws?.compile;
       const rows: string[] = [];

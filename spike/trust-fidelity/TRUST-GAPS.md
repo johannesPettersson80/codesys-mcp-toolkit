@@ -82,6 +82,27 @@ much the toolkit can lean on them.
 | L2 | **Method references and incoming calls are empty** | `references` from `METHOD Reset` → `[]`; `callHierarchy/incomingCalls` on the method → `[]`. The calls exist: `fb.Reset()` in a test, and `itfReset.Reset()` through an interface. Incoming calls to the FB itself work. **Ask:** method (and property) references, including calls through an interface variable, which implementations of the interface method could receive. |
 | L3 | **The outline leaves out variables** | `documentSymbol` for an FB gives the FB, its methods and its properties, but not its `VAR_INPUT`, `VAR_OUTPUT`, `VAR_IN_OUT` or locals. An interface outline needs those with types. **Ask:** variables as child symbols, with section (input, output, in-out, local) and type in `detail`, and children nested under the FB (`hierarchicalDocumentSymbolSupport`). |
 
+### Control Studio tuning on CODESYS programs (truST 0.34.0, found integrating tuning)
+
+Tried `trust-control-studio` 0.34.0 on the tank mirror: a CODESYS-style PI
+function block in Kp/Ti form (`FB_PI`, fields `_rKp`/`_rTi`, set through
+properties at init), an enum mode (`GVL_Par.eMode`), one 10 ms task, a
+`gravity_tank` plant. `setup --json` reads the project and offers the "Other
+law" search structure, which fits a Kp/Ti PI without code changes. These
+gaps keep the rest of the flow from working on typical CODESYS code. Source
+references are to the 0.33.0 tree.
+
+| # | Gap | Detail |
+|---|-----|--------|
+| S1 | **`setup` ignores `vendor_profile = "codesys"`** | `setup --project <mirror> --json` failed with `E208 method 'Reset' implementing interface 'I_Resettable' must be PUBLIC or INTERNAL`, while `trust-runtime build` of the same project (with `trust-lsp.toml` `vendor_profile = "codesys"`) succeeds. CODESYS methods without a modifier are PUBLIC. **Ask:** Studio compiles with the project's profile. *Workaround:* the toolkit's mirror now writes the implicit PUBLIC explicitly. |
+| S2 | **The mode must be a BOOL** | `ModeChoice` takes only a BOOL without an I/O address (`setup/pid_loop.rs:54-61`, `setup/form.rs:316-320`). CODESYS loops usually switch mode with an enum (`eMode = MANUAL/AUTO/...`) or a mode word. **Ask:** an enum (or integer) mode binding: the symbol plus the values that mean Auto and Manual. |
+| S3 | **A manual-output variable is mandatory** | Every loop needs a REAL/LREAL manual output that drives the MV in Manual, documented as a `%M` address (`state_feedback_loop.rs:284-299`, `control-studio.md:33-35`). Many CODESYS programs have no manual output. **Ask:** let Identify step the MV directly in simulation (write or force the MV's symbol), so a manual output is optional when the target is the simulator. |
+| S4 | **A program that sets its gains at startup needs a startup flag** | `check_startup` refuses a draft whose coefficients the program writes (here at init through `Kp`/`Ti` properties) unless a BOOL `startupFlag` is named (`state_feedback_loop.rs:305-322`). CODESYS code commonly does `IF bInit THEN fb.Kp := ...; bInit := FALSE; END_IF`, where TRUE means "initialize". **Ask:** document the flag's polarity, and accept such an init flag (or skip the check for coefficients only written while the flag is set). |
+| S5 | **Requirements can only be set through `serve`** | Tune refuses without requirements (`NO_REQUIREMENTS`, `workflow/tune_search.rs:197-205`), and no CLI verb sets them: only JSON-RPC `controlStudio/inputs`. **Ask:** `trust-control-studio inputs --loop ID --change '{...}'` (or `tune --requirement ...`) so scripts and agents can set them. |
+| S6 | **The search budget is too small for slow loops** | The whole search gets 50,000 scans and 60 s of wall time by default (`search_loop.rs:57,61`), summed over all trials and cases. At a 10 ms task that is 500 s of simulated time in total, less than two step responses of a tank that settles in about 250 s. Raising it means editing the loop file, which changes its revision. **Ask:** scale the default with the identified time constants, or take `--max-cycles` / `--wall-budget` on `tune`. |
+| S7 | **The search family list has no plain PI** | `family` must be one of 12 advanced labels (MPC, Smith, robust, ...); a PI written in Kp/Ti form has to borrow one (`search_loop.rs:30-43`). **Ask:** a "PI/PID (own form)" family, or Kp/Ti as an own-law form next to parallel Kp/Ki. |
+| S8 | **Identify needs a free-running runtime** | Studio treats 5 s without a new scan as stale and waits 10 s for parameter confirmation (spec 35, around lines 931-932). A runtime that a debugger holds paused between steps fails. **Ask:** a simulation-target mode that drives scans itself (or accepts a stepped runtime), so a debugger session and tuning can share one runtime. |
+
 ## C. Differences the v2 mirror handles (no truST change needed)
 
 | CODESYS | truST | Mirror does |

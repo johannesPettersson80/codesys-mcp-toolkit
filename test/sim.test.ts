@@ -7,7 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { analyse, SimController } from "../src/sim/controller.js";
 import { assertLoopback, TrustControl } from "../src/sim/control.js";
 import { evaluate, evaluateCondition, ExprError, parseExpr } from "../src/sim/expr.js";
-import { composeMirror, declaredType, enumMembers, fromMirror, HARNESS_FILE, injectAddress, isTestPou, parseIntervalMs, partLines, propertyHeader, rewriteEnumLiterals, stripQueryInterface, toMirror, toTestHeader, usedAddressEnd } from "../src/sim/mirror.js";
+import { composeMirror, declaredType, enumMembers, fromMirror, HARNESS_FILE, injectAddress, isTestPou, methodHeader, parseIntervalMs, partLines, propertyHeader, rewriteEnumLiterals, stripQueryInterface, toMirror, toTestHeader, usedAddressEnd } from "../src/sim/mirror.js";
 import { readManifest, writeMirror } from "../src/sim/mirror-store.js";
 import { applyOverride, parsePlantConfig, PlantConfigError, simulationToml } from "../src/sim/plant.js";
 import { assertSimulationOnly, parseDiagnostics, parseTestJson, runtimeToml } from "../src/sim/runtime.js";
@@ -25,7 +25,7 @@ describe("mirror composition", () => {
   it("nests methods, properties and accessors into the FB", () => {
     const t = file(compose(), "FB_PI").text;
     expect(t).toMatch(/^FUNCTION_BLOCK FB_PI IMPLEMENTS I_Resettable/);
-    expect(t).toContain("METHOD Reset : BOOL\nrI := 0.0;\nrY := 0.0;\nReset := TRUE;\nEND_METHOD");
+    expect(t).toContain("METHOD PUBLIC Reset : BOOL\nrI := 0.0;\nrY := 0.0;\nReset := TRUE;\nEND_METHOD");
     expect(t).toContain("PUBLIC PROPERTY Kp : REAL\n    GET\nKp := _rKp;\n    END_GET\n    SET\nIF Kp > 0.0 THEN");
     expect(t.trimEnd().endsWith("END_FUNCTION_BLOCK")).toBe(true);
     expect(t).not.toMatch(/VAR\s+END_VAR/);
@@ -101,6 +101,17 @@ describe("mirror composition", () => {
     const c = composeMirror(nodes, tankTasks(), { plant: parsePlantConfig(TANK_PLANT) });
     expect(c.addresses.get("gvl_io.lrlt101_level")).toBe("%IL2");
     expect(propertyHeader("PROPERTY PUBLIC FINAL X : INT")).toBe("PUBLIC FINAL PROPERTY X : INT");
+  });
+
+  it("makes CODESYS's implicit PUBLIC explicit on methods and properties", () => {
+    expect(methodHeader("METHOD Reset : BOOL")).toBe("METHOD PUBLIC Reset : BOOL");
+    expect(methodHeader("METHOD FINAL Bar : INT")).toBe("METHOD PUBLIC FINAL Bar : INT");
+    expect(methodHeader("{attribute 'x'}\nMETHOD Baz")).toBe("{attribute 'x'}\nMETHOD PUBLIC Baz");
+    expect(methodHeader("METHOD PRIVATE Foo")).toBe("METHOD PRIVATE Foo");
+    expect(methodHeader("METHOD PUBLIC Q")).toBe("METHOD PUBLIC Q");
+    expect(propertyHeader("PROPERTY Kp : REAL")).toBe("PUBLIC PROPERTY Kp : REAL");
+    expect(propertyHeader("PROPERTY PRIVATE Y : INT")).toBe("PRIVATE PROPERTY Y : INT");
+    expect(propertyHeader("PROPERTY Publicity : INT")).toBe("PUBLIC PROPERTY Publicity : INT");
   });
 
   it("rewrites CODESYS enum literals for truST, outside strings and comments", () => {

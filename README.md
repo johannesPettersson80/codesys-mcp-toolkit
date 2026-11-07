@@ -56,6 +56,18 @@ profile.
 | `--trust-runtime <exe>` | `trust-runtime.exe` for the simulation (default: `TRUST_RUNTIME`, then `PATH`) |
 | `--mirror-dir <dir>` | Where simulation mirrors go (default: `%LOCALAPPDATA%\codesys-mcp-toolkit\mirrors`) |
 | `--no-sim` | Don't offer the simulation tools |
+| `--viewer-port <port>` | Port of the browser workspace on 127.0.0.1 (default 5180, or the next free one) |
+| `--no-viewer` | Don't serve the browser workspace |
+| `--no-shared` | Run CODESYS in this process instead of the shared session |
+
+Claude Desktop may start the server more than once, for example one process
+for the chat and one for the panel. All processes started with the same
+options share one session: the first one starts a background owner that runs
+CODESYS, truST and the browser workspace, and the others connect to it over
+127.0.0.1 with a token. So the panel always shows the project the chat is
+working on, and only one CODESYS runs. The owner stops two minutes after the
+last client disconnects. Its log is `daemon-<id>.log` in
+`%LOCALAPPDATA%\codesys-mcp-toolkit`.
 
 CODESYS starts in the background when the server launches. A cold start takes
 1 to 3 minutes; later starts take about 10 seconds. `codesys_status` reports
@@ -218,9 +230,28 @@ Paths are CODESYS paths: `PRG_Tank.nTrips`, `GVL_IO.rLevel`,
 
 ### Live panel
 
-`open_sim_panel` opens a live view inside the chat, in clients that support
-[MCP Apps](https://modelcontextprotocol.io/extensions/apps) (Claude Desktop
-does).
+**In the chat.** Right after opening or creating a project, Claude opens the
+panel inside the chat (clients with
+[MCP Apps](https://modelcontextprotocol.io/extensions/apps)), so you watch
+the project tree and the code as it is written.
+
+**Views.** The panel switches view by what Claude is doing:
+
+| View | Shows | Comes up when Claude… |
+|---|---|---|
+| Code | the object Claude is writing, live, with new lines marked; compile problems | writes, creates, renames, reverts or compiles |
+| Unit tests | each test with pass/fail and the failure message | runs the tests |
+| Simulation | the plant and the trend | starts, runs, steps or forces the simulation |
+| Tuning | the step responses of the experiment's runs overlaid, with each run's settings, rise time, overshoot, settling time and IAE | runs experiments or scenarios |
+| Review | the objects Claude changed since you last accepted, with Changes, Accept and Revert | has unreviewed changes and has been quiet for 20 s |
+
+Click a view to stay on it; **Follow Claude** switches back to following. The
+full-screen workspace has the same view tabs and lays itself out for each.
+
+**In your browser, as a fallback.** In a chat that can't show MCP Apps,
+`open_sim_panel` opens the same workspace in your default browser instead. It
+is served on 127.0.0.1 only, with a random token in the link, and reaches
+only the panel's own tools.
 
 In the chat it is a compact card:
 - the simulation status and what Claude is doing;

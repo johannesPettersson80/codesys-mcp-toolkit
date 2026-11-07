@@ -195,7 +195,8 @@ describe("project tools over MCP (fake CODESYS)", () => {
   };
 
   beforeAll(async () => {
-    ctx = { bridge: fakeBridge(), autosave: true, workspace: tempDir(), startWaitMs: 20_000, changes: new ChangeStore(tempDir("cmcp-cps-")), cache: new ProjectCache(), driver: new Driver() };
+    // generous heartbeat limits: other test files start processes in parallel
+    ctx = { bridge: fakeBridge({ staleHeartbeatMs: 30_000, hungGraceMs: 10_000 }), autosave: true, workspace: tempDir(), startWaitMs: 20_000, changes: new ChangeStore(tempDir("cmcp-cps-")), cache: new ProjectCache(), driver: new Driver() };
     // a simulation controller, so the panel (and its user actions) is registered
     ctx.sim = new SimController({ exportSt: async () => [], tasks: async () => [], projectPath: () => ctx.project?.path }, { mirrorRoot: tempDir("cmcp-m-"), git: false });
     const server = createServer(ctx);

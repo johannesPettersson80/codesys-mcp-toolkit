@@ -9,6 +9,9 @@
  *   are nested into their FB or program text;
  * - GVLs are wrapped in NAMESPACE <name> so `GVL.x` works;
  * - `PROPERTY PUBLIC X : T` becomes `PUBLIC PROPERTY X : T`;
+ * - methods and properties without an access modifier get an explicit
+ *   PUBLIC (the CODESYS default), so truST tools that check under IEC rules,
+ *   such as Control Studio's setup, accept them too;
  * - the implicit `EXTENDS __System.IQueryInterface` is removed;
  * - each task becomes a TASK, each called program an instance with the POU's
  *   own name (so `PRG_Tank.nTrips` is the same path in CODESYS and truST);
@@ -128,9 +131,19 @@ export function toTestHeader(decl: string): string {
 
 const isEmptyVar = (decl: string | undefined) => /^\s*(VAR\s+END_VAR\s*)?$/i.test(decl ?? "");
 
-/** `PROPERTY PUBLIC X : T` -> `PUBLIC PROPERTY X : T` (truST order). */
+/** `PROPERTY PUBLIC X : T` -> `PUBLIC PROPERTY X : T` (truST order); no access modifier -> PUBLIC (CODESYS's default). */
 export function propertyHeader(decl: string): string {
-  return decl.replace(/^(\s*)PROPERTY\s+((?:(?:PUBLIC|PRIVATE|PROTECTED|INTERNAL|ABSTRACT|FINAL)\s+)+)/i, (_m, ws: string, mods: string) => `${ws}${mods.trim()} PROPERTY `);
+  const moved = decl.replace(/^(\s*)PROPERTY\s+((?:(?:PUBLIC|PRIVATE|PROTECTED|INTERNAL|ABSTRACT|FINAL)\s+)+)/i, (_m, ws: string, mods: string) => `${ws}${mods.trim()} PROPERTY `);
+  return moved.replace(/^(\s*)((?:(?:PUBLIC|PRIVATE|PROTECTED|INTERNAL|ABSTRACT|FINAL)\s+)*)PROPERTY\b/i, (m, ws: string, mods: string) =>
+    /\b(PUBLIC|PRIVATE|PROTECTED|INTERNAL)\b/i.test(mods) ? m : `${ws}PUBLIC ${mods}PROPERTY`,
+  );
+}
+
+/** `METHOD X` -> `METHOD PUBLIC X` when the method has no access modifier (CODESYS's default is PUBLIC). */
+export function methodHeader(decl: string): string {
+  return decl.replace(/^((?:\s*\{[^}]*\}\s*)*\s*)METHOD\s+((?:(?:PUBLIC|PRIVATE|PROTECTED|INTERNAL|ABSTRACT|FINAL|OVERRIDE)\s+)*)/i, (m, lead: string, mods: string) =>
+    /\b(PUBLIC|PRIVATE|PROTECTED|INTERNAL)\b/i.test(mods) ? m : `${lead}METHOD PUBLIC ${mods}`,
+  );
 }
 
 export function stripQueryInterface(decl: string): string {
@@ -382,7 +395,7 @@ export function composeMirror(nodes: TreeNode[], tasks: TaskInfo[], opts: Compos
           continue;
         }
         out.raw("");
-        out.add(decl.get(m.path), m.path, "decl");
+        out.add(methodHeader(decl.get(m.path) ?? ""), m.path, "decl");
         out.add(impl(m), m.path, "impl");
         out.raw("END_METHOD");
       }

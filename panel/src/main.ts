@@ -12,6 +12,9 @@ import { renderCard } from "./card.js";
 import { model, type Locals, type ObjData, type WsData } from "./model.js";
 import { $ } from "./util.js";
 import { Workspace } from "./workspace.js";
+import type { ExperimentRun } from "../../src/sim/panel-types.js";
+import { codePath, currentView, VIEWS, views, type ViewName } from "./views.js";
+import { persist } from "./util.js";
 
 const app = new App({ name: "codesys-workspace", version: "1.0.0" });
 
@@ -20,6 +23,10 @@ let stopped = false;
 let lastSeq = 0;
 let mode: "card" | "workspace" = "card";
 let inlineExpanded = false;
+/** The view on screen, and whether the workspace still needs its layout for it. */
+let view: ViewName | undefined;
+let workspaceStale = true;
+let runsKey = "";
 
 app.ontoolresult = (r) => {
   const id = (r.structuredContent as { panelId?: string } | undefined)?.panelId;
@@ -42,6 +49,10 @@ function layout() {
   document.body.classList.toggle("inline-expanded", !full && inlineExpanded);
   $("card").classList.toggle("hidden", mode !== "card");
   $("ws").classList.toggle("hidden", mode !== "workspace");
+  if (mode === "workspace" && workspaceStale && view) {
+    workspaceStale = false;
+    workspace.applyView(view);
+  }
   render();
 }
 
@@ -113,10 +124,69 @@ async function act(tool: string, args: Record<string, unknown>, what: string) {
   return r;
 }
 
+const viewLabel = (v: ViewName) => VIEWS.find(([id]) => id === v)![1];
+
+function pickView(v: ViewName) {
+  workspace.follow = false;
+  persist("ws-follow", false);
+  views.pinned = v;
+  render();
+  context(`The user switched the CODESYS panel to the ${viewLabel(v)} view.`);
+  pollSoon();
+}
+
+function followChanged() {
+  if (workspace.follow) views.pinned = undefined;
+  render();
+  pollSoon();
+}
+
+/** Accept / Revert (second click confirms) / show changes, from a review list. */
+function review(kind: string, path: string, btn: HTMLElement) {
+  if (kind === "diff") {
+    void setWorkspace(true).then(() => {
+      workspace.diff = true;
+      workspace.open(path, true);
+    });
+    return;
+  }
+  if (kind === "accept") {
+    void act("ui_accept_object", { path }, `accepted Claude's changes to ${path} after reviewing them`);
+    return;
+  }
+  if (btn.dataset.confirm !== "1") {
+    btn.dataset.confirm = "1";
+    btn.textContent = "Click again to revert";
+    setTimeout(() => {
+      btn.dataset.confirm = "";
+      btn.textContent = "Revert";
+    }, 4000);
+    return;
+  }
+  void act("ui_revert_object", { path }, `reverted ${path} in CODESYS to the reviewed version`);
+}
+
 const workspace = new Workspace({
   needObject: (path) => void fetchObject(path),
   context,
   act,
+  pickView,
+  followChanged,
+  review,
+});
+
+$("c-views").addEventListener("click", (e) => {
+  const v = (e.target as HTMLElement).closest<HTMLElement>("[data-view]")?.dataset.view as ViewName | undefined;
+  if (v) pickView(v);
+});
+$("c-follow").addEventListener("click", () => {
+  workspace.follow = !workspace.follow;
+  persist("ws-follow", workspace.follow);
+  followChanged();
+});
+$("c-view").addEventListener("click", (e) => {
+  const rv = (e.target as HTMLElement).closest<HTMLElement>("[data-rv]");
+  if (rv) review(rv.dataset.rv!, rv.closest<HTMLElement>("[data-path]")!.dataset.path!, rv);
 });
 
 $("c-hold").addEventListener("click", () => void act("ui_hold", { on: !model.state?.held }, model.state?.held ? "resumed Claude" : "paused Claude to drive the simulation themselves"));
@@ -139,7 +209,7 @@ async function fetchObject(path: string) {
   const r = await call<Omit<ObjData, "version">>("get_object", { path });
   if (!r) return;
   model.objects.set(path.toLowerCase(), { ...r, version: model.ws?.version ?? 0 });
-  if (mode === "workspace") workspace.render();
+  render();
 }
 
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
@@ -207,6 +277,21 @@ async function pollOnce() {
       }
     }
   }
+  // What the current view needs.
+  const v = currentView(workspace.follow);
+  if (v === "code" && mode === "card") {
+    const p = codePath();
+    const o = p ? model.objects.get(p.toLowerCase()) : undefined;
+    if (p && (!o || o.version !== model.ws?.version)) await fetchObject(p);
+  }
+  const key = (s?.experiments ?? []).map((e) => e.n).join(",");
+  if (key !== runsKey && (v === "tuning" || mode === "card")) {
+    const r = await call<{ runs: ExperimentRun[] }>("get_experiments");
+    if (r) {
+      views.runs = r.runs;
+      runsKey = key;
+    }
+  }
   if (mode === "workspace") {
     workspace.autoFollow();
     const paused = s?.status === "paused" && s.location && !s.location.harness;
@@ -223,7 +308,14 @@ async function pollOnce() {
 }
 
 function render() {
-  if (mode === "card") renderCard();
+  const v = currentView(workspace.follow);
+  if (v !== view) {
+    view = v;
+    if (mode === "workspace") workspace.applyView(v);
+    else workspaceStale = true;
+    if (mode === "workspace") return;
+  }
+  if (mode === "card") renderCard(v, workspace.follow);
   else workspace.render();
 }
 

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CODESYS workspace</title>
+<style>
+:root { color-scheme: light dark; --bg: #f6f7f9; --fg: #1d2330; --warn-bg: #fff4e0; --warn-fg: #8a5300; }
+@media (prefers-color-scheme: dark) { :root { --bg: #16181d; --fg: #e6e8ee; --warn-bg: #3a2a10; --warn-fg: #ffcf87; } }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
+body { display: flex; flex-direction: column; }
+#banner { padding: 8px 16px; background: var(--warn-bg); color: var(--warn-fg); }
+#panel { flex: 1; width: 100%; border: 0; display: block; }
+body.inline { align-items: center; overflow: auto; padding: 24px 16px; box-sizing: border-box; }
+body.inline #panel { flex: none; max-width: 760px; }
+</style>
+</head>
+<body>
+<div id="banner" hidden></div>
+<iframe id="panel" title="CODESYS workspace" sandbox="allow-scripts"></iframe>
+<script>/*VIEWER_SCRIPT*/</script>
+</body>
+</html>

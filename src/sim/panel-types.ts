@@ -32,6 +32,8 @@ export interface PanelState {
   /** The user paused Claude ("Pause Claude"): Claude's changing tools are held. */
   held?: boolean;
   heldSince?: string;
+  /** What Claude did last that moves the panel's view, and how long it has been quiet since. */
+  phase?: { view: "code" | "tests" | "simulation" | "tuning"; tool: string; quietMs: number };
   status: PanelStatus;
   project?: string;
   trust?: string;
@@ -50,7 +52,7 @@ export interface PanelState {
   feedback: { signal: string; follows: string; delay_ms: number; invert: boolean }[];
   experiments: { n: number; name: string; at: string; metrics: Record<string, number | string | null> }[];
   /** The last run_tests result. */
-  tests?: { at: string; total: number; passed: number; failed: number; failing: string[] };
+  tests?: { at: string; total: number; passed: number; failed: number; failing: string[]; results?: { name: string; obj: string; status: string; message?: string; durationMs?: number }[] };
   journalSeq: number;
   trendEpoch: number;
   warnings: string[];
@@ -69,4 +71,18 @@ export interface SourceView {
   /** The top-level object the file holds. */
   title: string;
   lines: SourceLine[];
+}
+
+/** One experiment run for the panel's Tuning view (get_experiments). */
+export interface ExperimentRun {
+  n: number;
+  name: string;
+  at: string;
+  /** Variables the run set before starting (tuning parameters such as fbPI._rKp). */
+  set: Record<string, string | number | boolean>;
+  pv?: string;
+  sp?: { var: string; value: number | string; at_s?: number };
+  metrics: Record<string, number | string | null>;
+  /** The process variable over time (downsampled). */
+  points: { t: number; pv: number | null }[];
 }

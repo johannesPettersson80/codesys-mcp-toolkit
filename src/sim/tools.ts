@@ -1,5 +1,6 @@
 /** Model-facing MCP tools for the truST simulation. */
 import type { McpServer } from "@modelcontextprotocol/server";
+import { annotationsFor, type ToolAnnotations } from "../annotations.js";
 import * as z from "zod/v4";
 import { BridgeError, type CodesysBridge } from "../bridge/bridge.js";
 import type { TreeNode } from "../codesys/st.js";
@@ -63,9 +64,15 @@ export function registerSimTools(server: McpServer, sim: SimController, driver?:
   /** Tools that change the simulation are held while the user has paused Claude (panel). */
   const HELD = new Set(["sim_start", "sim_stop", "run_scans", "run_for", "set_breakpoint", "clear_breakpoint", "continue", "step_over", "step_in", "step_out", "write_var", "force_var", "unforce_var", "set_plant_param", "run_experiment", "run_scenarios", "save_scenario"]);
   const reg = ((name: string, config: unknown, cb: (...a: unknown[]) => unknown) =>
-    server.registerTool(name, config as never, (HELD.has(name)
-      ? async (...a: unknown[]) => (driver?.held ? text(heldMessage(driver, name), true) : cb(...a))
-      : cb) as never)) as unknown as McpServer["registerTool"];
+    server.registerTool(
+      name,
+      { ...(config as object), annotations: annotationsFor(name, (config as { annotations?: ToolAnnotations }).annotations) } as never,
+      (async (...a: unknown[]) => {
+        if (HELD.has(name) && driver?.held) return text(heldMessage(driver, name), true);
+        driver?.note(name); // the panel picks its view from what Claude does
+        return cb(...a);
+      }) as never,
+    )) as unknown as McpServer["registerTool"];
   reg(
     "sync_mirror",
     {

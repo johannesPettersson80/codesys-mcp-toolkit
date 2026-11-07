@@ -1,5 +1,7 @@
 /** Model-facing MCP tools for CODESYS (ST only, offline only). */
 import { copyFile } from "node:fs/promises";
+import { annotationsFor, type ToolAnnotations } from "./annotations.js";
+import { getUiCapability } from "@modelcontextprotocol/ext-apps/server";
 import { existsSync } from "node:fs";
 import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
@@ -35,6 +37,8 @@ export interface AppContext {
   cache?: ProjectCache;
   /** Whether the user has paused Claude in the panel. */
   driver?: Driver;
+  /** The browser viewer (the panel in a normal browser window). */
+  viewer?: { url: string; open(force?: boolean): boolean };
 }
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
@@ -117,9 +121,15 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   /** Tools that change the project are held while the user has paused Claude (panel). */
   const HELD = new Set(["write_object", "create_object", "delete_object", "rename_object", "revert_object", "add_library", "create_project", "open_project", "close_project"]);
   const reg = ((name: string, config: unknown, cb: (...a: unknown[]) => unknown) =>
-    server.registerTool(name, config as never, (HELD.has(name)
-      ? async (...a: unknown[]) => (ctx.driver?.held ? text(heldMessage(ctx.driver, name), true) : cb(...a))
-      : cb) as never)) as unknown as McpServer["registerTool"];
+    server.registerTool(
+      name,
+      { ...(config as object), annotations: annotationsFor(name, (config as { annotations?: ToolAnnotations }).annotations) } as never,
+      (async (...a: unknown[]) => {
+        if (HELD.has(name) && ctx.driver?.held) return text(heldMessage(ctx.driver, name), true);
+        ctx.driver?.note(name); // the panel picks its view from what Claude does
+        return cb(...a);
+      }) as never,
+    )) as unknown as McpServer["registerTool"];
   const cache = ctx.cache;
   /** Export all ST (and keep the workspace cache current). */
   const exportNodes = async (): Promise<TreeNode[]> => {
@@ -144,16 +154,26 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
    */
   const sessionStart = async (project: string): Promise<string> => {
     cache?.reset(project);
-    if (!cache && !ctx.changes) return "";
+    // Where the chat can show MCP Apps the user watches in the panel (open_sim_panel);
+    // otherwise the same workspace opens in their browser.
+    const inChat = !!getUiCapability(server.server.getClientCapabilities());
+    const shown = inChat
+      ? " Call open_sim_panel now so the user can watch the project tree and the code as you write it."
+      : ctx.viewer
+        ? ctx.viewer.open()
+          ? ` The live CODESYS workspace opened in the user's browser (${ctx.viewer.url}): it shows the project tree and the code as you write it.`
+          : ` Live CODESYS workspace for the user: ${ctx.viewer.url}`
+        : "";
+    if (!cache && !ctx.changes) return shown;
     let nodes: TreeNode[];
     try {
       nodes = await exportNodes();
     } catch {
-      return "";
+      return shown;
     }
-    if (!ctx.changes) return "";
+    if (!ctx.changes) return shown;
     const taken = await ctx.changes.sessionStart(project, async () => nodes);
-    return taken ? " Checkpoint 'session-start' saved (get_changes shows what changes from here)." : "";
+    return (taken ? " Checkpoint 'session-start' saved (get_changes shows what changes from here)." : "") + shown;
   };
   const save = () => ({ save: ctx.autosave });
   const savedNote = (r: { saved?: boolean }) => (r.saved ? " Project saved." : ctx.autosave ? "" : " (not saved; call save_project)");

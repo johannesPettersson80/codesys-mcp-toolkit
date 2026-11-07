@@ -197,6 +197,40 @@ tr:last-child td { border-bottom: 0; }
 .list .err { color: var(--bad); font-weight: 600; } .list .wrn { color: var(--warn); font-weight: 600; }
 .bottom canvas { display: block; width: 100%; }
 .bottom .pid svg { height: 190px; }
+
+/* views */
+.vbar { display: flex; align-items: center; gap: 8px; margin: 10px 0 8px; flex-wrap: wrap; }
+.views button { position: relative; }
+.views button.auto::after { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.views .vc { margin-left: 5px; font-size: 10.5px; padding: 0 5px; border-radius: 8px; background: var(--bg2); color: var(--fg2); font-variant-numeric: tabular-nums; }
+.views .vc.bad { background: rgba(220, 38, 38, 0.14); color: var(--bad); } .views .vc.good { color: var(--ok); background: transparent; }
+.btn.sm { height: 24px; font-size: 11.5px; padding: 0 8px; }
+.cview { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 120px; }
+.cview .card-body { margin: 0; }
+.vhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12.5px; }
+.vhead .cl { margin-left: auto; font-size: 11.5px; } .vhead .cl.bad { color: var(--bad); font-weight: 600; } .vhead .cl.good { color: var(--ok); }
+.code.live { position: relative; max-height: 340px; overflow: auto; font: 12px/1.55 var(--mono); border-radius: 6px; background: var(--bg2); padding: 4px 0; }
+.code.live .part { font: 600 10px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--fg2); padding: 6px 12px 2px 44px; }
+.code.live .ln { display: flex; white-space: pre; } .code.live .no { width: 34px; flex: none; text-align: right; padding-right: 10px; color: var(--fg2); opacity: .7; user-select: none; }
+.code.live .ln.add { background: var(--add); } .code.live .ln.add .no { color: var(--ok); opacity: 1; }
+.problems { list-style: none; margin: 8px 0 0; padding: 0; font-size: 12px; } .problems li { padding: 2px 0; }
+.problems .err { color: var(--bad); font-weight: 600; } .problems .wrn { color: var(--warn); font-weight: 600; }
+.tests { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+.tests li { display: flex; gap: 8px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); } .tests li:first-child { border-top: 0; }
+.tests .ti { width: 14px; flex: none; text-align: center; font-weight: 700; } .tests li.pass .ti { color: var(--ok); } .tests li.fail .ti { color: var(--bad); }
+.tests .msg { font: 11.5px var(--mono); color: var(--bad); margin-top: 2px; white-space: pre-wrap; } .tests .t { margin-left: auto; font-size: 11px; }
+canvas.runs { display: block; width: 100%; height: 170px; }
+.runtab { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.runtab th { text-align: left; font-weight: 600; color: var(--fg2); font-size: 11px; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+.runtab td { padding: 4px 6px; border-bottom: 1px solid var(--line); } .runtab tr.best td { font-weight: 600; }
+.runtab .sw { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; }
+.review-list { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+.review-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); flex-wrap: wrap; } .review-list li:first-child { border-top: 0; }
+.review-list .rp { display: flex; flex-direction: column; flex: 1 1 140px; min-width: 0; } .review-list .rp b { overflow-wrap: anywhere; }
+.review-list .btn { height: 24px; font-size: 11.5px; }
+.mk.D { color: var(--bad); }
+.vpad { padding: 10px 12px; }
+#w-views { margin-left: 4px; }
 </style>
 </head>
 <body>
@@ -212,16 +246,16 @@ tr:last-child td { border-bottom: 0; }
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/></svg>Open workspace</button>
   </div>
   <div id="c-facts" class="facts"></div>
-  <div class="card-body">
-    <div class="box pid"><h3>Plant</h3><div id="c-pid"></div></div>
-    <div class="box"><h3>Trend</h3><canvas id="c-trend" class="trend"></canvas></div>
-  </div>
+  <div class="vbar"><div id="c-views" class="seg views" role="group" aria-label="View"></div>
+    <button id="c-follow" class="btn sm" aria-pressed="true" title="Switch views by what Claude is doing">Follow Claude</button></div>
+  <div id="c-view" class="cview"></div>
 </section>
 
 <section id="ws" class="hidden">
   <div class="ws-top">
     <span id="w-status" class="pill"><span class="dot"></span><span id="w-statusText">Connecting</span></span>
     <span id="w-meta" class="meta"></span>
+    <div id="w-views" class="seg views" role="group" aria-label="View"></div>
     <span id="w-activity" class="activity"></span>
     <div class="runbar" role="group" aria-label="Simulation">
       <button class="ib" data-run="continue" title="Continue: run until a breakpoint"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg></button>
@@ -261,7 +295,7 @@ tr:last-child td { border-bottom: 0; }
   </div>
   <section class="bottom">
     <div class="pane-head"><div class="seg" id="w-bottom-tabs">
-      <button data-t="trend" aria-pressed="true">Trend</button><button data-t="plant" aria-pressed="false">Plant</button><button data-t="tests" aria-pressed="false">Tests</button><button data-t="problems" aria-pressed="false">Problems</button><button data-t="activity" aria-pressed="false">Activity</button>
+      <button data-t="trend" aria-pressed="true">Trend</button><button data-t="plant" aria-pressed="false">Plant</button><button data-t="tests" aria-pressed="false">Tests</button><button data-t="tuning" aria-pressed="false">Tuning</button><button data-t="review" aria-pressed="false">Review</button><button data-t="problems" aria-pressed="false">Problems</button><button data-t="activity" aria-pressed="false">Activity</button>
     </div><span id="w-bottom-info" class="muted" style="margin-left:auto;font-size:11px"></span></div>
     <div id="w-bottom" class="scroll"></div>
   </section>
