@@ -124,11 +124,36 @@ export class ChangeStore {
     if (this.started.has(key)) return false;
     this.started.add(key);
     try {
-      await this.save(project, "session-start", await exportNodes());
+      const nodes = await exportNodes();
+      await this.save(project, "session-start", nodes);
+      // The review baseline starts as the session start; Accept moves it per object.
+      await this.save(project, REVIEW, nodes);
       return true;
     } catch {
       this.started.delete(key);
       return false;
     }
   }
+
+  /** The review baseline (what the user has accepted); falls back to session-start. */
+  async review(project: string): Promise<Checkpoint | undefined> {
+    return (await this.load(project, REVIEW)) ?? (await this.load(project, "session-start"));
+  }
+
+  /** Accept the current state of an object and everything under it into the review baseline. */
+  async accept(project: string, path: string, now: SnapObject[]): Promise<number> {
+    const cp = await this.review(project);
+    if (!cp) throw new Error("No review baseline yet: open the project first.");
+    const key = path.replace(/^\/+/, "").toLowerCase();
+    const inTree = (o: SnapObject) => o.path.toLowerCase() === key || o.path.toLowerCase().startsWith(key + "/");
+    const kept = cp.objects.filter((o) => !inTree(o));
+    const taken = now.filter(inTree);
+    const objects = [...kept, ...taken];
+    await mkdir(this.dir(project), { recursive: true });
+    await writeFile(this.file(project, REVIEW), JSON.stringify({ ...cp, name: REVIEW, at: new Date().toISOString(), objects }), "utf8");
+    return taken.length;
+  }
 }
+
+/** Name of the checkpoint the workspace's diffs and badges compare against. */
+export const REVIEW = "review";

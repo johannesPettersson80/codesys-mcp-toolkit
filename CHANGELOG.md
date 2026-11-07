@@ -52,6 +52,17 @@ Rewrite. See README "Migrating from v1".
     `get_trend`, `get_workspace`, `get_object`, `get_locals`, `get_values`)
     are hidden from clients without MCP Apps support. They read a project
     cache that the tools keep current, so the panel never calls CODESYS.
+  - **Interaction:**
+    - set breakpoints from the gutter;
+    - Continue (in the background), Pause and step from a run bar;
+    - force, set or release variables from the watch list;
+    - edit plant parameters (one restart for a batch);
+    - accept or revert Claude's change per object (a `review` checkpoint
+      the badges and diffs compare with);
+    - **Pause Claude**, which holds Claude's changing tools with a
+      `paused_by_user` answer while the user drives.
+    User actions are journaled as "User: …" and sent to Claude as model
+    context. They use app-only `ui_*` tools.
 
 ### Fixed
 - `compile` returns errors and warnings with object, line and code (#10).

@@ -20,7 +20,8 @@ export type EventKind =
   | "var_unforced"
   | "plant_param"
   | "experiment"
-  | "tests";
+  | "tests"
+  | "user";
 
 export interface SimEvent {
   seq: number;
@@ -34,10 +35,24 @@ export class Journal {
   private events: SimEvent[] = [];
   private seq = 0;
 
+  /** Set while a user action from the panel runs: its events are marked as the user's. */
+  actor?: "user";
+
   constructor(private readonly capacity = 5000) {}
 
+  /** Run fn with every event it journals marked as the user's. */
+  async asUser<T>(fn: () => Promise<T>): Promise<T> {
+    this.actor = "user";
+    try {
+      return await fn();
+    } finally {
+      this.actor = undefined;
+    }
+  }
+
   add(kind: EventKind, text: string, data?: Record<string, unknown>): SimEvent {
-    const e: SimEvent = { seq: ++this.seq, at: new Date().toISOString(), kind, text, ...(data ? { data } : {}) };
+    const by = this.actor;
+    const e: SimEvent = { seq: ++this.seq, at: new Date().toISOString(), kind, text: by ? `User: ${text}` : text, ...(data || by ? { data: { ...data, ...(by ? { by } : {}) } } : {}) };
     this.events.push(e);
     if (this.events.length > this.capacity) this.events.splice(0, this.events.length - this.capacity);
     return e;

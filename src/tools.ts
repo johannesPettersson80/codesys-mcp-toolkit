@@ -10,6 +10,7 @@ import { buildOutline, ioList, type OutlineTask } from "./codesys/outline.js";
 import { diffObjects, formatDiff, lineDiff, snapshot, type ChangeStore, type SnapObject } from "./codesys/changes.js";
 import { parseDeclaration } from "./codesys/decl.js";
 import type { ProjectCache } from "./codesys/cache.js";
+import { heldMessage, type Driver } from "./driver.js";
 import { checkDeclaration, kindLabel, normalizeText, type CreateKind, type TreeNode } from "./codesys/st.js";
 
 export interface AppContext {
@@ -32,6 +33,8 @@ export interface AppContext {
   changes?: ChangeStore;
   /** What the server knows about the open project, for the workspace panel. */
   cache?: ProjectCache;
+  /** Whether the user has paused Claude in the panel. */
+  driver?: Driver;
 }
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
@@ -111,6 +114,12 @@ export function formatBuild(messages: BuildMessage[]): { text: string; errors: n
 
 export function registerTools(server: McpServer, ctx: AppContext): void {
   const b = ctx.bridge;
+  /** Tools that change the project are held while the user has paused Claude (panel). */
+  const HELD = new Set(["write_object", "create_object", "delete_object", "rename_object", "revert_object", "add_library", "create_project", "open_project", "close_project"]);
+  const reg = ((name: string, config: unknown, cb: (...a: unknown[]) => unknown) =>
+    server.registerTool(name, config as never, (HELD.has(name)
+      ? async (...a: unknown[]) => (ctx.driver?.held ? text(heldMessage(ctx.driver, name), true) : cb(...a))
+      : cb) as never)) as unknown as McpServer["registerTool"];
   const cache = ctx.cache;
   /** Export all ST (and keep the workspace cache current). */
   const exportNodes = async (): Promise<TreeNode[]> => {
@@ -149,7 +158,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   const save = () => ({ save: ctx.autosave });
   const savedNote = (r: { saved?: boolean }) => (r.saved ? " Project saved." : ctx.autosave ? "" : " (not saved; call save_project)");
 
-  server.registerTool(
+  reg(
     "codesys_status",
     {
       description: "Show the CODESYS connection state, installation and open project. Never waits on CODESYS, so it is safe while CODESYS starts or is busy.",
@@ -170,7 +179,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     },
   );
 
-  server.registerTool(
+  reg(
     "open_project",
     {
       description: "Open a CODESYS .project file. All other tools work on the open project. Refuses to drop unsaved changes in a different open project unless discardChanges is true. Projects are opened without version upgrades.",
@@ -192,7 +201,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "create_project",
     {
       description: "Create a new CODESYS project and open it. template 'standard' copies CODESYS's Standard.project (device + application + PLC_PRG); 'empty' creates an empty project; any other value is a path to a template .project file.",
@@ -222,13 +231,13 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "save_project",
     { description: "Save the open project.", inputSchema: z.object({}) },
     async () => run(ctx, async () => `Saved ${(await b.call<{ path: string }>("project.save")).path}.`),
   );
 
-  server.registerTool(
+  reg(
     "close_project",
     {
       description: "Close the open project. Refuses when there are unsaved changes unless discardChanges is true.",
@@ -243,7 +252,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "get_project_tree",
     {
       description: "List the objects of the open project's application (or a sub-tree) with their kinds. Objects with graphical bodies (SFC/CFC/LD/FBD) are marked [non-ST]; v2 reads and edits ST only.",
@@ -263,7 +272,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "read_objects",
     {
       description: "Read the declaration and implementation text of ST objects: POUs, methods, property accessors (path 'FB/Prop/Get'), actions, interfaces, DUTs and GVLs.",
@@ -282,7 +291,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "write_object",
     {
       description: "Replace the declaration and/or implementation text of an ST object. The declaration must keep the object's header (e.g. 'FUNCTION_BLOCK FB_Pump', 'METHOD Start : BOOL'); a GVL declaration starts with VAR_GLOBAL; property accessors hold only VAR blocks.",
@@ -308,7 +317,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "create_object",
     {
       description:
@@ -347,7 +356,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "delete_object",
     { description: "Delete an object (and its children).", inputSchema: z.object({ path: pathArg }), annotations: { destructiveHint: true } },
     async ({ path }) =>
@@ -359,7 +368,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "rename_object",
     {
       description: "Rename an object. References in other code are NOT updated; search_code for the old name afterwards.",
@@ -374,7 +383,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "search_code",
     {
       description: "Search all ST text (declarations and implementations) of the application. Returns path, part and line for each hit.",
@@ -409,7 +418,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "compile",
     {
       description: "Build the active application and return errors and warnings with object and line. CODESYS only compiles POUs reachable from a task.",
@@ -432,7 +441,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "list_libraries",
     { description: "List the libraries referenced by the application's Library Manager.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
     async () =>
@@ -445,7 +454,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "add_library",
     {
       description: "Add a library reference by its full name, e.g. 'Standard, * (System)' or 'Util, 3.5.17.0 (System)'. The library must be installed in the CODESYS library repository.",
@@ -458,7 +467,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "list_tasks",
     { description: "List the application's tasks with interval, priority and the POUs each one calls.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
     async () =>
@@ -471,7 +480,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "get_outline",
     {
       description:
@@ -488,7 +497,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "get_io_list",
     {
       description:
@@ -523,7 +532,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
 
   type LibApi = { library: string; path: string; title?: string; version?: string; company?: string; compiled?: boolean; nodes: TreeNode[] };
   const libCache = new Map<string, LibApi>();
-  server.registerTool(
+  reg(
     "get_library_api",
     {
       description:
@@ -562,7 +571,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     return { store: ctx.changes, project: ctx.project.path };
   };
 
-  server.registerTool(
+  reg(
     "checkpoint",
     {
       description:
@@ -581,7 +590,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "get_changes",
     {
       description:
@@ -631,80 +640,95 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "revert_object",
     {
       description:
         "Put an object (and everything under it, e.g. an FB with its methods and properties) back to how it was at a checkpoint (default 'session-start'): modified objects are rewritten, objects added since are deleted, removed ones are recreated.",
       inputSchema: z.object({ path: pathArg, to: z.string().optional() }),
     },
-    async ({ path, to }) =>
-      run(ctx, async () => {
-        const { store: s, project } = store();
-        const name = to ?? "session-start";
-        const cp = await s.load(project, name);
-        if (!cp) throw new Error(`No checkpoint '${name}'.`);
-        const key = path.replace(/^\/+/, "").toLowerCase();
-        const inTree = (o: SnapObject) => o.path.toLowerCase() === key || o.path.toLowerCase().startsWith(key + "/");
-        const old = cp.objects.filter(inTree);
-        const now = snapshot(await exportNodes()).filter(inTree);
-        if (!old.length && !now.length) throw new Error(`No object '${path}' now or in '${name}'.`);
-        const oldBy = new Map(old.map((o) => [o.path.toLowerCase(), o] as const));
-        const nowBy = new Map(now.map((o) => [o.path.toLowerCase(), o] as const));
-        const done: string[] = [];
-        const same = (a?: string, c?: string) => (normalizeText(a ?? "") ?? "").replace(/\s+$/, "") === (normalizeText(c ?? "") ?? "").replace(/\s+$/, "");
-        // 1. delete what was added (top-most only; children go with their parent)
-        const added = now.filter((o) => !oldBy.has(o.path.toLowerCase()));
-        for (const o of added) {
-          if (added.some((p) => o.path.toLowerCase().startsWith(p.path.toLowerCase() + "/"))) continue;
-          await b.call("object.delete", { path: o.path, save: false });
-          done.push(`deleted ${o.path}`);
-        }
-        // 2. recreate what was removed (parents first) and rewrite what changed
-        const ordered = [...old].sort((x, y) => x.path.split("/").length - y.path.split("/").length);
-        for (const o of ordered) {
-          const cur = nowBy.get(o.path.toLowerCase());
-          if (!cur) {
-            if (o.kind === "accessor") {
-              // created with its property; write its text below
-            } else {
-              const parent = o.path.includes("/") ? o.path.slice(0, o.path.lastIndexOf("/")) : undefined;
-              const header = parseDeclaration(o.declaration).header;
-              const kind = o.kind === "pou" ? o.sub : o.kind === "interface_method" ? "method" : o.kind;
-              await b.call("object.create", {
-                parent,
-                kind,
-                name: o.name,
-                return_type: header.returnType,
-                dut_type: o.kind === "dut" ? o.sub : undefined,
-                base_interfaces: o.kind === "interface" ? "" : undefined,
-                declaration: o.kind === "folder" ? undefined : o.declaration,
-                implementation: o.implementation,
-                save: false,
-              });
-              done.push(`recreated ${o.path}`);
-              continue;
-            }
-          }
-          if (o.kind === "folder") continue;
-          const args: Record<string, unknown> = { path: o.path, save: false };
-          if (o.declaration !== undefined && !same(o.declaration, cur?.declaration)) args.declaration = o.declaration;
-          if (o.implementation !== undefined && !same(o.implementation, cur?.implementation)) args.implementation = o.implementation;
-          if (args.declaration === undefined && args.implementation === undefined) continue;
-          await b.call("object.write", args);
-          done.push(`restored ${o.path}`);
-        }
-        if (!done.length) return `${path} is already as it was at '${name}'.`;
-        let saved = "";
-        if (ctx.autosave) {
-          await b.call("project.save");
-          saved = " Project saved.";
-        }
-        if (cache) {
-          await exportNodes().catch(() => undefined);
-          cache.touch(path.replace(/^\/+/, ""), "revert");
-        }
-        return `Reverted ${path} to '${name}' (${cp.at}): ${done.join(", ")}.${saved}`;
-      }),
+    async ({ path, to }) => run(ctx, () => revertObject(ctx, path, to ?? "session-start")),
   );
+}
+
+/**
+ * Put an object (and everything under it) back to how it was at a checkpoint:
+ * modified objects are rewritten, objects added since are deleted, removed
+ * ones are recreated. Used by revert_object and by the panel's Revert.
+ */
+export async function revertObject(ctx: AppContext, path: string, name: string): Promise<string> {
+  if (!ctx.changes) throw new Error("Change tracking is not enabled.");
+  if (!ctx.project) throw new Error("No project is open. Call open_project first.");
+  const s = ctx.changes;
+  const project = ctx.project.path;
+  const b = ctx.bridge;
+  const cache = ctx.cache;
+  const exportNodes = async () => {
+    const nodes = (await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 })).nodes;
+    cache?.setAll(nodes);
+    return nodes;
+  };
+  const cp = await s.load(project, name);
+  if (!cp) throw new Error(`No checkpoint '${name}'.`);
+  const key = path.replace(/^\/+/, "").toLowerCase();
+  const inTree = (o: SnapObject) => o.path.toLowerCase() === key || o.path.toLowerCase().startsWith(key + "/");
+  const old = cp.objects.filter(inTree);
+  const now = snapshot(await exportNodes()).filter(inTree);
+  if (!old.length && !now.length) throw new Error(`No object '${path}' now or in '${name}'.`);
+  const oldBy = new Map(old.map((o) => [o.path.toLowerCase(), o] as const));
+  const nowBy = new Map(now.map((o) => [o.path.toLowerCase(), o] as const));
+  const done: string[] = [];
+  const same = (a?: string, c?: string) => (normalizeText(a ?? "") ?? "").replace(/\s+$/, "") === (normalizeText(c ?? "") ?? "").replace(/\s+$/, "");
+  // 1. delete what was added (top-most only; children go with their parent)
+  const added = now.filter((o) => !oldBy.has(o.path.toLowerCase()));
+  for (const o of added) {
+    if (added.some((p) => o.path.toLowerCase().startsWith(p.path.toLowerCase() + "/"))) continue;
+    await b.call("object.delete", { path: o.path, save: false });
+    done.push(`deleted ${o.path}`);
+  }
+  // 2. recreate what was removed (parents first) and rewrite what changed
+  const ordered = [...old].sort((x, y) => x.path.split("/").length - y.path.split("/").length);
+  for (const o of ordered) {
+    const cur = nowBy.get(o.path.toLowerCase());
+    if (!cur) {
+      if (o.kind === "accessor") {
+        // created with its property; write its text below
+      } else {
+        const parent = o.path.includes("/") ? o.path.slice(0, o.path.lastIndexOf("/")) : undefined;
+        const header = parseDeclaration(o.declaration).header;
+        const kind = o.kind === "pou" ? o.sub : o.kind === "interface_method" ? "method" : o.kind;
+        await b.call("object.create", {
+          parent,
+          kind,
+          name: o.name,
+          return_type: header.returnType,
+          dut_type: o.kind === "dut" ? o.sub : undefined,
+          base_interfaces: o.kind === "interface" ? "" : undefined,
+          declaration: o.kind === "folder" ? undefined : o.declaration,
+          implementation: o.implementation,
+          save: false,
+        });
+        done.push(`recreated ${o.path}`);
+        continue;
+      }
+    }
+    if (o.kind === "folder") continue;
+    const args: Record<string, unknown> = { path: o.path, save: false };
+    if (o.declaration !== undefined && !same(o.declaration, cur?.declaration)) args.declaration = o.declaration;
+    if (o.implementation !== undefined && !same(o.implementation, cur?.implementation)) args.implementation = o.implementation;
+    if (args.declaration === undefined && args.implementation === undefined) continue;
+    await b.call("object.write", args);
+    done.push(`restored ${o.path}`);
+  }
+  if (!done.length) return `${path} is already as it was at '${name}'.`;
+  let saved = "";
+  if (ctx.autosave) {
+    await b.call("project.save");
+    saved = " Project saved.";
+  }
+  if (cache) {
+    await exportNodes().catch(() => undefined);
+    cache.touch(path.replace(/^\/+/, ""), "revert");
+  }
+  return `Reverted ${path} to '${name}' (${cp.at}): ${done.join(", ")}.${saved}`;
 }

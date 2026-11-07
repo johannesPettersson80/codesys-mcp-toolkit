@@ -86,6 +86,11 @@ export class ProjectCache {
     this.version++;
   }
 
+  /** Something the workspace shows changed without a node change (e.g. the review baseline). */
+  bump(): void {
+    this.version++;
+  }
+
   touch(path: string, action: Focus["action"]): void {
     this.focus = { path, action, at: new Date().toISOString() };
     this.version++;

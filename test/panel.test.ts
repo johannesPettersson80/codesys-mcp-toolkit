@@ -13,19 +13,20 @@ import { Recorder } from "../src/sim/recorder.js";
 import type { AppContext } from "../src/tools.js";
 import { LINES, TANK_PLANT, tankNodes, tankTasks, tankTestNodes } from "./fixtures/tank.js";
 import { ProjectCache } from "../src/codesys/cache.js";
-import { ChangeStore } from "../src/codesys/changes.js";
+import { ChangeStore, diffObjects, snapshot } from "../src/codesys/changes.js";
+import { Driver } from "../src/driver.js";
 import { tempDir } from "./helpers.js";
 
 const UI = { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } };
 
-async function connect(withUi: boolean, project?: string) {
+async function connect(withUi: boolean, project?: string, driver: Driver | null = new Driver()) {
   const root = tempDir("cmcp-panel-");
   const proj = project ?? join(root, "Tank.project");
   writeFileSync(join(root, "Tank.plant.toml"), TANK_PLANT);
   const sim = new SimController({ exportSt: async () => tankNodes(), tasks: async () => tankTasks(), projectPath: () => (project === "" ? undefined : proj) }, { mirrorRoot: join(root, "m"), git: false });
   const cache = new ProjectCache();
   const changes = new ChangeStore(join(root, "cp"));
-  const ctx = { bridge: {} as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes, ...(project === "" ? {} : { project: { path: proj } }) } as AppContext;
+  const ctx = { bridge: {} as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes, driver: driver ?? undefined, ...(project === "" ? {} : { project: { path: proj } }) } as AppContext;
   const server = createServer(ctx);
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
@@ -35,7 +36,7 @@ async function connect(withUi: boolean, project?: string) {
     const r = (await client.callTool({ name, arguments: args })) as { structuredContent?: T; content: { text: string }[]; isError?: boolean };
     return r;
   };
-  return { client, sim, call, cache, changes, project: proj };
+  return { client, sim, call, cache, changes, driver, project: proj };
 }
 
 describe("panel registration", () => {
@@ -90,7 +91,7 @@ describe("panel data", () => {
     await sim.sync();
     const s = (await call<PanelState>("get_sim_state")).structuredContent!;
     expect(s.status).toBe("stopped");
-    expect(s.plants).toEqual([{ id: "T101", model: "gravity_tank", inputs: ["GVL_IO.lrFV101_FlowCmd"], outputs: ["GVL_IO.lrLT101_Level"] }]);
+    expect(s.plants).toEqual([{ id: "T101", model: "gravity_tank", inputs: ["GVL_IO.lrFV101_FlowCmd"], outputs: ["GVL_IO.lrLT101_Level"], parameters: { area_m2: 1, outflow_coefficient_m2_sqrt_m_per_s: 0.03 }, initial_state: [0.2] }]);
     expect(s.signals.map((x) => `${x.name}:${x.role}:${x.address ?? ""}`)).toEqual([
       "GVL_IO.lrLT101_Level:plant_out:%IL0",
       "GVL_IO.lrFV101_FlowCmd:plant_in:%QL0",
@@ -164,6 +165,70 @@ describe("workspace data", () => {
     const { call } = await connect(true);
     expect((await call("get_locals")).structuredContent).toEqual({ paused: false, stack: [], locals: [] });
     expect((await call("get_values", { names: ["GVL_IO.lrLT101_Level"] })).structuredContent).toEqual({ values: {} });
+  });
+});
+
+describe("user actions (Phase 7)", () => {
+  type Act = { ok: boolean; message: string };
+  const text = (r: { content: { text: string }[] }) => r.content.map((c) => c.text).join("\n");
+
+  it("are app-only tools", async () => {
+    const { client } = await connect(true);
+    const tools = (await client.listTools()).tools;
+    for (const n of ["ui_set_breakpoint", "ui_clear_breakpoint", "ui_continue", "ui_pause", "ui_step", "ui_run_for", "ui_force_var", "ui_unforce_var", "ui_write_var", "ui_set_plant_params", "ui_hold", "ui_accept_object", "ui_revert_object"]) {
+      const t = tools.find((x) => x.name === n);
+      expect(t, n).toBeDefined();
+      expect((t!._meta as { ui: { visibility: string[] } }).ui.visibility).toEqual(["app"]);
+    }
+    const plain = (await (await connect(false)).client.listTools()).tools.map((t) => t.name);
+    expect(plain.some((n) => n.startsWith("ui_"))).toBe(false);
+  });
+
+  it("Pause Claude holds the tools that change things, not the reading ones", async () => {
+    const { call, driver } = await connect(true);
+    const on = (await call<Act>("ui_hold", { on: true })).structuredContent!;
+    expect(on).toEqual({ ok: true, message: "paused Claude and took over the simulation" });
+    expect(driver!.held).toBe(true);
+    const s = (await call<PanelState>("get_sim_state")).structuredContent!;
+    expect(s.held).toBe(true);
+    expect(s.heldSince).toBe(driver!.since);
+    for (const [tool, args] of [["run_scans", { n: 1 }], ["write_var", { name: "GVL_Par.rLevelSP", value: "1" }], ["write_object", { path: "FB_PI", implementation: "x" }], ["create_project", { path: "C:/x.project" }]] as const) {
+      const r = await call(tool, args);
+      expect(r.isError, tool).toBe(true);
+      expect(text(r), tool).toMatch(new RegExp(`^paused_by_user: .*so ${tool} is held`));
+    }
+    expect(text(await call("sim_status"))).not.toMatch(/paused_by_user/);
+    const ev = (await call<{ events: { kind: string; text: string; data?: { by?: string } }[] }>("get_events", { since: 0 })).structuredContent!.events;
+    expect(ev.at(-1)).toMatchObject({ kind: "user", text: "User: paused Claude and took over the simulation", data: { by: "user" } });
+    expect((await call<Act>("ui_hold", { on: false })).structuredContent!.message).toBe("resumed Claude");
+    expect(text(await call("run_scans", { n: 1 }))).not.toMatch(/paused_by_user/);
+  });
+
+  it("report failures as ok:false instead of tool errors", async () => {
+    const { call } = await connect(true);
+    const r = await call<Act>("ui_step", { kind: "step_over" });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent!.ok).toBe(false);
+    const none = await connect(true, undefined, null);
+    expect((await none.call<Act>("ui_hold", { on: true })).structuredContent).toEqual({ ok: false, message: "Pause Claude is not available." });
+    expect((await none.call<Act>("ui_accept_object", { path: "FB_PI" })).structuredContent!.ok).toBe(false);
+  });
+
+  it("Accept moves the review baseline, not session-start", async () => {
+    const { call, cache, changes, project } = await connect(true);
+    cache.reset(project);
+    cache.setAll(tankNodes());
+    await changes.sessionStart(project, async () => tankNodes());
+    cache.upsert({ ...cache.get("FB_PI/Reset")!, implementation: "rY := 1.0;" });
+    type Ws = { tree: { path: string; change?: string }[]; changeCount: number };
+    const change = async (p: string) => (await call<Ws>("get_workspace")).structuredContent!.tree.find((n) => n.path === p)!.change;
+    expect(await change("FB_PI/Reset")).toBe("M");
+    expect((await call<Act>("ui_accept_object", { path: "FB_PI" })).structuredContent).toEqual({ ok: true, message: expect.stringMatching(/^accepted the changes to FB_PI and its \d+ child objects$/) });
+    expect(await change("FB_PI/Reset")).toBeUndefined();
+    type Obj = { base: { implementation: string } | null };
+    expect((await call<Obj>("get_object", { path: "FB_PI/Reset" })).structuredContent!.base!.implementation).toBe("rY := 1.0;");
+    // session-start is untouched, so get_changes still shows Claude's whole session
+    expect(diffObjects((await changes.load(project, "session-start"))!.objects, snapshot(cache.nodes!)).map((c) => c.path)).toEqual(["FB_PI/Reset"]);
   });
 });
 

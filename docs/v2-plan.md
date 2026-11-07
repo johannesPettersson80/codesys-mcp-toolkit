@@ -411,6 +411,46 @@ On top of the workspace:
 - "pause Claude";
 - accept or revert per object from the diff.
 
+**Status (2026-11-07): done.** "Plant sliders" became a parameter form,
+because truST applies plant changes only on restart: a slider would restart
+the simulation on every move. The form applies a batch with one restart.
+
+How it works:
+- **User actions** are app-only `ui_*` tools. They answer `{ok, message}`
+  instead of failing, and the panel shows the message as a toast. Each
+  action is journaled as "User: …". The panel also sends the last few
+  actions to Claude as model context.
+- **While Claude is busy** (a run, an experiment), actions that would fight
+  it are refused. Pause, breakpoints, hold, accept and revert still work.
+- **Continue** runs in the background, so the panel stays live. Pause
+  interrupts it at the next stop check.
+- **Pause Claude** is a `Driver` flag. A wrapper on tool registration holds
+  the tools that change the project (write/create/delete/rename/revert,
+  libraries, project open/close/create) or the simulation (start/stop/run,
+  breakpoints, stepping, writes, forces, plant, experiments, scenarios). A
+  held tool answers `paused_by_user` with how to proceed. Reading tools,
+  compile and tests are not held.
+- **Review:** sessionStart saves a `review` checkpoint next to
+  `session-start`. Accept replaces one object's subtree in it. The badges
+  and diffs compare with it, and Revert restores it through the same code
+  as `revert_object`. Claude's `get_changes` still defaults to
+  `session-start`.
+
+Verified in the dev host:
+- a gutter breakpoint, forcing from the watch list, Continue to the
+  breakpoint, and step over;
+- Pause Claude from the card (Claude's `run_scans` then answers
+  `paused_by_user`), and Resume;
+- plant parameters applied with a restart;
+- adding a watch with Enter;
+- Accept on Claude's FB_PI edit.
+
+Revert is covered by a test against the fake CODESYS.
+
+Found while verifying: MCP App views run in an iframe sandbox without
+`allow-forms`. That sandbox drops form `submit` events, so the panel uses
+click and Enter handlers.
+
 ### 10.1 Checks before Phase 5
 
 1. Does truST run test programs (`TEST_PROGRAM` / `TEST_FUNCTION_BLOCK`

@@ -9,6 +9,7 @@ import { ExprError } from "./expr.js";
 import { MirrorError, type TaskInfo } from "./mirror.js";
 import { PlantConfigError } from "./plant.js";
 import { ScenarioError } from "./scenarios.js";
+import { heldMessage, type Driver } from "../driver.js";
 
 /** CODESYS ops the simulation may use. Read-only; nothing that writes or goes online. */
 export const SIM_CODESYS_OPS = ["export", "tasks.list"] as const;
@@ -58,8 +59,14 @@ const experimentShape = {
 };
 const value = z.string().describe("Structured Text literal: 0.6, TRUE, 'text', T#2s, E_Mode.AUTO");
 
-export function registerSimTools(server: McpServer, sim: SimController): void {
-  server.registerTool(
+export function registerSimTools(server: McpServer, sim: SimController, driver?: Driver): void {
+  /** Tools that change the simulation are held while the user has paused Claude (panel). */
+  const HELD = new Set(["sim_start", "sim_stop", "run_scans", "run_for", "set_breakpoint", "clear_breakpoint", "continue", "step_over", "step_in", "step_out", "write_var", "force_var", "unforce_var", "set_plant_param", "run_experiment", "run_scenarios", "save_scenario"]);
+  const reg = ((name: string, config: unknown, cb: (...a: unknown[]) => unknown) =>
+    server.registerTool(name, config as never, (HELD.has(name)
+      ? async (...a: unknown[]) => (driver?.held ? text(heldMessage(driver, name), true) : cb(...a))
+      : cb) as never)) as unknown as McpServer["registerTool"];
+  reg(
     "sync_mirror",
     {
       description:
@@ -85,7 +92,7 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
       }),
   );
 
-  server.registerTool(
+  reg(
     "sim_start",
     {
       description:
@@ -98,15 +105,15 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     async ({ speed, sync }) => run(() => sim.start({ timeScale: speed, sync })),
   );
 
-  server.registerTool("sim_stop", { description: "Stop the simulation and its trust-runtime process.", inputSchema: z.object({}) }, async () => run(() => sim.stop()));
+  reg("sim_stop", { description: "Stop the simulation and its trust-runtime process.", inputSchema: z.object({}) }, async () => run(() => sim.stop()));
 
-  server.registerTool(
+  reg(
     "sim_status",
     { description: "Simulation state: running or paused, where, scan and simulated time, breakpoints, forces, plant overrides.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
     async () => run(() => sim.status()),
   );
 
-  server.registerTool(
+  reg(
     "run_scans",
     {
       description: "Run exactly n PLC scans in simulated time, then pause. Stops early at a breakpoint (and shows where).",
@@ -115,7 +122,7 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     async ({ n }) => run(() => sim.runScans(n)),
   );
 
-  server.registerTool(
+  reg(
     "run_for",
     {
       description: "Run for a span of simulated time, then pause. Optional speed sets the time scale (simulated seconds per wall second). Stops early at a breakpoint.",
@@ -124,7 +131,7 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     async ({ seconds, speed }) => run(() => sim.runFor(seconds, speed)),
   );
 
-  server.registerTool(
+  reg(
     "set_breakpoint",
     {
       description:
@@ -138,7 +145,7 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     async ({ path, line, condition }) => run(() => sim.setBreakpoint(path, line, condition)),
   );
 
-  server.registerTool(
+  reg(
     "clear_breakpoint",
     {
       description: "Clear breakpoints by id, by object (and line), or all.",
@@ -147,7 +154,7 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     async ({ id, path, line, all }) => run(() => sim.clearBreakpoint({ id, obj: path, line, all })),
   );
 
-  server.registerTool(
+  reg(
     "continue",
     {
       description: "Resume and wait until a breakpoint is hit (or timeout, then pause). Returns the location, source lines and local variables.",
@@ -161,10 +168,10 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     ["step_in", "Step into the call on the current line (FB, method, function)."],
     ["step_out", "Run to the end of the current POU and stop in its caller."],
   ] as const) {
-    server.registerTool(name, { description: desc + " Needs a paused simulation.", inputSchema: z.object({}) }, async () => run(() => sim.step(name)));
+    reg(name, { description: desc + " Needs a paused simulation.", inputSchema: z.object({}) }, async () => run(() => sim.step(name)));
   }
 
-  server.registerTool(
+  reg(
     "read_vars",
     {
       description: "Read simulation variables (globals, program variables, FB instance members).",
@@ -174,21 +181,21 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     async ({ names }) => run(() => sim.readVars(names)),
   );
 
-  server.registerTool(
+  reg(
     "write_var",
     { description: "Write a value once (the program may overwrite it). Applied at the start of the next scan.", inputSchema: z.object({ name: varName, value }) },
     async ({ name, value: v }) => run(() => sim.writeVar(name, v)),
   );
 
-  server.registerTool(
+  reg(
     "force_var",
     { description: "Force a variable to a value until unforce_var (e.g. a sensor fault).", inputSchema: z.object({ name: varName, value }) },
     async ({ name, value: v }) => run(() => sim.forceVar(name, v)),
   );
 
-  server.registerTool("unforce_var", { description: "Release a forced variable.", inputSchema: z.object({ name: varName }) }, async ({ name }) => run(() => sim.unforceVar(name)));
+  reg("unforce_var", { description: "Release a forced variable.", inputSchema: z.object({ name: varName }) }, async ({ name }) => run(() => sim.unforceVar(name)));
 
-  server.registerTool(
+  reg(
     "set_plant_param",
     {
       description:
@@ -202,7 +209,7 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     async ({ plant, param, value: v }) => run(() => sim.setPlantParam(plant, param, v)),
   );
 
-  server.registerTool(
+  reg(
     "run_experiment",
     {
       description:
@@ -212,7 +219,7 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     async (spec) => run(() => sim.runExperiment(spec)),
   );
 
-  server.registerTool(
+  reg(
     "save_scenario",
     {
       description:
@@ -227,7 +234,7 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     async ({ delete: del, ...s }) => run(() => sim.saveScenario(s, { delete: del })),
   );
 
-  server.registerTool(
+  reg(
     "run_scenarios",
     {
       description:
@@ -246,7 +253,7 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     },
   );
 
-  server.registerTool(
+  reg(
     "run_tests",
     {
       description: [
@@ -272,7 +279,7 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     },
   );
 
-  server.registerTool(
+  reg(
     "experiment_log",
     { description: "List the experiments run in this session with their metrics.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
     async () => run(async () => sim.experimentLog()),

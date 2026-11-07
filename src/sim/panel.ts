@@ -17,7 +17,8 @@ import * as z from "zod/v4";
 import type { SimController } from "./controller.js";
 import type { PanelState } from "./panel-types.js";
 import type { ProjectCache } from "../codesys/cache.js";
-import { diffObjects, snapshot, type ChangeStore, type SnapObject } from "../codesys/changes.js";
+import { diffObjects, REVIEW, snapshot, type ChangeStore, type SnapObject } from "../codesys/changes.js";
+import type { Driver } from "../driver.js";
 import { parseDeclaration } from "../codesys/decl.js";
 
 export const PANEL_URI = "ui://codesys/sim-panel.html";
@@ -42,6 +43,10 @@ export interface WorkspaceDeps {
   cache?: ProjectCache;
   changes?: ChangeStore;
   project: () => string | undefined;
+  /** "Pause Claude". */
+  driver?: Driver;
+  /** Revert an object in CODESYS to a checkpoint (the revert_object logic). */
+  revert?: (path: string, to: string) => Promise<string>;
 }
 
 export function registerPanel(server: McpServer, sim: SimController, ws: WorkspaceDeps = { project: () => undefined }): void {
@@ -94,7 +99,11 @@ export function registerPanel(server: McpServer, sim: SimController, ws: Workspa
       },
       async ({ panelId }) => {
         const s = await sim.panelState();
-        const state: PanelState = { ...s, current: !panelId || !latestPanel || panelId === latestPanel };
+        const state: PanelState = {
+          ...s,
+          current: !panelId || !latestPanel || panelId === latestPanel,
+          ...(ws.driver?.held ? { held: true, heldSince: ws.driver.since } : {}),
+        };
         return json(state);
       },
     ),
@@ -149,7 +158,7 @@ export function registerPanel(server: McpServer, sim: SimController, ws: Workspa
     const project = ws.project();
     if (!project || !ws.changes) return undefined;
     if (baseline?.project !== project) {
-      const cp = await ws.changes.load(project, "session-start");
+      const cp = await ws.changes.review(project);
       if (!cp) return undefined;
       baseline = { project, objects: new Map(cp.objects.map((o) => [o.path.toLowerCase(), o] as const)) };
     }
@@ -261,6 +270,82 @@ export function registerPanel(server: McpServer, sim: SimController, ws: Workspa
       },
       async ({ names }) => json({ values: await sim.panelValues(names).catch(() => ({})) }),
     ),
+  );
+
+  // ---- user actions from the panel (Phase 7)
+
+  /**
+   * A user action: journaled as the user's (the model sees it in events and
+   * gets told through model context by the panel). Run controls are refused
+   * while Claude is in the middle of a run.
+   */
+  const action = <S extends z.ZodObject>(name: string, description: string, schema: S, fn: (a: z.infer<S>) => Promise<string>, o: { whileBusy?: boolean } = {}) => {
+    tools.push(
+      registerAppTool(server, name, { description: `Panel (user action): ${description}`, inputSchema: schema, _meta: appOnly }, (async (a: z.infer<S>) => {
+        try {
+          if (!o.whileBusy && sim.busyWith) return json({ ok: false, message: `Claude is busy (${sim.busyWith}). Wait until it finishes, or use Pause Claude.` });
+          const message = await sim.journal.asUser(() => fn(a));
+          return json({ ok: true, message });
+        } catch (e) {
+          return json({ ok: false, message: (e as Error).message });
+        }
+      }) as never),
+    );
+  };
+  const note = async (text: string) => {
+    await sim.journal.asUser(async () => void sim.journal.add("user", text));
+    return text;
+  };
+
+  action("ui_set_breakpoint", "set a breakpoint on an implementation line.", z.object({ path: z.string(), line: z.number().int().min(1), condition: z.string().optional() }), (a) => sim.setBreakpoint(a.path, a.line, a.condition), { whileBusy: true });
+  action("ui_clear_breakpoint", "clear a breakpoint.", z.object({ id: z.number().int() }), (a) => sim.clearBreakpoint({ id: a.id }), { whileBusy: true });
+  action("ui_continue", "run until a breakpoint (in the background; Pause stops it).", z.object({}), async () => sim.continueInBackground());
+  action("ui_pause", "pause the simulation.", z.object({}), () => sim.pauseNow(), { whileBusy: true });
+  action("ui_step", "step over, into or out of the current statement.", z.object({ kind: z.enum(["step_over", "step_in", "step_out"]) }), (a) => sim.step(a.kind));
+  action("ui_run_for", "run for some simulated seconds.", z.object({ seconds: z.number().positive().max(3600) }), (a) => sim.runFor(a.seconds));
+  action("ui_force_var", "force a variable.", z.object({ name: z.string(), value: z.string() }), (a) => sim.forceVar(a.name, a.value));
+  action("ui_unforce_var", "release a forced variable.", z.object({ name: z.string() }), (a) => sim.unforceVar(a.name));
+  action("ui_write_var", "write a value once.", z.object({ name: z.string(), value: z.string() }), (a) => sim.writeVar(a.name, a.value));
+  action("ui_set_plant_params", "change plant parameters (restarts the simulation).", z.object({ plant: z.string(), params: z.record(z.string(), z.number()) }), (a) => sim.setPlantParams(a.plant, a.params));
+  action(
+    "ui_hold",
+    "pause or resume Claude (its tools that change the project or simulation are held).",
+    z.object({ on: z.boolean() }),
+    async (a) => {
+      if (!ws.driver) throw new Error("Pause Claude is not available.");
+      ws.driver.hold(a.on);
+      ws.cache?.bump();
+      return note(a.on ? "paused Claude and took over the simulation" : "resumed Claude");
+    },
+    { whileBusy: true },
+  );
+  action(
+    "ui_accept_object",
+    "accept the current text of an object (and its children) as reviewed.",
+    z.object({ path: z.string() }),
+    async (a) => {
+      const project = ws.project();
+      if (!project || !ws.changes || !ws.cache?.nodes) throw new Error("No project is open.");
+      const n = await ws.changes.accept(project, a.path, snapshot(ws.cache.nodes));
+      baseline = undefined;
+      ws.cache.bump();
+      return note(`accepted the changes to ${a.path}${n > 1 ? ` and its ${n - 1} child object${n === 2 ? "" : "s"}` : ""}`);
+    },
+    { whileBusy: true },
+  );
+  action(
+    "ui_revert_object",
+    "revert an object (and its children) in CODESYS to the reviewed text.",
+    z.object({ path: z.string() }),
+    async (a) => {
+      if (!ws.revert) throw new Error("Revert is not available.");
+      const r = await ws.revert(a.path, REVIEW);
+      baseline = undefined;
+      ws.cache?.bump();
+      await note(`reverted ${a.path} in CODESYS to the reviewed version`);
+      return r;
+    },
+    { whileBusy: true },
   );
 
   // Clients without MCP Apps support would show app-only tools to the model; hide them there.

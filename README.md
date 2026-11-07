@@ -232,13 +232,14 @@ In the chat it is a compact card:
 **Open workspace** switches to full screen, or expands in place where the
 client has no full screen. The workspace is laid out like CODESYS:
 
-- **Project tree** with badges: changed since the session started (A/M),
+- **Project tree** with badges: changed since you last reviewed it (A/M),
   compile errors, breakpoints, where the simulation stopped (▶), test
   results (✓/✗) and what Claude touched last (✦). There's a filter box.
 - **Editor tabs** with the declaration above the implementation. Line
   numbers and text are as in CODESYS. The current line is highlighted,
   breakpoints are marked, and live values show next to the code while
-  stopped. **Diff** shows the changes since the session started.
+  stopped. **Diff** shows the changes since you last reviewed the object
+  (at first, since the session started).
 - **Inspector:**
   - a watch list you can add variables to;
   - locals and the call stack;
@@ -256,9 +257,30 @@ client has no full screen. The workspace is laid out like CODESYS:
 When you open or select something, the panel tells Claude, so "fix this"
 refers to what is on your screen.
 
-The panel only reads: Claude drives everything through its tools. It never
-calls CODESYS itself, because the tools keep a project cache current as they
-work. In clients without MCP Apps, `open_sim_panel` returns a text snapshot.
+You can also drive the simulation from the workspace:
+- **Breakpoints:** click a line number in the implementation to set or clear
+  one.
+- **Run bar:** Continue (runs in the background until a breakpoint), Pause,
+  step over / into / out, and +10 s.
+- **Watch list:** click a variable to force it, set it once, or release the
+  force. Forced variables show an F.
+- **Plant tab:** edit the `plant.toml` parameters and apply them. truST
+  applies plant changes on restart only, so the simulation restarts.
+- **Review:** an object Claude changed shows a bar with Show changes, Accept
+  and Revert. Accept marks the current text as reviewed, and the badges and
+  diff then compare with it. Revert writes the reviewed text back to
+  CODESYS. Claude's `get_changes` still compares with the session start.
+- **Pause Claude** (card and workspace): while you drive, Claude's tools that
+  change the project or the simulation answer `paused_by_user`. Its reading
+  tools still work. Resume hands control back.
+
+Your actions go to Claude: they appear in the activity log as "User: …" and
+in the model context, so Claude knows what you did.
+
+Claude's own changes always go through its tools. The panel never calls
+CODESYS to read: the tools keep a project cache current as they work. The
+one exception is Revert, which you start. In clients without MCP Apps,
+`open_sim_panel` returns a text snapshot.
 Add `display = { max = 2.5, unit = "m" }` to a `[[plant]]` to fix the tank's
 scale.
 

@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { registerTools, type AppContext } from "./tools.js";
+import { registerTools, revertObject, type AppContext } from "./tools.js";
 import { registerSimTools } from "./sim/tools.js";
 import { registerPanel } from "./sim/panel.js";
 
@@ -16,8 +16,14 @@ export function createServer(ctx: AppContext): McpServer {
   const server = new McpServer({ name: "codesys-mcp-toolkit", version: VERSION }, { instructions: INSTRUCTIONS });
   registerTools(server, ctx);
   if (ctx.sim) {
-    registerSimTools(server, ctx.sim);
-    registerPanel(server, ctx.sim, { cache: ctx.cache, changes: ctx.changes, project: () => ctx.project?.path });
+    registerSimTools(server, ctx.sim, ctx.driver);
+    registerPanel(server, ctx.sim, {
+      cache: ctx.cache,
+      changes: ctx.changes,
+      project: () => ctx.project?.path,
+      driver: ctx.driver,
+      revert: (path, to) => revertObject(ctx, path, to),
+    });
   }
   return server;
 }

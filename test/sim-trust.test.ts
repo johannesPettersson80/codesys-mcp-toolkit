@@ -148,6 +148,34 @@ describe.skipIf(!exe || !toolchain)("simulation in truST", () => {
     expect(wide).toBeLessThan(narrow * 0.7);
   }, T);
 
+  it("lets the user continue in the background, pause, force from the watch list and change several plant parameters", async () => {
+    const r = await sim.setPlantParams("T101", { area_m2: 1.5, outflow_coefficient_m2_sqrt_m_per_s: 0.04 });
+    expect(r).toMatch(/^T101\.area_m2 = 1\.5, T101\.outflow_coefficient_m2_sqrt_m_per_s = 0\.04\. truST applies plant changes only on restart/);
+    const toml = readFileSync(join(sim.mirrorFolder(), "simulation.toml"), "utf8");
+    expect(toml).toMatch(/area_m2 = 1\.5/);
+    expect(toml).toMatch(/outflow_coefficient_m2_sqrt_m_per_s = 0\.04/);
+    expect((await sim.panelState()).plants[0]!.parameters).toEqual({ area_m2: 1.5, outflow_coefficient_m2_sqrt_m_per_s: 0.04 });
+
+    await sim.forceVar("GVL_IO.lrLT101_Level", "0.5");
+    expect((await sim.panelState()).forced).toEqual(["GVL_IO.lrLT101_Level"]);
+    const s0 = await sim.scan();
+    expect(sim.continueInBackground(60_000)).toBe("Running until a breakpoint.");
+    expect(sim.busyWith).toBeTruthy();
+    expect(() => sim.continueInBackground()).toThrow(/Busy/);
+    await new Promise((res) => setTimeout(res, 600));
+    expect(await sim.pauseNow()).toBe("Paused.");
+    expect(sim.busyWith).toBeUndefined();
+    const s1 = await sim.scan();
+    expect(s1).toBeGreaterThan(s0);
+    await new Promise((res) => setTimeout(res, 300));
+    expect(await sim.scan()).toBe(s1);
+    expect(await sim.readVars(["GVL_IO.lrLT101_Level"])).toBe("GVL_IO.lrLT101_Level = 0.5");
+    await sim.unforceVar("GVL_IO.lrLT101_Level");
+    expect((await sim.panelState()).forced).toEqual([]);
+    // paused and idle: Pause just reports where it is
+    expect(await sim.pauseNow()).toMatch(/^Paused at scan \d+\.$/);
+  }, T);
+
   it("maps a truST build error back to the CODESYS object and line", async () => {
     nodes = tankNodes().map((n) => (n.path === "PRG_Tank" ? { ...n, implementation: PRG_TANK_IMPL.replace("nTrips := nTrips + 1;", "nTrips := nTrips + ;") } : n));
     await expect(sim.start()).rejects.toThrow(new RegExp(`truST could not build the mirror:\\nPRG_Tank \\(implementation line ${LINES.trip}\\): expected expression`));

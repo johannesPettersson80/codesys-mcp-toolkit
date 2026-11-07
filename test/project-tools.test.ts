@@ -12,6 +12,9 @@ import { checkExpectations, parseScenarios, ScenarioError, stringifyScenarios } 
 import { createServer } from "../src/server.js";
 import type { AppContext } from "../src/tools.js";
 import { tankNodes, tankTasks, tankTestNodes } from "./fixtures/tank.js";
+import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
+import { Driver } from "../src/driver.js";
+import { SimController } from "../src/sim/controller.js";
 import { fakeBridge, fakeProjectFile, tempDir } from "./helpers.js";
 
 describe("declaration parser", () => {
@@ -138,7 +141,7 @@ describe("change tracking", () => {
     expect(await s.sessionStart("c:/P/tank.project", exp)).toBe(false);
     expect(exports).toBe(1);
     await s.save("C:/p/Tank.project", "x", tankNodes());
-    expect((await s.list("C:/p/Tank.project")).map((c) => c.name).sort()).toEqual(["session-start", "x"]);
+    expect((await s.list("C:/p/Tank.project")).map((c) => c.name).sort()).toEqual(["review", "session-start", "x"]);
     expect((await s.load("C:/p/Tank.project", "x"))!.objects.find((o) => o.path === "FB_PI")!.implementation).toContain("rE := rSP - rPV;");
   });
 });
@@ -192,11 +195,14 @@ describe("project tools over MCP (fake CODESYS)", () => {
   };
 
   beforeAll(async () => {
-    ctx = { bridge: fakeBridge(), autosave: true, workspace: tempDir(), startWaitMs: 20_000, changes: new ChangeStore(tempDir("cmcp-cps-")), cache: new ProjectCache() };
+    ctx = { bridge: fakeBridge(), autosave: true, workspace: tempDir(), startWaitMs: 20_000, changes: new ChangeStore(tempDir("cmcp-cps-")), cache: new ProjectCache(), driver: new Driver() };
+    // a simulation controller, so the panel (and its user actions) is registered
+    ctx.sim = new SimController({ exportSt: async () => [], tasks: async () => [], projectPath: () => ctx.project?.path }, { mirrorRoot: tempDir("cmcp-m-"), git: false });
     const server = createServer(ctx);
     const [a, b] = InMemoryTransport.createLinkedPair();
     await server.connect(a);
-    client = new Client({ name: "t", version: "1" });
+    // a client with MCP Apps support, so the panel's user-action tools exist
+    client = new Client({ name: "t", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } } as never });
     await client.connect(b);
     expect((await call("open_project", { path: fakeProjectFile() })).text).toMatch(/Checkpoint 'session-start' saved/);
   });
@@ -258,6 +264,31 @@ describe("project tools over MCP (fake CODESYS)", () => {
     await call("close_project");
     expect(cache.nodes).toBeUndefined();
     await call("open_project", { path: cache.project ?? fakeProjectFile() });
+  });
+
+  it("reverts to what the user accepted in the panel, not to session-start", async () => {
+    const ui = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })).structuredContent as { ok: boolean; message: string };
+    await call("write_object", { path: "PLC_PRG", implementation: "a := 1;" });
+    expect((await ui("ui_accept_object", { path: "PLC_PRG" })).ok).toBe(true);
+    await call("write_object", { path: "PLC_PRG", implementation: "a := 2;" });
+    const r = await ui("ui_revert_object", { path: "PLC_PRG" });
+    expect(r, r.message).toMatchObject({ ok: true, message: expect.stringMatching(/restored PLC_PRG/) });
+    expect((await call("read_objects", { paths: ["PLC_PRG"] })).text).toMatch(/a := 1;/);
+    expect(ctx.cache!.get("PLC_PRG")!.implementation).toBe("a := 1;");
+    // Claude's own view still compares with session-start
+    expect((await call("get_changes")).text).toMatch(/M PLC_PRG/);
+  });
+
+  it("holds project edits while the user has paused Claude", async () => {
+    const ui = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })).structuredContent as { ok: boolean };
+    expect((await ui("ui_hold", { on: true })).ok).toBe(true);
+    const w = await call("write_object", { path: "PLC_PRG", implementation: "b := 1;" });
+    expect(w.isError).toBe(true);
+    expect(w.text).toMatch(/^paused_by_user:/);
+    expect((await call("read_objects", { paths: ["PLC_PRG"] })).text).toMatch(/a := 1;/);
+    expect((await call("get_outline")).isError).toBe(false);
+    expect((await ui("ui_hold", { on: false })).ok).toBe(true);
+    expect((await call("write_object", { path: "PLC_PRG", implementation: "b := 1;" })).isError).toBe(false);
   });
 
   it("reports library reading as unavailable where CODESYS has no library manager", async () => {

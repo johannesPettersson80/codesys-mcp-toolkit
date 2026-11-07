@@ -65,6 +65,7 @@ body.superseded #card, body.superseded #ws { opacity: 0.45; pointer-events: none
 
 /* ---------------- card (inline in the chat) */
 #card { padding: 10px; }
+#c-hold[aria-pressed="true"] { background: rgba(217, 119, 6, 0.14); border-color: var(--warn); color: var(--warn); }
 .card-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .card-top .meta { color: var(--fg2); font-variant-numeric: tabular-nums; }
 .card-top .activity { color: var(--accent); flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -82,7 +83,39 @@ body.superseded #card, body.superseded #ws { opacity: 0.45; pointer-events: none
 canvas.trend { display: block; width: 100%; height: 60px; }
 
 /* ---------------- workspace */
-#ws { display: grid; grid-template-rows: auto minmax(0, 1fr) var(--bottom-h, 220px); height: var(--ws-h, 100vh); min-height: 520px; }
+#ws { display: grid; grid-template-rows: auto auto minmax(0, 1fr) var(--bottom-h, 220px); height: var(--ws-h, 100vh); min-height: 520px; }
+.ws-top { grid-row: 1; } #w-held { grid-row: 2; } .ws-main { grid-row: 3; } #ws > .bottom { grid-row: 4; }
+.runbar { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--bg3); }
+.ib { display: inline-grid; place-items: center; width: 28px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--fg); cursor: pointer; }
+.ib.txt { width: auto; padding: 0 8px; font-size: 12px; }
+.ib:hover:not(:disabled) { background: var(--bg); }
+.ib:disabled { color: var(--fg2); opacity: 0.45; cursor: default; }
+.ib[data-run="continue"]:not(:disabled) { color: var(--ok); }
+#w-hold[aria-pressed="true"] { background: rgba(217, 119, 6, 0.14); border-color: var(--warn); color: var(--warn); }
+.held { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: rgba(217, 119, 6, 0.12); color: var(--warn); border-bottom: 1px solid var(--line); font-weight: 500; }
+.held .btn { margin-left: auto; }
+.toasts { position: fixed; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 50; max-width: min(420px, 90vw); }
+.toast { padding: 8px 12px; border-radius: 8px; background: var(--fg); color: var(--bg); box-shadow: 0 4px 16px rgba(0,0,0,.18); font-size: 12.5px; animation: toast-in .15s ease-out; }
+.toast.err { background: var(--bad); color: #fff; }
+@keyframes toast-in { from { transform: translateY(6px); opacity: 0; } }
+.ln .bp { cursor: pointer; }
+.ln.impl .bp:hover::after, .ln.impl .no:hover { color: var(--bad); }
+.ln.impl .no { cursor: pointer; }
+.ln.impl:not(.cur) .bp:empty:hover::after { content: "●"; opacity: .35; }
+.review { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--bg2); font: 12px var(--font); position: sticky; left: 0; top: 0; z-index: 2; }
+.review > span:nth-child(2) { flex: 1 1 16ch; }
+.review .btn { height: 24px; }
+.btn.good { border-color: var(--ok); color: var(--ok); }
+.btn.danger { border-color: var(--bad); color: var(--bad); }
+td:has(> .force-form) { white-space: normal; }
+.force-form { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0 8px; }
+.force-form input { flex: 1 1 100%; min-width: 0; }
+.params { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 14px; padding: 10px 12px; }
+.params label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--fg2); }
+.params input { height: 26px; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; background: var(--bg); color: var(--fg); font: 12.5px var(--mono); }
+.params-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px 0; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); min-height: 0; }
+@media (max-width: 900px) { .split { grid-template-columns: minmax(0, 1fr); } }
 body.inline-expanded #ws { --ws-h: 780px; }
 .ws-top { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--bg2); flex-wrap: wrap; }
 .ws-top .meta { color: var(--fg2); font-variant-numeric: tabular-nums; }
@@ -174,6 +207,7 @@ tr:last-child td { border-bottom: 0; }
     <span id="c-status" class="pill"><span class="dot"></span><span id="c-statusText">Connecting</span></span>
     <span id="c-meta" class="meta"></span>
     <span id="c-activity" class="activity"></span>
+    <button id="c-hold" class="btn" aria-pressed="false" title="Hold Claude's tools that change the project or the simulation">Pause Claude</button>
     <button id="c-open" class="btn primary" title="Open the full workspace">
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/></svg>Open workspace</button>
   </div>
@@ -189,12 +223,23 @@ tr:last-child td { border-bottom: 0; }
     <span id="w-status" class="pill"><span class="dot"></span><span id="w-statusText">Connecting</span></span>
     <span id="w-meta" class="meta"></span>
     <span id="w-activity" class="activity"></span>
+    <div class="runbar" role="group" aria-label="Simulation">
+      <button class="ib" data-run="continue" title="Continue: run until a breakpoint"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg></button>
+      <button class="ib" data-run="pause" title="Pause"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg></button>
+      <button class="ib" data-run="step_over" title="Step over"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 9a5.5 5.5 0 0 1 10.6-2"/><path d="M13.5 3v4h-4"/><circle cx="8" cy="12.5" r="1.2" fill="currentColor" stroke="none"/></svg></button>
+      <button class="ib" data-run="step_in" title="Step into"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 1.5v8M4.5 6.5 8 10l3.5-3.5"/><circle cx="8" cy="13.5" r="1.2" fill="currentColor" stroke="none"/></svg></button>
+      <button class="ib" data-run="step_out" title="Step out"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 10.5v-8M4.5 5.5 8 2l3.5 3.5"/><circle cx="8" cy="13.5" r="1.2" fill="currentColor" stroke="none"/></svg></button>
+      <button class="ib txt" data-run="run10" title="Run 10 simulated seconds">+10 s</button>
+    </div>
+    <button id="w-hold" class="btn" aria-pressed="false" title="Hold Claude's tools that change the project or the simulation while you drive">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6"/><path d="M6.5 5.5v5M9.5 5.5v5"/></svg><span>Pause Claude</span></button>
     <button id="w-follow" class="btn" aria-pressed="true" title="Open what Claude works on, and where the simulation stops">
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="2.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"/></svg>Follow Claude</button>
     <span id="w-badge" class="badge">Simulated in truST</span>
     <button id="w-close" class="btn" title="Back to the compact view">
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5 14 2M6.5 9.5 2 14"/></svg>Compact</button>
   </div>
+  <div id="w-held" class="held hidden">You're driving: Claude's tools that change the project or the simulation are paused. <button class="btn" data-resume>Resume Claude</button></div>
   <div class="ws-main">
     <section class="pane">
       <div class="pane-head"><input id="w-filter" class="filter" placeholder="Filter objects" aria-label="Filter objects"></div>
@@ -221,6 +266,7 @@ tr:last-child td { border-bottom: 0; }
     <div id="w-bottom" class="scroll"></div>
   </section>
 </section>
+<div id="toasts" class="toasts" aria-live="polite"></div>
 <script>/*PANEL_SCRIPT*/</script>
 </body>
 </html>

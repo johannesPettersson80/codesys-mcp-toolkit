@@ -23,6 +23,7 @@ import type { AppContext } from "../../src/tools.js";
 import { LINES, TANK_PLANT, tankNodes, tankTasks, tankTestNodes } from "../../test/fixtures/tank.js";
 import { ProjectCache } from "../../src/codesys/cache.js";
 import { ChangeStore } from "../../src/codesys/changes.js";
+import { Driver } from "../../src/driver.js";
 
 export async function startDevHost(port: number, hostJs: string, pageHtml: string): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "cmcp-devhost-"));
@@ -36,7 +37,7 @@ export async function startDevHost(port: number, hostJs: string, pageHtml: strin
   cache.reset(project);
   cache.setAll(structuredClone(nodes));
   await changes.sessionStart(project, async () => nodes);
-  const ctx = { bridge: {} as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes, project: { path: project } } as AppContext;
+  const ctx = { bridge: {} as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes, project: { path: project }, driver: new Driver() } as AppContext;
   const server = createServer(ctx);
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
@@ -104,6 +105,7 @@ export async function startDevHost(port: number, hostJs: string, pageHtml: strin
           res.end((r.contents[0] as { text: string }).text);
         } else if (req.url === "/call" && req.method === "POST") {
           const { name, arguments: args } = JSON.parse(await body(req));
+          if (!String(name).startsWith("get_")) log.push(`panel call ${name} ${JSON.stringify(args)}`);
           const r = await call(name, args ?? {});
           res.writeHead(200, { "content-type": "application/json" });
           res.end(JSON.stringify(r));

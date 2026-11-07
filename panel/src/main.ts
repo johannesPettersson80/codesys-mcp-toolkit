@@ -72,18 +72,54 @@ $("w-close").addEventListener("click", () => void setWorkspace(false));
 
 // ---------------------------------------------------------------- model context
 
+// The host keeps only the latest model context, so it carries the current
+// view plus the user's recent actions in the panel.
 let contextTimer: ReturnType<typeof setTimeout> | undefined;
-function context(text: string) {
+let viewing = "";
+const recent: string[] = [];
+function sendContext() {
   clearTimeout(contextTimer);
   contextTimer = setTimeout(() => {
-    app.updateModelContext({ content: [{ type: "text", text }] }).catch(() => undefined);
+    const lines = [viewing, recent.length ? `Recent actions by the user in the CODESYS panel (oldest first):\n${recent.map((r) => `- ${r}`).join("\n")}` : ""].filter(Boolean);
+    if (lines.length) app.updateModelContext({ content: [{ type: "text", text: lines.join("\n") }] }).catch(() => undefined);
   }, 400);
+}
+function context(text: string) {
+  viewing = text;
+  sendContext();
+}
+
+function toast(text: string, error = false) {
+  const t = document.createElement("div");
+  t.className = `toast${error ? " err" : ""}`;
+  t.textContent = text;
+  $("toasts").append(t);
+  setTimeout(() => t.remove(), error ? 7000 : 4000);
+}
+
+async function act(tool: string, args: Record<string, unknown>, what: string) {
+  const r = await call<{ ok: boolean; message: string }>(tool, args);
+  if (!r) {
+    toast("No answer from the server.", true);
+    return undefined;
+  }
+  toast(r.message.split("\n")[0]!, !r.ok);
+  if (r.ok) {
+    recent.push(`${new Date().toLocaleTimeString()}: ${what}. Result: ${r.message.split("\n")[0]}`);
+    if (recent.length > 8) recent.shift();
+    sendContext();
+  }
+  pollSoon();
+  return r;
 }
 
 const workspace = new Workspace({
   needObject: (path) => void fetchObject(path),
   context,
+  act,
 });
+
+$("c-hold").addEventListener("click", () => void act("ui_hold", { on: !model.state?.held }, model.state?.held ? "resumed Claude" : "paused Claude to drive the simulation themselves"));
 
 // ---------------------------------------------------------------- server calls
 
@@ -106,12 +142,36 @@ async function fetchObject(path: string) {
   if (mode === "workspace") workspace.render();
 }
 
+let pollTimer: ReturnType<typeof setTimeout> | undefined;
+let polling = false;
+
+/** Poll right away (after a user action), unless a poll is running. */
+function pollSoon() {
+  if (polling) return;
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(poll, 50);
+}
+
 async function poll() {
-  if (stopped) return;
+  if (stopped || polling) return;
+  polling = true;
+  try {
+    await pollOnce();
+  } finally {
+    polling = false;
+  }
+  const s = model.state;
+  const fast = s && (s.status === "running" || s.activity);
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(poll, fast ? 300 : 1000);
+}
+
+async function pollOnce() {
   const s = await call<PanelState>("get_sim_state", panelId ? { panelId } : {});
   if (s) {
     if (!s.current) {
       stopped = true;
+      clearTimeout(pollTimer);
       document.body.classList.add("superseded");
       return;
     }
@@ -160,8 +220,6 @@ async function poll() {
     }
   }
   render();
-  const fast = s && (s.status === "running" || s.activity);
-  setTimeout(poll, fast ? 300 : 1000);
 }
 
 function render() {

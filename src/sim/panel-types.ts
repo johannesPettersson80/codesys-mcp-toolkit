@@ -29,6 +29,9 @@ export type PanelStatus = "no_project" | "no_mirror" | "stopped" | "running" | "
 export interface PanelState {
   /** False when a newer panel took over; this one should stop polling. */
   current: boolean;
+  /** The user paused Claude ("Pause Claude"): Claude's changing tools are held. */
+  held?: boolean;
+  heldSince?: string;
   status: PanelStatus;
   project?: string;
   trust?: string;
@@ -40,8 +43,10 @@ export interface PanelState {
   activity?: string;
   location?: PanelLocation;
   breakpoints: { id: number; obj: string; line: number; condition?: string }[];
+  /** Variables forced through force_var (any path, not only plant signals). */
+  forced: string[];
   signals: PanelSignal[];
-  plants: { id: string; model: string; inputs: string[]; outputs: string[]; display?: PlantDisplay }[];
+  plants: { id: string; model: string; inputs: string[]; outputs: string[]; display?: PlantDisplay; parameters?: Record<string, number>; initial_state?: number[] }[];
   feedback: { signal: string; follows: string; delay_ms: number; invert: boolean }[];
   experiments: { n: number; name: string; at: string; metrics: Record<string, number | string | null> }[];
   /** The last run_tests result. */

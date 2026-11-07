@@ -363,6 +363,10 @@ export class SimController {
     const c = this.ctl();
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      if (this.interrupted) {
+        this.interrupted = false;
+        return undefined;
+      }
       if (!this.running) throw new SimError("sim_exited", `The simulation stopped unexpectedly. ${this.runtime?.exitInfo ?? ""}\n${await this.runtime?.logTail(10)}`);
       const r = await c.request<{ stops: { path?: string; line?: number; reason: string }[] }>("debug.stops");
       for (const s of r.stops) {
@@ -544,6 +548,7 @@ export class SimController {
         await this.ensurePaused();
         await this.record();
         const scan = await this.scan();
+        this.journal.add("stopped", `Paused at scan ${scan}`, { scan });
         return `No breakpoint was hit within ${fmtS(timeoutMs)} of wall time; paused at scan ${scan} (sim time ${fmtS(scan * this.manifest!.cycleMs)}).`;
       }
       this.journal.add("stopped", `Stopped at ${loc.obj ?? loc.file}:${loc.line ?? loc.line0 + 1}`, { reason: loc.reason, obj: loc.obj, line: loc.line });
@@ -688,12 +693,22 @@ export class SimController {
   // ------------------------------------------------------------ plant
 
   async setPlantParam(plant: string, key: string, value: unknown): Promise<string> {
+    return this.setPlantParams(plant, { [key]: value });
+  }
+
+  /** Change several parameters of one plant with a single restart. */
+  async setPlantParams(plant: string, params: Record<string, unknown>): Promise<string> {
     if (!this.plant) throw new SimError("no_plant", "No plant.toml is loaded. Pass plant text to sync_mirror first.");
-    const o: ParamOverride = { plant, key, value };
-    applyOverride(structuredClone(this.plant), o);
-    this.overrides = this.overrides.filter((x) => !(x.plant.toLowerCase() === plant.toLowerCase() && x.key === key));
-    this.overrides.push(o);
-    this.journal.add("plant_param", `${plant}.${key} = ${JSON.stringify(value)}`, { plant, key, value });
+    const entries = Object.entries(params);
+    if (!entries.length) return "Nothing to change.";
+    const trial = structuredClone(this.plant);
+    for (const [key, value] of entries) applyOverride(trial, { plant, key, value });
+    for (const [key, value] of entries) {
+      this.overrides = this.overrides.filter((x) => !(x.plant.toLowerCase() === plant.toLowerCase() && x.key === key));
+      this.overrides.push({ plant, key, value });
+    }
+    const text = entries.map(([k, v]) => `${plant}.${k} = ${JSON.stringify(v)}`).join(", ");
+    this.journal.add("plant_param", text, { plant, params });
     // truST never hot-replaces a plant: a parameter change needs a restart.
     if (this.mirrorDir && this.manifest) {
       const addresses = new Map(Object.entries(this.manifest.addresses));
@@ -701,9 +716,43 @@ export class SimController {
     }
     if (this.running) {
       await this.start({ sync: false });
-      return `${plant}.${key} = ${JSON.stringify(value)}. truST applies plant changes only on restart, so the simulation restarted from scan 0 (PLC and plant state reset).`;
+      return `${text}. truST applies plant changes only on restart, so the simulation restarted from scan 0 (PLC and plant state reset).`;
     }
-    return `${plant}.${key} = ${JSON.stringify(value)} (applies at sim_start).`;
+    return `${text} (applies at sim_start).`;
+  }
+
+  // ------------------------------------------------------------ user control (panel)
+
+  private interrupted = false;
+  private background?: Promise<unknown>;
+
+  /** True while a tool or a panel action is running the simulation. */
+  get busyWith(): string | undefined {
+    return this.activity;
+  }
+
+  /** Resume until a breakpoint without waiting (the panel's Continue); Pause interrupts it. */
+  continueInBackground(maxMs = 600_000): string {
+    if (this.activity) throw new SimError("busy", `Busy: ${this.activity}.`);
+    this.ctl();
+    this.background = this.cont(maxMs)
+      .catch((e: Error) => this.journal.add("stopped", `Continue failed: ${e.message}`))
+      .finally(() => (this.background = undefined));
+    return "Running until a breakpoint.";
+  }
+
+  /** Pause: interrupt a background continue, or pause a free-running runtime. */
+  async pauseNow(): Promise<string> {
+    if (this.background) {
+      this.interrupted = true;
+      await this.background;
+      return "Paused.";
+    }
+    if (this.activity) throw new SimError("busy", `Busy: ${this.activity}; it pauses by itself when done.`);
+    await this.ensurePaused();
+    const scan = await this.scan();
+    this.journal.add("stopped", `Paused at scan ${scan}`);
+    return `Paused at scan ${scan}.`;
   }
 
   // ------------------------------------------------------------ experiments
@@ -933,8 +982,17 @@ export class SimController {
       cycleMs: this.manifest?.cycleMs,
       activity: this.activity,
       breakpoints: [...this.breakpoints.values()].map((b) => ({ id: b.id, obj: b.obj, line: b.line, ...(b.condition ? { condition: b.condition } : {}) })),
+      forced: [...this.forced],
       signals: this.panelSignals().map((s) => ({ ...s, address: this.ioAddress(s.name), forced: this.forced.has(s.name) })),
-      plants: (plant?.plants ?? []).map((p) => ({ id: p.id, model: p.model, inputs: p.inputs, outputs: p.outputs, ...(p.display ? { display: p.display } : {}) })),
+      plants: (plant?.plants ?? []).map((p) => ({
+        id: p.id,
+        model: p.model,
+        inputs: p.inputs,
+        outputs: p.outputs,
+        ...(p.display ? { display: p.display } : {}),
+        parameters: Object.fromEntries(Object.entries(p.parameters ?? {}).filter(([, v]) => typeof v === "number")) as Record<string, number>,
+        ...(p.initial_state ? { initial_state: p.initial_state } : {}),
+      })),
       feedback: plant?.feedback ?? [],
       experiments: this.experiments.map((e) => ({ n: e.n, name: e.name, at: e.at, metrics: e.metrics })),
       ...(this.lastTests ? { tests: this.lastTests } : {}),

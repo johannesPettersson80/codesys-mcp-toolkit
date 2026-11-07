@@ -13,7 +13,9 @@ export function renderCard(): void {
   $("c-statusText").textContent = s ? (label[shown] ?? shown) : "Connecting";
   $("c-meta").textContent = s && (s.status === "running" || s.status === "paused") ? `scan ${s.scan} · ${s.simTime.toFixed(2)} s · ${s.timeScale}x` : (ws?.project?.split(/[\\/]/).pop() ?? "");
   const where = s?.location && !s.location.harness && s.location.obj ? `Stopped${s.location.breakpoint ? ` at breakpoint #${s.location.breakpoint}` : ""}: ${s.location.obj} line ${s.location.line}` : "";
-  $("c-activity").textContent = s?.activity ?? where;
+  $("c-activity").textContent = s?.held ? "You're driving: Claude is paused." : (s?.activity ?? where);
+  $("c-hold").setAttribute("aria-pressed", String(!!s?.held));
+  $("c-hold").textContent = s?.held ? "Resume Claude" : "Pause Claude";
 
   const facts: string[] = [];
   const f = ws?.focus;
