@@ -320,6 +320,52 @@ export class TrustRuntime {
     }
   }
 
+  /**
+   * Call one Control Studio JSON-RPC method through `trust-control-studio serve`
+   * (LSP-style Content-Length framing). Used for what the 0.34 CLI has no verb
+   * for, such as setting a loop's requirements (TRUST-GAPS S5).
+   */
+  async studioRpc<T = unknown>(method: string, params: unknown, o: { timeoutMs?: number } = {}): Promise<T> {
+    const exe = findControlStudio(this.exe);
+    if (!exe) throw new TrustError("no_control_studio", `trust-control-studio (truST's tuning engine) was not found next to ${this.exe}.`);
+    const child = spawn(exe, ["serve"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: process.env });
+    return new Promise<T>((resolve, reject) => {
+      let buf = Buffer.alloc(0);
+      let stderr = "";
+      let settled = false;
+      const done = (err?: Error, value?: T) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        child.stdin.end();
+        setTimeout(() => child.kill(), 2000).unref();
+        if (err) reject(err);
+        else resolve(value as T);
+      };
+      const timer = setTimeout(() => done(new TrustError("studio_timeout", `Control Studio did not answer ${method}.`)), o.timeoutMs ?? 60_000);
+      child.on("error", (e) => done(e));
+      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+      child.on("exit", (code) => done(new TrustError("studio_exited", `Control Studio exited (code ${code}) before answering ${method}. ${stderr.trim().split("\n").slice(-5).join(" ")}`)));
+      child.stdout.on("data", (d: Buffer) => {
+        buf = Buffer.concat([buf, d]);
+        for (;;) {
+          const sep = buf.indexOf("\r\n\r\n");
+          if (sep < 0) return;
+          const m = /Content-Length:\s*(\d+)/i.exec(buf.subarray(0, sep).toString());
+          const len = Number(m?.[1] ?? 0);
+          if (buf.length < sep + 4 + len) return;
+          const msg = JSON.parse(buf.subarray(sep + 4, sep + 4 + len).toString()) as { id?: number; result?: T; error?: { message: string } };
+          buf = buf.subarray(sep + 4 + len);
+          if (msg.id !== 1) continue;
+          if (msg.error) return done(new TrustError("studio_refused", msg.error.message));
+          return done(undefined, msg.result as T);
+        }
+      });
+      const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
+      child.stdin.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+    });
+  }
+
   async build(dir: string): Promise<BuildResult> {
     const t0 = Date.now();
     try {

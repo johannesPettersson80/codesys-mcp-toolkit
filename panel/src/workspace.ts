@@ -5,7 +5,7 @@ import { renderPid } from "./plant.js";
 import { highlight } from "./st.js";
 import { drawTrend } from "./trend.js";
 import { $, ago, esc, persist, segmented, show, store } from "./util.js";
-import { drawRuns, reviewView, tuningView, viewTabs, type ViewName } from "./views.js";
+import { drawTuningCharts, reviewView, tuningView, viewTabs, type ViewName } from "./views.js";
 
 const KIND_LABEL: Record<string, string> = {
   program: "PRG",
@@ -526,8 +526,7 @@ export class Workspace {
         el.innerHTML = `<div class="vpad">${html}</div>`;
         el.dataset.html = html;
       }
-      const c = el.querySelector<HTMLCanvasElement>("canvas.runs");
-      if (c) drawRuns(c);
+      drawTuningCharts(el);
       return;
     } else if (this.bottom === "review") {
       const html = reviewView();

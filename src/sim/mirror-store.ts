@@ -49,7 +49,8 @@ export async function readManifest(dir: string): Promise<Manifest | undefined> {
 const STATIC_FILES: Record<string, string> = {
   "io.toml": '[io]\ndriver = "simulated"\nparams = {}\n',
   "trust-lsp.toml": 'include_paths = ["src"]\n\n[project]\nvendor_profile = "codesys"\n',
-  ".gitignore": "build/\nprogram.tpi\ndeployment-record.bin\n.trust-runtime/\nruntime.toml\n*.log\n",
+  // .control-token holds the runtime's control token for Control Studio: never committed.
+  ".gitignore": "build/\nprogram.tpi\ndeployment-record.bin\n.trust-runtime/\nruntime.toml\n*.log\n.control-token\n.control-studio/\ncontrol-studio/\n",
 };
 
 /** Objects whose hash differs between two manifests. */

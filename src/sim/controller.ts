@@ -27,6 +27,7 @@ import { applyOverride, parsePlantConfig, simulationToml, type ParamOverride, ty
 import { TrustError } from "./control.js";
 import { findTrustRuntime, TrustRuntime, TESTED_TRUST_VERSION, type Diagnostic, type TestRun } from "./runtime.js";
 import { formatValue, numeric, parseTrustValue, toTrustLiteral, type StValue } from "./values.js";
+import { Tuning } from "./tuning.js";
 
 /** Read-only view of the CODESYS project: the only CODESYS access the simulation has. */
 export interface CodesysSource {
@@ -126,10 +127,52 @@ export class SimController {
   private experimentSignals: string[] = [];
   private trustVersion?: string;
 
+  /** Loop tuning with truST's Control Studio. */
+  readonly tuning: Tuning;
+
   constructor(
     private readonly codesys: CodesysSource,
     private readonly o: SimOptions,
-  ) {}
+  ) {
+    this.tuning = new Tuning({
+      ensureStarted: async () => (this.running ? undefined : this.start()),
+      mirrorPath: () => this.mirrorDir,
+      trust: () => this.getRuntime(),
+      freeRun: (label, speed, fn) => this.freeRun(label, speed, fn),
+      runBusy: (label, fn) => this.busy(label, fn),
+      journal: this.journal,
+    });
+  }
+
+  /**
+   * Let the simulation run freely (breakpoints off, no harness stop) while fn
+   * runs, for tools that need a live runtime (Control Studio's Identify).
+   * Afterwards it is paused at a scan start with the breakpoints back.
+   */
+  private async freeRun<T>(label: string, speed: number, fn: () => Promise<T>): Promise<T> {
+    this.ctl();
+    return this.busy(label, async () => {
+      const prevScale = this.timeScale;
+      await this.ensurePaused();
+      await this.silenceBreakpoints(true);
+      await this.setHarnessBreakpoint(0);
+      await this.setTimeScale(speed);
+      await this.ctl().request("resume");
+      const timer = setInterval(() => void this.record(), 500);
+      try {
+        return await fn();
+      } finally {
+        clearInterval(timer);
+        if (this.running) {
+          await this.ensurePaused().catch(() => undefined);
+          await this.runScansRaw(1).catch(() => undefined); // back to a scan start
+          await this.setTimeScale(prevScale).catch(() => undefined);
+          await this.silenceBreakpoints(false).catch(() => undefined);
+          await this.record();
+        }
+      }
+    });
+  }
 
   // ------------------------------------------------------------ mirror
 
@@ -1021,6 +1064,7 @@ export class SimController {
       })),
       feedback: plant?.feedback ?? [],
       experiments: this.experiments.map((e) => ({ n: e.n, name: e.name, at: e.at, metrics: e.metrics })),
+      tuningVersion: this.tuning.version,
       ...(this.lastTests ? { tests: this.lastTests } : {}),
       journalSeq: this.journal.last,
       trendEpoch: this.recorder.epoch,

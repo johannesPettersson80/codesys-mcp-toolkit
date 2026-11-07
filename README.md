@@ -191,7 +191,49 @@ BOOL, an integer type, REAL or LREAL.
 | `run_experiment` / `experiment_log` | Repeatable runs from a fresh start: settings, a setpoint step, faults over time. Returns overshoot, rise and settling time, steady-state error and IAE, compared with the previous run of the same name. |
 | `run_tests` | Run the project's unit tests in truST and report pass/fail per test (below). |
 | `save_scenario` / `run_scenarios` | Save an experiment plus expectations (e.g. overshoot below 5 %, no interlock trip) in `<Project>.scenarios.toml`, and rerun them all after a change: PASS/FAIL per scenario with the failing checks. |
+| `tune_setup` / `tune_run` / `tune_status` | Tune a control loop with truST's Control Studio: identify the plant, search the program's own controller coefficients against the model, validate the best candidate with the actual ST (below). |
 | `open_sim_panel` | Show the live panel (below). |
+
+### Loop tuning
+
+Tuning uses truST's built-in tuning engine, Control Studio
+(`trust-control-studio`, next to `trust-runtime` from truST 0.34). It runs on
+the simulation only and never writes to the CODESYS project:
+
+1. `tune_setup` names the loop's signals and the controller coefficients to
+   search, with the values to try, e.g. `fbPI._rKp` in {25, 50, 100, 200, 300}
+   and `fbPI._rTi` in {20, 60, 120}. It also sets the requirements (settling
+   time, overshoot, error); by default they scale with the signal ranges.
+2. `tune_run` `identify` runs the simulation freely, steps the setpoint in
+   Auto (or, with method `step`, the output in Manual) and fits a plant model,
+   e.g. `G(s) = 67.6 / (66.5 s + 1)`.
+3. `tune_run` `search` runs the program's own controller code against the model
+   for every combination and selects the best one that meets the requirements.
+4. `tune_run` `validate` runs the actual ST in isolated simulations, the
+   current settings against the candidate, and checks every requirement.
+
+The panel's Tuning view shows the model fit, the candidates and the
+validation, with the current and tuned responses overlaid. To keep the new
+gains, Claude changes them in CODESYS (`write_object`) and confirms them with
+`run_experiment`.
+
+truST 0.34 asks a few things of the program (see
+[TRUST-GAPS.md](spike/trust-fidelity/TRUST-GAPS.md), S1 to S15):
+
+- **One program.** Every loop signal must be a variable of one `PROGRAM`, not
+  a GVL member: the measurement and the output mapped to the I/O there
+  (`lrLevel AT %IL0 : LREAL;`), plus the setpoint. `tune_setup` checks this
+  and says what to change. truST plans to accept GVL signals.
+- **Manual mode.** A BOOL mode (Manual/Auto), and a REAL/LREAL manual output
+  that drives the output in Manual. A bumpless controller (one that follows
+  the manual output while in Manual) passes the Manual-to-Auto check.
+- **Startup flag.** If the program sets its gains at startup, use a done-flag
+  (`IF NOT bInitDone THEN fbPI.Kp := ...; bInitDone := TRUE; END_IF`) and
+  name it as `startup_flag`.
+
+The toolkit works around the rest: it raises the search budget, sets the
+requirements and the Auto-entry tolerance, and keeps the simulation running
+while Control Studio works.
 
 ### Unit tests
 

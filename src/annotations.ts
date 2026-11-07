@@ -62,6 +62,9 @@ const KIND: Record<string, Kind> = {
   run_experiment: "safe",
   run_scenarios: "safe",
   save_scenario: "safe",
+  tune_status: "read",
+  tune_setup: "safe",
+  tune_run: "safe",
 };
 
 export interface ToolAnnotations {

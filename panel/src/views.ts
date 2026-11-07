@@ -9,7 +9,7 @@
  *   Review      Claude changed objects and has been quiet for a while
  */
 import { lineDiff } from "../../src/codesys/diff.js";
-import type { ExperimentRun } from "../../src/sim/panel-types.js";
+import type { ExperimentRun, TuningLoop, TuningTrace } from "../../src/sim/panel-types.js";
 import { model, type ObjData } from "./model.js";
 import { highlight } from "./st.js";
 import { ago, esc, fmt } from "./util.js";
@@ -31,6 +31,8 @@ export const views = {
   /** The view the user picked (used while not following Claude). */
   pinned: undefined as ViewName | undefined,
   runs: [] as ExperimentRun[],
+  /** truST Control Studio loops (get_tuning). */
+  loops: [] as TuningLoop[],
 };
 
 export function unreviewed(): number {
@@ -59,6 +61,7 @@ export function viewTabs(current: ViewName, follow: boolean): string {
     if (id === "tests" && s?.tests) return s.tests.failed ? `<span class="vc bad">${s.tests.failed}</span>` : `<span class="vc good">✓</span>`;
     if (id === "review" && unreviewed()) return `<span class="vc">${unreviewed()}</span>`;
     if (id === "code" && model.ws?.compile?.errors) return `<span class="vc bad">${model.ws.compile.errors}</span>`;
+    if (id === "tuning" && views.loops.some((l) => l.busy)) return `<span class="vc">…</span>`;
     if (id === "tuning" && s?.experiments.length) return `<span class="vc">${s.experiments.length}</span>`;
     return "";
   };
@@ -159,8 +162,15 @@ export function compareRuns(): ExperimentRun[] {
 const RUN_COLORS = ["#94a3b8", "#0891b2", "#9333ea", "#d97706", "#16a34a", "#2563eb"];
 
 export function tuningView(): string {
+  const loops = views.loops.map(loopView).join("");
+  const runs = experimentsView();
+  if (!loops && !runs) return `<div class="empty">Nothing tuned yet. truST's loop tuning (tune_setup, tune_run) and Claude's step tests (run_experiment) show here.</div>`;
+  return loops + (loops && runs ? `<div class="tsep">Step tests</div>` : "") + runs;
+}
+
+function experimentsView(): string {
   const runs = compareRuns();
-  if (!runs.length) return `<div class="empty">No experiments yet. Claude's step tests (run_experiment) show here, overlaid, so you can compare tunings.</div>`;
+  if (!runs.length) return "";
   const best = runs.reduce((a, b) => (num(b.metrics.iae) < num(a.metrics.iae) ? b : a));
   const color = (i: number) => RUN_COLORS[(RUN_COLORS.length - runs.length + i) % RUN_COLORS.length];
   const setTxt = (r: ExperimentRun) =>
@@ -255,6 +265,153 @@ export function drawRuns(canvas: HTMLCanvasElement): void {
     }
     g.stroke();
   });
+}
+
+// ------------------------------------------------------------------ tuning (truST Control Studio)
+
+const VERDICT: Record<string, string> = { Pass: "good", Fail: "bad" };
+const short = (s: string) => s.split(".").pop()!.replace(/^_/, "");
+
+/** truST's tuning of one loop: stages, model fit, search and validation. */
+function loopView(l: TuningLoop, i: number): string {
+  const stage = (label: string, done: boolean, busy: boolean, bad: boolean) =>
+    `<span class="stg${busy ? " busy" : done ? (bad ? " bad" : " done") : ""}">${busy ? "…" : done ? (bad ? "✗" : "✓") : "○"} ${label}</span>`;
+  const valBad = !!l.validation && l.validation.status !== "Pass";
+  const sel = l.search?.selected !== undefined ? l.search.trials[l.search.selected] : undefined;
+  const fmtP = (p: Record<string, number>) =>
+    Object.entries(p)
+      .map(([k, v]) => `${esc(short(k))} ${num4(v)}`)
+      .join(" · ");
+  let html =
+    `<div class="vhead"><b>${esc(l.name)}</b><span class="muted">truST Control Studio · ${esc(l.signals.pv)} ← ${esc(l.signals.mv)}</span></div>` +
+    `<div class="stages">${stage("Identify", !!l.model, l.busy === "identify", l.error?.step === "identify")}${stage("Search", !!l.search, l.busy === "search", l.error?.step === "search")}${stage("Validate", !!l.validation, l.busy === "validate", valBad || l.error?.step === "validate")}</div>`;
+  if (l.error) html += `<div class="terr">${esc(l.error.step)}: ${esc(l.error.message)}</div>`;
+  if (l.model) {
+    html +=
+      `<div class="tsec"><b>Model</b> <span class="mono">${esc(l.model.equation)}</span>${l.model.provisional ? ' <span class="muted">provisional</span>' : ""}` +
+      `${l.model.keyNumbers ? `<div class="muted">${esc(l.model.keyNumbers)}</div>` : ""}</div>` +
+      `<canvas class="tchart" data-loop="${i}" data-chart="model"></canvas><div class="legend"><span class="sw" style="background:${C_MEAS}"></span>measured <span class="sw dash" style="background:${C_PRED}"></span>model</div>`;
+  }
+  if (l.search) {
+    const top = l.search.trials
+      .map((t, k) => ({ ...t, k }))
+      .filter((t) => t.score !== null)
+      .sort((a, b) => a.score! - b.score!)
+      .slice(0, 5);
+    html +=
+      `<div class="tsec"><b>Search</b> ${sel ? `<span class="good">${fmtP(sel.parameters)}</span>` : `<span class="muted">${esc(l.search.status)}</span>`}` +
+      `<span class="muted"> · ${l.search.trials.length} candidates, ${l.search.trials.filter((t) => t.met).length} meet the requirements</span></div>` +
+      `<table class="runtab"><thead><tr><th>Settings</th><th>Score${l.search.scoreUnit ? ` (${esc(l.search.scoreUnit)})` : ""}</th><th>Requirements</th></tr></thead><tbody>${top
+        .map(
+          (t) =>
+            `<tr${t.k === l.search!.selected ? ' class="best"' : ""}><td>${fmtP(t.parameters)}</td><td>${t.score!.toPrecision(3)}</td><td class="${t.met ? "good" : "bad"}">${t.met ? "met" : "missed"}</td></tr>`,
+        )
+        .join("")}</tbody></table>`;
+  }
+  if (l.validation) {
+    const v = l.validation;
+    html +=
+      `<div class="tsec"><b>Validation</b> <span class="${VERDICT[v.status] ?? "muted"}">${esc(v.status)}</span>${v.failure ? `<div class="muted">${esc(v.failure)}</div>` : ""}</div>` +
+      (v.traces.length ? `<canvas class="tchart" data-loop="${i}" data-chart="validation"></canvas><div class="legend"><span class="sw" style="background:${C_CUR}"></span>current settings <span class="sw" style="background:${C_TUNED}"></span>candidate</div>` : "") +
+      `<table class="runtab"><thead><tr><th>Check</th><th>Measured</th><th>Limit</th><th></th></tr></thead><tbody>${v.rows
+        .map((r) => `<tr><td>${esc(r.title)}</td><td>${esc(r.measured)}</td><td>${esc(r.limit)}</td><td class="${VERDICT[r.verdict] ?? ""}">${esc(r.verdict)}</td></tr>`)
+        .join("")}</tbody></table>`;
+  }
+  if (!l.model && !l.busy && !l.error) html += `<div class="muted tsec">Set up. Next: identify the plant (Claude runs tune_run).</div>`;
+  return `<div class="tloop">${html}</div>`;
+}
+
+const C_MEAS = "#0891b2";
+const C_PRED = "#d97706";
+const C_CUR = "#94a3b8";
+const C_TUNED = "#16a34a";
+
+/** Draw the tuning charts (truST's model fit and validation) and the step-test overlay. */
+export function drawTuningCharts(root: HTMLElement): void {
+  const runs = root.querySelector<HTMLCanvasElement>("canvas.runs");
+  if (runs) drawRuns(runs);
+  for (const c of root.querySelectorAll<HTMLCanvasElement>("canvas.tchart")) {
+    const l = views.loops[Number(c.dataset.loop)];
+    if (!l) continue;
+    if (c.dataset.chart === "model" && l.model) {
+      const meas = l.model.traces.find((t) => t.role === "measurement");
+      const pred = l.model.traces.find((t) => t.role === "prediction");
+      drawSeries(c, [
+        ...(meas ? [{ tr: meas, color: C_MEAS, width: 1.6 }] : []),
+        ...(pred ? [{ tr: pred, color: C_PRED, width: 1.6, dash: true }] : []),
+      ]);
+    } else if (c.dataset.chart === "validation" && l.validation) {
+      drawSeries(
+        c,
+        l.validation.traces.map((tr) => ({ tr, color: tr.role === "tuned" ? C_TUNED : C_CUR, width: tr.role === "tuned" ? 2 : 1.4 })),
+      );
+    }
+  }
+}
+
+/** An axis label with enough decimals for the axis span. */
+const tick = (y: number, span: number) => y.toFixed(Math.min(6, Math.max(0, Math.ceil(-Math.log10(span / 4 || 1)) + 1)));
+const num4 = (v: number) => String(Number(v.toPrecision(4)));
+
+function drawSeries(canvas: HTMLCanvasElement, series: { tr: TuningTrace; color: string; width: number; dash?: boolean }[]): void {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || 600;
+  const h = 150;
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.height = `${h}px`;
+  }
+  const g = canvas.getContext("2d")!;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const ts = series.flatMap((s) => s.tr.t);
+  const vs = series.flatMap((s) => s.tr.v).filter((v): v is number => typeof v === "number");
+  if (!ts.length || !vs.length) return;
+  const t0 = Math.min(...ts);
+  const t1 = Math.max(...ts);
+  let y0 = Math.min(...vs);
+  let y1 = Math.max(...vs);
+  const pad = (y1 - y0) * 0.08 || Math.abs(y0) * 0.05 || 0.1;
+  y0 -= pad;
+  y1 += pad;
+  const css = getComputedStyle(document.documentElement);
+  const fg2 = css.getPropertyValue("--fg2").trim() || "#888";
+  const line = css.getPropertyValue("--line").trim() || "#ddd";
+  const L = 44, R = 8, T = 8, B = 18;
+  const X = (t: number) => L + ((t - t0) / (t1 - t0 || 1)) * (w - L - R);
+  const Y = (y: number) => T + (1 - (y - y0) / (y1 - y0 || 1)) * (h - T - B);
+  g.font = `10px ${css.getPropertyValue("--font") || "sans-serif"}`;
+  g.strokeStyle = line;
+  g.fillStyle = fg2;
+  g.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = y0 + ((y1 - y0) * i) / 4;
+    g.beginPath();
+    g.moveTo(L, Y(y));
+    g.lineTo(w - R, Y(y));
+    g.stroke();
+    g.fillText(tick(y, y1 - y0), 2, Y(y) + 3);
+  }
+  const unit = series[0]?.tr.unit;
+  g.fillText(`${fmt(t0)} s`, L, h - 4);
+  g.fillText(`${fmt(t1)} s${unit ? `  ·  ${unit}` : ""}`, w - R - 80, h - 4);
+  for (const s of series) {
+    g.strokeStyle = s.color;
+    g.lineWidth = s.width;
+    g.setLineDash(s.dash ? [5, 4] : []);
+    g.beginPath();
+    let started = false;
+    s.tr.t.forEach((t, k) => {
+      const v = s.tr.v[k];
+      if (typeof v !== "number") return;
+      if (!started) g.moveTo(X(t), Y(v));
+      else g.lineTo(X(t), Y(v));
+      started = true;
+    });
+    g.stroke();
+  }
+  g.setLineDash([]);
 }
 
 // ------------------------------------------------------------------ review

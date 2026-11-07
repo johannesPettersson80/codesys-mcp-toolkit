@@ -20,7 +20,7 @@ import { createServer } from "../../src/server.js";
 import { SimController } from "../../src/sim/controller.js";
 import { PANEL_URI } from "../../src/sim/panel.js";
 import type { AppContext } from "../../src/tools.js";
-import { LINES, TANK_PLANT, tankNodes, tankTasks, tankTestNodes } from "../../test/fixtures/tank.js";
+import { LINES, TANK_PLANT, tankNodes, tankTasks, tankTestNodes, TUNING_PLANT, tuningTankNodes } from "../../test/fixtures/tank.js";
 import { ProjectCache } from "../../src/codesys/cache.js";
 import { ChangeStore } from "../../src/codesys/changes.js";
 import { Driver } from "../../src/driver.js";
@@ -61,6 +61,30 @@ export async function startDevHost(port: number, hostJs: string, pageHtml: strin
       await step("run_experiment", { name: "level step", duration_s: 300, speed: 20, pv: "GVL_IO.lrLT101_Level", sp: { var: "GVL_Par.rLevelSP", value: 1.2, at_s: 10 }, watch: ["PRG_Tank.nTrips"] });
     } else if (which === "tuned") {
       await step("run_experiment", { name: "level step", duration_s: 300, speed: 20, pv: "GVL_IO.lrLT101_Level", sp: { var: "GVL_Par.rLevelSP", value: 1.2, at_s: 10 }, set: { "PRG_Tank.fbPI._rKp": 150 }, watch: ["PRG_Tank.nTrips"] });
+    } else if (which === "tune") {
+      // truST Control Studio tuning on the tuning-ready tank (loop signals in PRG_Tank, TRUST-GAPS S9).
+      writeFileSync(join(root, "Tank.plant.toml"), TUNING_PLANT);
+      cache.setAll(structuredClone([...tuningTankNodes(), ...tankTestNodes()]));
+      await step("sim_start", { speed: 20 });
+      await step("tune_setup", {
+        name: "LT101 level",
+        pv: { symbol: "PRG_Tank.lrLevel", unit: "m", min: 0, max: 2.5 },
+        sp: "PRG_Tank.rLevelSP",
+        mv: { symbol: "PRG_Tank.lrFlowCmd", unit: "m3/s", min: 0, max: 0.05 },
+        mode: { symbol: "PRG_Tank.bManual", true_means: "Manual" },
+        manual_output: "PRG_Tank.lrManualFlow",
+        coefficients: [
+          { symbol: "PRG_Tank.fbPI._rKp", unit: "%/m", values: [25, 50, 100, 200, 300] },
+          { symbol: "PRG_Tank.fbPI._rTi", unit: "s", values: [20, 60, 120] },
+        ],
+        startup_flag: "PRG_Tank.bInitDone",
+        experiment_s: 400,
+        step: 0.005,
+        replace: true,
+      });
+      await step("tune_run", { loop: "loop:lt101-level", step: "identify", settle_s: 120 });
+      await step("tune_run", { loop: "loop:lt101-level", step: "search" });
+      await step("tune_run", { loop: "loop:lt101-level", step: "validate" });
     } else if (which === "breakpoint") {
       await step("set_breakpoint", { path: "PRG_Tank", line: LINES.trip });
       await step("force_var", { name: "GVL_IO.lrLT101_Level", value: "2.4" });

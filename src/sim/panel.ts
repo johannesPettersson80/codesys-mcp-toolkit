@@ -273,6 +273,20 @@ export function registerPanel(server: McpServer, sim: SimController, ws: Workspa
   tools.push(
     registerAppTool(
       server,
+      "get_tuning",
+      {
+        description: "Panel: truST Control Studio loops with their model fit, search trials and validation (Tuning view).",
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: true },
+        _meta: appOnly,
+      },
+      async () => json({ version: sim.tuning.version, loops: await sim.tuning.list().catch(() => sim.tuning.panelLoops()) }),
+    ),
+  );
+
+  tools.push(
+    registerAppTool(
+      server,
       "get_locals",
       {
         description: "Panel: locals and call stack while the simulation is paused in user code.",

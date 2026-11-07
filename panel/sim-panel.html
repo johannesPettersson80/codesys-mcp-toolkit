@@ -220,6 +220,12 @@ tr:last-child td { border-bottom: 0; }
 .tests .ti { width: 14px; flex: none; text-align: center; font-weight: 700; } .tests li.pass .ti { color: var(--ok); } .tests li.fail .ti { color: var(--bad); }
 .tests .msg { font: 11.5px var(--mono); color: var(--bad); margin-top: 2px; white-space: pre-wrap; } .tests .t { margin-left: auto; font-size: 11px; }
 canvas.runs { display: block; width: 100%; height: 170px; }
+canvas.tchart { display: block; width: 100%; height: 150px; margin-top: 4px; }
+.tloop { margin-bottom: 14px; } .tsep { font-size: 11px; font-weight: 600; color: var(--fg2); text-transform: uppercase; letter-spacing: .04em; margin: 6px 0 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.stages { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; } .stg { font-size: 11.5px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--fg2); }
+.stg.done { color: var(--ok); border-color: var(--ok); } .stg.bad { color: var(--bad); border-color: var(--bad); } .stg.busy { color: var(--accent); border-color: var(--accent); animation: pulse 1.2s infinite; }
+.tsec { font-size: 12.5px; margin-top: 8px; } .tsec .mono { font-family: var(--mono); font-size: 12px; } .terr { font-size: 12px; color: var(--bad); margin: 4px 0; white-space: pre-wrap; }
+.legend { font-size: 11px; color: var(--fg2); display: flex; gap: 6px; align-items: center; } .legend .sw { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-left: 6px; }
 .runtab { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; font-variant-numeric: tabular-nums; }
 .runtab th { text-align: left; font-weight: 600; color: var(--fg2); font-size: 11px; padding: 3px 6px; border-bottom: 1px solid var(--line); }
 .runtab td { padding: 4px 6px; border-bottom: 1px solid var(--line); } .runtab tr.best td { font-weight: 600; }

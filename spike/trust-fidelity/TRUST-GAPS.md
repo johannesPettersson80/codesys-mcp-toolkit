@@ -92,6 +92,66 @@ law" search structure, which fits a Kp/Ti PI without code changes. These
 gaps keep the rest of the flow from working on typical CODESYS code. Source
 references are to the 0.33.0 tree.
 
+**truST's answer (7 November):**
+- **S1:** a confirmed bug, fixed in PR #321, not released yet. The catalog
+  command (`trust-lsp command trust-lsp.hmiBindings`) ignored the profile.
+  Under IEC a method without a specifier is PROTECTED, so the error was really
+  E202 on `fbPI.Reset()`. The HMI Builder's variable list is fixed too.
+- **S2:** BOOL-only is the specified behaviour (spec 35) for every loop kind,
+  "Other law" included, because its identification uses Manual step tests.
+  Enum modes are proposed to the owner, not decided.
+- **S8:** the 5 s stop is intended. Run the simulation freely during
+  identification, Apply and monitoring. The search trials and Validate are
+  isolated runs and don't step the program.
+- **S7:** our reading of the loop types is confirmed. Tuning computed from the
+  model in Kp/Ti form (as CODESYS's PID uses: KP/TN/TV) is proposed to the
+  owner.
+- **S3, S4, S5, S6:** not answered yet.
+
+**Decided for truST 0.35.0 (7 November, second answer):**
+- **Enum mode signals (S2):** a loop names the member that means Manual and
+  the one that means Auto.
+- **Own P/PI/PID in Kp/Ti (and Td) form (S7):** tuned from the model like
+  truST's PID, so `FB_PI` no longer needs the grid search.
+- **S4:** the startup flag records which value means "startup has run" and
+  recognises both `IF NOT done THEN ... done := TRUE` and CODESYS's
+  `IF bInit THEN ... bInit := FALSE`. Until then only the done-flag pattern
+  works; naming `bInit` would rerun the startup code in Validate and overwrite
+  the seeded values.
+- **S5:** `tune` will fill missing requirements from the model, as every other
+  design already does (a bug in the finite search). A new verb
+  `trust-control-studio inputs --loop <id> --change <file|->` declares your
+  own. Until then: `serve` with `controlStudio/inputs`.
+- **S6:** a bug. Setup will write the spec's budgets (10,000,000 scans, 60 min),
+  and the search refuses up front when its trials can't fit. Until then: raise
+  `controller.project.maximumCycles` and `wallBudgetMs` in
+  `control-loops/<id>.json` right after setup, before Identify (a changed loop
+  file is a new revision).
+- **S3:** stays as it is. Identify steps the output only through the program's
+  own Manual path, never by a direct write or a force, in simulation and on a
+  real target alike. If Manual simply stops writing the MV, the MV itself can
+  be named as the manual output (not yet run end to end).
+
+**End-to-end run on 0.34.0 (7 November).** Setup → identify (MV step) → tune
+("Other law", 6×6 grid on `_rKp`/`_rTi`) → validate all ran on a scratch copy
+of the tank. Identify fitted G(s) = 71.6 / (73.0 s + 1) (tank physics: τ ≈ 75 s
+at 1 m). The search took 52 s for 36 trials and chose Kp 300 / Ti 20 s. Validate
+passed the model check (6 % error, limit 15 %) and the candidate's settling
+(20 s against 196 s for Kp 50 / Ti 60). One row failed, the Manual-to-Auto
+entry, because the tank's valve feedback starts closed in the isolated run
+(the program's own logic). To get there the scratch copy needed the S2–S6
+workarounds, plus these:
+
+| # | Gap | Detail |
+|---|-----|--------|
+| S9 | **Loop signals can't live in a GVL** | Two rules together rule out CODESYS's normal layout, where I/O and parameters are GVL members (`GVL_IO.lrLT101_Level`, `GVL_Par.rLevelSP`). (1) Control Studio's symbol paths take only a global or a program instance as the first name (`host/debug/control/symbol_path.rs:31`, `program_facts::is_global_or_program`), so `GVL_IO.x`, which truST compiles as a `NAMESPACE` member, fails with "program instance not found". (2) Every loop member must belong to one compiled program ("transfer members must belong to one compiled program"), and the measurement must be an input the program only reads. Setup's catalog offers the GVL symbols, so the error only appears at Identify. *Scratch workaround:* the level and flow command mapped `AT %IL0`/`AT %QL0` on `PRG_Tank` locals, the setpoint, mode and manual output as `PRG_Tank` locals. **Ask:** resolve namespace-qualified globals in symbol paths, and accept GVL members (or I/O addresses) as the loop's measurement, setpoint and output. |
+| S10 | **A failed operation can lock the loop** | When the hand-back to Auto is refused (transfer tolerance) or the fit fails after the experiment, the operation stays journaled ("This loop has an unfinished operation"). `cancel` retries the same refused transfer, so it can't finish either; only deleting the journal folder cleared it. **Ask:** `cancel` ends the operation and reports the loop's mode and values, even when the restoring transfer is refused. |
+| S11 | **The Auto-entry tolerance defaults to zero** | Without a reviewed `transferTolerance`, the hand-back to Auto after a manual step is refused even for a bumpless controller, because REAL/LREAL rounding alone differs from the held output. It can only be set through `serve` (S5), and only applies to operations started after it was set. **Ask:** a sensible default (e.g. a small fraction of the output span) and a CLI way to set it. |
+| S12 | **A large manual step drives a nonlinear plant into its trips** | Identify's default step amplitude comes from the loop file; 0.015 m³/s from 0.030 drove the tank from 1.0 m to 2.16 m, past its 2.0 m high-high trip, and the fit then failed ("a bounded input step with pre- and post-step data is required"). 0.005 m³/s worked. **Ask:** stop the step when the measurement leaves a declared safe band (the PV range or a trip level), and say so in the failure. |
+| S13 | **The step fit rejects some valid recordings at random** | With the same loop, plant and 0.005 m³/s step, `identify --method step` fitted 2 of 5 runs and failed 3 with "Step-response fit: A bounded input step with pre- and post-step data is required." The recordings were nearly identical (clean step, no trip). The difference is the sample at the step edge: samples are averages over 10–20 scans, so the edge sample lands partway between the old and new output depending on where the step falls in its block. It passed at 75 % and 95 % of the step and failed at 50 %, 50 % and 55 %. A failed recording can't be refitted ("the study keeps the experiment request only for the recording of its Identify result"). `--method setpoint-step` fitted 4 of 4 runs, with a better model check (3.7 % against 6 %). **Ask:** take the step time from the experiment request (the journal knows when it wrote the step), not from the averaged samples; and allow refitting a kept recording. *Toolkit:* identifies with `setpoint-step` by default. |
+| S14 | **Identify's recording stops at about 24,000 scans** | A 380 s experiment on a 10 ms task stopped with `finished_early` at 240 s (1,199–1,202 samples, scan range 20 to about 24,000), at 20x and at 40x alike; a 190 s experiment completed (`duration_complete`). The fit still ran on the shortened record. **Ask:** record the whole requested duration (decimate more for long experiments), or refuse up front when it can't, and say so in the answer. |
+| S15 | **Search and Validate need a free-running target** | Tune and Validate run isolated simulations, but with the runtime paused between scans (as the toolkit's debugger keeps it) `tune` failed with "native simulation host status timed out", and Validate's live model check reported "still changing" until the loop had settled while running. **Ask:** let the isolated verbs run without polling the target, or document that the target must run; Validate could say what it waits for. *Toolkit:* runs the simulation freely (20x) during Identify, Search and Validate, and pauses it again at a scan start after. |
+
 | # | Gap | Detail |
 |---|-----|--------|
 | S1 | **`setup` ignores `vendor_profile = "codesys"`** | `setup --project <mirror> --json` failed with `E208 method 'Reset' implementing interface 'I_Resettable' must be PUBLIC or INTERNAL`, while `trust-runtime build` of the same project (with `trust-lsp.toml` `vendor_profile = "codesys"`) succeeds. CODESYS methods without a modifier are PUBLIC. **Ask:** Studio compiles with the project's profile. *Workaround:* the toolkit's mirror now writes the implicit PUBLIC explicitly. |

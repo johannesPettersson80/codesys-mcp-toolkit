@@ -10,6 +10,7 @@ import { ExprError } from "./expr.js";
 import { MirrorError, type TaskInfo } from "./mirror.js";
 import { PlantConfigError } from "./plant.js";
 import { ScenarioError } from "./scenarios.js";
+import { TuningError } from "./tuning.js";
 import { heldMessage, type Driver } from "../driver.js";
 
 /** CODESYS ops the simulation may use. Read-only; nothing that writes or goes online. */
@@ -42,6 +43,7 @@ async function run(fn: () => Promise<string>): Promise<ToolResult> {
     if (e instanceof MirrorError || e instanceof PlantConfigError) return text(`mirror: ${e.message}`, true);
     if (e instanceof ExprError) return text(`condition: ${e.message}`, true);
     if (e instanceof ScenarioError) return text(`scenario: ${e.message}`, true);
+    if (e instanceof TuningError) return text(`${e.code}: ${e.message}`, true);
     return text(`error: ${(e as Error).message}`, true);
   }
 }
@@ -62,7 +64,7 @@ const value = z.string().describe("Structured Text literal: 0.6, TRUE, 'text', T
 
 export function registerSimTools(server: McpServer, sim: SimController, driver?: Driver): void {
   /** Tools that change the simulation are held while the user has paused Claude (panel). */
-  const HELD = new Set(["sim_start", "sim_stop", "run_scans", "run_for", "set_breakpoint", "clear_breakpoint", "continue", "step_over", "step_in", "step_out", "write_var", "force_var", "unforce_var", "set_plant_param", "run_experiment", "run_scenarios", "save_scenario"]);
+  const HELD = new Set(["sim_start", "sim_stop", "run_scans", "run_for", "set_breakpoint", "clear_breakpoint", "continue", "step_over", "step_in", "step_out", "write_var", "force_var", "unforce_var", "set_plant_param", "run_experiment", "run_scenarios", "save_scenario", "tune_setup", "tune_run"]);
   const reg = ((name: string, config: unknown, cb: (...a: unknown[]) => unknown) =>
     server.registerTool(
       name,
@@ -290,5 +292,92 @@ export function registerSimTools(server: McpServer, sim: SimController, driver?:
     "experiment_log",
     { description: "List the experiments run in this session with their metrics.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
     async () => run(async () => sim.experimentLog()),
+  );
+
+  // ---------------------------------------------------------------- tuning (truST Control Studio)
+
+  const range = z.object({
+    symbol: varName,
+    unit: z.string().optional(),
+    min: z.number().describe("Lowest value of the signal's range"),
+    max: z.number().describe("Highest value of the signal's range"),
+  });
+  reg(
+    "tune_setup",
+    {
+      description: [
+        "Set up a control loop for tuning with truST's Control Studio (simulation only; nothing is written to CODESYS or a controller).",
+        "Control Studio identifies the plant (by default with a setpoint step in Auto), then searches the program's own controller coefficients (e.g. FB_PI._rKp and _rTi) against the fitted model and validates the best candidate with the actual ST.",
+        "Requirements of truST 0.34 on the program: every signal named here must be a variable of ONE PROGRAM instance, not a GVL member (the measurement and output mapped to I/O there, e.g. `lrLevel AT %IL0 : LREAL;`);",
+        "a BOOL mode (Manual/Auto) with a REAL/LREAL manual output that drives the output in Manual; ideally a bumpless controller (tracks the manual output in Manual);",
+        "and if the program sets the coefficients at startup, a BOOL done-flag (`IF NOT bInitDone THEN fbPI.Kp := ...; bInitDone := TRUE; END_IF`) named as startup_flag.",
+        "If the program lacks these, explain what is missing and ask the user before restructuring. Starts the simulation if needed.",
+      ].join(" "),
+      inputSchema: z.object({
+        name: z.string().min(1).describe("Loop name, e.g. 'LT101 level' (id becomes loop:lt101-level)"),
+        pv: range.describe("Measurement: an input the program only reads"),
+        sp: varName.describe("Setpoint variable"),
+        mv: range.describe("Controller output (manipulated variable) with its range"),
+        mode: z.object({ symbol: varName, true_means: z.enum(["Manual", "Auto"]) }).describe("BOOL mode switch"),
+        manual_output: varName.describe("REAL/LREAL that drives the output in Manual"),
+        coefficients: z
+          .array(z.object({ symbol: varName, values: z.array(z.number()).min(2).max(12), unit: z.string().optional() }))
+          .min(1)
+          .max(4)
+          .describe("Coefficients to search and the values to try, e.g. {symbol:'PRG_Tank.fbPI._rKp', values:[25,50,100,200,400]}. Up to 4; the search tries every combination."),
+        startup_flag: varName.optional().describe("BOOL done-flag the program sets after writing its coefficients at startup"),
+        action: z.enum(["direct", "reverse"]).optional().describe("direct (default): more output raises the measurement"),
+        step: z.number().positive().optional().describe("Identification step of the output (default 10% of its range). Keep it small enough that the plant stays clear of trips and limits."),
+        experiment_s: z.number().positive().max(86_400).optional().describe("How long the identification step runs, in simulated seconds (default 300); about 4-5 time constants of the plant"),
+        requirements: z
+          .object({
+            reference_change: z.number().optional(),
+            maximum_error: z.number().optional(),
+            settling_band: z.number().optional(),
+            settling_time_s: z.number().optional(),
+            duration_s: z.number().optional(),
+            maximum_overshoot_pct: z.number().optional(),
+            transfer_tolerance: z.number().optional().describe("Allowed output jump at the Manual-to-Auto hand-back"),
+          })
+          .optional()
+          .describe("What a good response is; defaults scale with the pv/mv ranges"),
+        replace: z.boolean().optional().describe("Set an existing loop up again (drops its results)"),
+      }),
+    },
+    async (a) => run(() => sim.tuning.setup(a)),
+  );
+
+  reg(
+    "tune_run",
+    {
+      description: [
+        "Run a step of truST's Control Studio tuning on a loop from tune_setup:",
+        "'identify' runs the simulation freely and steps the setpoint in Auto (method 'setpoint-step', the default, repeatable on truST 0.34) or the output in Manual (method 'step') to fit a plant model; it needs the loop settled in Auto and waits and retries while it settles;",
+        "'search' tries every coefficient combination against the model and selects the best that meets the requirements;",
+        "'validate' runs the actual ST in isolated simulations, current settings vs the candidate, and checks each requirement;",
+        "'cancel' ends a journaled operation that blocks the loop.",
+        "Results show in the panel's Tuning view. The gains are a proposal: change them in CODESYS with write_object to keep them.",
+      ].join(" "),
+      inputSchema: z.object({
+        loop: z.string().describe("Loop id or name, e.g. 'loop:lt101-level'"),
+        step: z.enum(["identify", "search", "validate", "cancel"]),
+        method: z.enum(["setpoint-step", "step", "automatic"]).optional().describe("identify: setpoint-step (default) or step (the output in Manual)"),
+        speed: z.number().min(1).max(100).optional().describe("identify: time scale while free-running (default 20)"),
+        settle_s: z.number().min(0).max(3600).optional().describe("identify: simulated seconds to let the loop settle first (default 60)"),
+      }),
+    },
+    async ({ loop, step, method, speed, settle_s }) =>
+      run(() =>
+        step === "identify" ? sim.tuning.identify(loop, { method, speed, settle_s })
+        : step === "search" ? sim.tuning.search(loop)
+        : step === "validate" ? sim.tuning.validate(loop)
+        : sim.tuning.cancel(loop),
+      ),
+  );
+
+  reg(
+    "tune_status",
+    { description: "Tuning loops (truST Control Studio) with their model, search and validation results from this session.", inputSchema: z.object({ loop: z.string().optional() }), annotations: { readOnlyHint: true } },
+    async ({ loop }) => run(() => sim.tuning.status(loop)),
   );
 }

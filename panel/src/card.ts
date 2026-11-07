@@ -3,7 +3,7 @@ import { model } from "./model.js";
 import { renderPid } from "./plant.js";
 import { drawTrend } from "./trend.js";
 import { $, ago, esc } from "./util.js";
-import { codePath, codeView, drawRuns, problemsList, reviewView, testsView, tuningView, viewTabs, type ViewName } from "./views.js";
+import { codePath, codeView, drawTuningCharts, problemsList, reviewView, testsView, tuningView, viewTabs, type ViewName } from "./views.js";
 
 let shownView: ViewName | undefined;
 let shownHtml = "";
@@ -69,8 +69,7 @@ export function renderCard(view: ViewName, follow: boolean): void {
     }
   }
   if (view === "tuning") {
-    const c = el.querySelector<HTMLCanvasElement>("canvas.runs");
-    if (c) drawRuns(c);
+    drawTuningCharts(el);
   }
   shownView = view;
 }

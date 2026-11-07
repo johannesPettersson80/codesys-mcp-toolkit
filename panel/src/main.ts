@@ -12,7 +12,7 @@ import { renderCard } from "./card.js";
 import { model, type Locals, type ObjData, type WsData } from "./model.js";
 import { $ } from "./util.js";
 import { Workspace } from "./workspace.js";
-import type { ExperimentRun } from "../../src/sim/panel-types.js";
+import type { ExperimentRun, TuningLoop } from "../../src/sim/panel-types.js";
 import { codePath, currentView, VIEWS, views, type ViewName } from "./views.js";
 import { persist } from "./util.js";
 
@@ -27,6 +27,7 @@ let inlineExpanded = false;
 let view: ViewName | undefined;
 let workspaceStale = true;
 let runsKey = "";
+let tuningKey: number | undefined;
 
 app.ontoolresult = (r) => {
   const id = (r.structuredContent as { panelId?: string } | undefined)?.panelId;
@@ -290,6 +291,13 @@ async function pollOnce() {
     if (r) {
       views.runs = r.runs;
       runsKey = key;
+    }
+  }
+  if (s && s.tuningVersion !== tuningKey && (v === "tuning" || mode === "card")) {
+    const r = await call<{ version: number; loops: TuningLoop[] }>("get_tuning");
+    if (r) {
+      views.loops = r.loops;
+      tuningKey = s.tuningVersion;
     }
   }
   if (mode === "workspace") {

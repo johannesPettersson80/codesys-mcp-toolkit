@@ -47,6 +47,14 @@ Rewrite. See README "Migrating from v1".
   marked), Unit tests, Simulation, Tuning (experiment runs overlaid and
   compared) and Review (accept or revert each changed object). New app-only
   tool `get_experiments`.
+- Loop tuning with truST's Control Studio (truST 0.34+): `tune_setup`,
+  `tune_run` (`identify`, `search`, `validate`, `cancel`) and `tune_status`.
+  Identifies the plant on the free-running simulation, searches the program's
+  own controller coefficients against the fitted model and validates the
+  candidate with the actual ST. Works around truST 0.34's gaps (search
+  budget, requirements and Auto-entry tolerance, stuck journals) and refuses
+  GVL loop signals with what to change. The Tuning view shows the model fit,
+  the candidates and the validation (app-only tool `get_tuning`).
 - Tool annotations (read-only, non-destructive, destructive; all local), so
   clients can tell harmless tools from ones that overwrite project code.
 - Shared session: server processes started with the same options share one
