@@ -78,6 +78,10 @@ progress without waiting.
 | `compile` | Build the application and return errors and warnings with object, line and code. |
 | `list_libraries` / `add_library` | Library references. Use the full name, e.g. `Util, * (System)`. |
 | `list_tasks` | Tasks with interval, priority and the POUs they call. |
+| `get_outline` | The project at a glance without reading every object: tasks and what they run, each POU's interface (inputs, outputs, methods, properties), interfaces, enums, structs, GVLs, tests. Pass `path` for one object in full or one folder. |
+| `get_io_list` | Variables mapped to I/O (`AT %I…`, `%Q…`, `%M…` and the `%I*` / `%Q*` placeholders), with type, owner and comment. |
+| `get_library_api` | The real interface of a referenced library's FBs, functions and types, read from the installed source library (`.library`). Compiled libraries carry no readable declarations. |
+| `checkpoint` / `get_changes` / `revert_object` | Snapshots of the project's ST (one is taken automatically when a project is opened: `session-start`), what changed since one (with a line diff per object), and putting an object back, including its methods and properties. |
 
 ### Object paths
 
@@ -174,6 +178,7 @@ BOOL, an integer type, REAL or LREAL.
 | `set_plant_param` | Change a plant parameter for this session. The simulation restarts, because truST applies plant changes only on restart. |
 | `run_experiment` / `experiment_log` | Repeatable runs from a fresh start: settings, a setpoint step, faults over time. Returns overshoot, rise and settling time, steady-state error and IAE, compared with the previous run of the same name. |
 | `run_tests` | Run the project's unit tests in truST and report pass/fail per test (below). |
+| `save_scenario` / `run_scenarios` | Save an experiment plus expectations (e.g. overshoot below 5 %, no interlock trip) in `<Project>.scenarios.toml`, and rerun them all after a change: PASS/FAIL per scenario with the failing checks. |
 | `open_sim_panel` | Show the live panel (below). |
 
 ### Unit tests

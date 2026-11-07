@@ -25,6 +25,7 @@ import { createServer, VERSION } from "./server.js";
 import type { AppContext } from "./tools.js";
 import { SimController } from "./sim/controller.js";
 import { codesysSource } from "./sim/tools.js";
+import { ChangeStore } from "./codesys/changes.js";
 
 const log = (m: string) => process.stderr.write(`[codesys-mcp] ${m}\n`);
 
@@ -77,6 +78,7 @@ async function main() {
     codesys: { exe: codesys.exe, profile: codesys.profile, label: codesys.install.label },
     startWaitMs: 90_000,
   };
+  ctx.changes = new ChangeStore(join(process.env.LOCALAPPDATA ?? tmpdir(), "codesys-mcp-toolkit", "checkpoints"));
   if (!values["no-sim"]) {
     const mirrorRoot = values["mirror-dir"] ?? join(process.env.LOCALAPPDATA ?? tmpdir(), "codesys-mcp-toolkit", "mirrors");
     ctx.sim = new SimController(codesysSource(bridge, () => ctx.project?.path, ctx.startWaitMs), { trustRuntime: values["trust-runtime"], mirrorRoot, log });

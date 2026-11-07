@@ -8,6 +8,7 @@ import { SimController, SimError, type CodesysSource } from "./controller.js";
 import { ExprError } from "./expr.js";
 import { MirrorError, type TaskInfo } from "./mirror.js";
 import { PlantConfigError } from "./plant.js";
+import { ScenarioError } from "./scenarios.js";
 
 /** CODESYS ops the simulation may use. Read-only; nothing that writes or goes online. */
 export const SIM_CODESYS_OPS = ["export", "tasks.list"] as const;
@@ -34,11 +35,23 @@ async function run(fn: () => Promise<string>): Promise<ToolResult> {
     if (e instanceof SimError || e instanceof TrustError || e instanceof BridgeError) return text(`${e.code}: ${e.message}`, true);
     if (e instanceof MirrorError || e instanceof PlantConfigError) return text(`mirror: ${e.message}`, true);
     if (e instanceof ExprError) return text(`condition: ${e.message}`, true);
+    if (e instanceof ScenarioError) return text(`scenario: ${e.message}`, true);
     return text(`error: ${(e as Error).message}`, true);
   }
 }
 
 const varName = z.string().describe("Variable path as in CODESYS: 'GVL_IO.rLevel', 'PRG_Tank.nTrips', 'PRG_Tank.fbPI.rY'");
+const experimentShape = {
+  duration_s: z.number().positive().max(86_400),
+  speed: z.number().min(1).max(1000).optional().describe("Time scale during the run (default 100)"),
+  pv: varName.optional().describe("Process value to analyse"),
+  sp: z.object({ var: varName, value: z.union([z.number(), z.string()]), at_s: z.number().min(0).optional() }).optional().describe("Setpoint step"),
+  set: z.record(z.string(), z.union([z.number(), z.string()])).optional().describe("Values written at t=0, e.g. {\"PRG_Tank.fbPI._rKp\": 80}"),
+  force: z.array(z.object({ var: varName, value: z.union([z.number(), z.string()]), at_s: z.number().min(0).optional(), until_s: z.number().min(0).optional() })).optional(),
+  watch: z.array(varName).max(20).optional().describe("Signals to report (alarms, modes, counters)"),
+  samples: z.number().int().min(10).max(2000).optional(),
+  restart: z.boolean().optional().describe("Fresh start first (default true)"),
+};
 const value = z.string().describe("Structured Text literal: 0.6, TRUE, 'text', T#2s, E_Mode.AUTO");
 
 export function registerSimTools(server: McpServer, sim: SimController): void {
@@ -190,20 +203,43 @@ export function registerSimTools(server: McpServer, sim: SimController): void {
     {
       description:
         "Run a repeatable experiment from a cold restart: apply settings, step a setpoint and/or force faults at given times, run for duration_s simulated seconds, and return a summary (overshoot, rise and settling time, steady-state error, IAE, watched signals), compared with the previous run of the same name. Breakpoints are ignored during the run.",
-      inputSchema: z.object({
-        name: z.string().optional().describe("Name for comparing runs, e.g. 'level step'"),
-        duration_s: z.number().positive().max(86_400),
-        speed: z.number().min(1).max(1000).optional().describe("Time scale during the run (default 100)"),
-        pv: varName.optional().describe("Process value to analyse"),
-        sp: z.object({ var: varName, value: z.union([z.number(), z.string()]), at_s: z.number().min(0).optional() }).optional().describe("Setpoint step"),
-        set: z.record(z.string(), z.union([z.number(), z.string()])).optional().describe("Values written at t=0, e.g. {\"PRG_Tank.fbPI._rKp\": 80}"),
-        force: z.array(z.object({ var: varName, value: z.union([z.number(), z.string()]), at_s: z.number().min(0).optional(), until_s: z.number().min(0).optional() })).optional(),
-        watch: z.array(varName).max(20).optional().describe("Signals to report (alarms, modes, counters)"),
-        samples: z.number().int().min(10).max(2000).optional(),
-        restart: z.boolean().optional().describe("Cold restart first (default true)"),
-      }),
+      inputSchema: z.object({ name: z.string().optional().describe("Name for comparing runs, e.g. 'level step'"), ...experimentShape }),
     },
     async (spec) => run(() => sim.runExperiment(spec)),
+  );
+
+  server.registerTool(
+    "save_scenario",
+    {
+      description:
+        "Save an experiment plus expectations as a named scenario in <Project>.scenarios.toml next to the project, to rerun after every change with run_scenarios. Expectations: metrics (overshoot_pct, rise_time_s, settling_time_s, steady_state_error, iae, pv_min, pv_max, pv_final) take {min, max, abs_max, equals}; watched variables take {final, min, max} over the run, e.g. {\"PRG_Tank.nTrips\": {\"final\": 0}}. Saving an existing name replaces it; delete: true removes it.",
+      inputSchema: z.object({
+        name: z.string().min(1),
+        ...experimentShape,
+        expect: z.record(z.string(), z.object({ min: z.number().optional(), max: z.number().optional(), abs_max: z.number().optional(), equals: z.union([z.number(), z.string()]).optional(), final: z.union([z.number(), z.string()]).optional() })).optional(),
+        delete: z.boolean().optional(),
+      }),
+    },
+    async ({ delete: del, ...s }) => run(() => sim.saveScenario(s, { delete: del })),
+  );
+
+  server.registerTool(
+    "run_scenarios",
+    {
+      description:
+        "Run the saved scenarios (all, or those whose name contains filter) from fresh starts and check their expectations: PASS/FAIL per scenario with the failing checks. Starts the simulation if it isn't running. Use after changing code to catch regressions.",
+      inputSchema: z.object({ filter: z.string().optional() }),
+    },
+    async ({ filter }) => {
+      try {
+        const r = await sim.runScenarios({ filter });
+        return text(r.text);
+      } catch (e) {
+        return run(async () => {
+          throw e;
+        });
+      }
+    },
   );
 
   server.registerTool(

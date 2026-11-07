@@ -485,6 +485,54 @@ def op_libraries_list(args):
     return {"libraries": refs}
 
 
+def op_library_api(args):
+    """Declarations of a referenced library's objects, read from its source
+    .library file opened as a secondary, read-only project. Compiled libraries
+    (.compiled-library) carry no readable source."""
+    c = Ctx()
+    want = (args.get("name") or "").strip().lower()
+    lm = _library_manager(c)
+    match = None
+    for r in list(_safe(lambda: lm.references, []) or []):
+        nm = (to_text(_safe(lambda: r.name)) or "").strip()
+        short = nm.lstrip("#").split(",")[0].strip().lower()
+        if nm.lower() == want or short == want:
+            match = r
+            break
+    if match is None:
+        raise OpError("not_found", "No library reference named '%s'. Use list_libraries." % args.get("name"))
+    display = to_text(_safe(lambda: match.effective_resolution)) or to_text(_safe(lambda: match.name))
+    glm = getattr(se, "librarymanager", None)
+    if glm is None:
+        raise OpError("unavailable", "The CODESYS library manager is not available to scripts here.")
+    managed = _safe(lambda: match.managed_library)
+    if managed is None:
+        found = _safe(lambda: glm.find_library(display))
+        if found:
+            managed = found[0]
+    if managed is None:
+        raise OpError("not_installed", "Library %s is not installed in any repository." % display)
+    path = to_text(_safe(lambda: glm.get_file_path(managed))) or ""
+    info = {"library": display, "path": path, "title": to_text(_safe(lambda: managed.title)),
+            "version": to_text(_safe(lambda: managed.version)), "company": to_text(_safe(lambda: managed.company))}
+    if not path.lower().endswith(".library"):
+        info["compiled"] = True
+        info["nodes"] = []
+        return info
+    proj = se.projects.open(path, primary=False)
+    if proj is None:
+        raise OpError("open_failed", "CODESYS could not open %s." % path)
+    try:
+        out = []
+        _walk(c, proj, [], None, True, out)
+        for n in out:
+            n.pop("implementation", None)
+        info["nodes"] = out
+    finally:
+        _safe(lambda: proj.close())
+    return info
+
+
 def op_libraries_add(args):
     c = Ctx()
     lm = _library_manager(c)
@@ -535,4 +583,5 @@ OPS = {
     "libraries.list": op_libraries_list,
     "libraries.add": op_libraries_add,
     "tasks.list": op_tasks_list,
+    "library.api": op_library_api,
 }

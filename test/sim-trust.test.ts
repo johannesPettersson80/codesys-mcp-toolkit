@@ -192,3 +192,28 @@ describe.skipIf(!exe || !toolchain)("unit tests in truST ({attribute 'test'} pro
     expect(readFileSync(join(sim.mirrorFolder(), "src", "Configuration.st"), "utf8")).not.toMatch(/T_PI/);
   }, T);
 });
+
+describe.skipIf(!exe || !toolchain)("scenarios in truST", () => {
+  const root = tempDir("cmcp-scen-");
+  const sim = new SimController({ exportSt: async () => tankNodes(), tasks: async () => tankTasks(), projectPath: () => join(root, "Tank.project") }, { mirrorRoot: join(root, "mirrors"), git: false });
+  beforeAll(() => writeFileSync(join(root, "Tank.plant.toml"), TANK_PLANT));
+  afterAll(async () => {
+    await sim.stop();
+  }, 30_000);
+
+  it("saves scenarios next to the project, runs them and checks expectations", async () => {
+    expect((await sim.runScenarios()).text).toMatch(/No scenarios yet/);
+    const base = { duration_s: 200, pv: "GVL_IO.lrLT101_Level", sp: { var: "GVL_Par.rLevelSP", value: 0.6, at_s: 5 }, watch: ["PRG_Tank.nTrips", "GVL_Par.eMode"], samples: 40 };
+    expect(await sim.saveScenario({ name: "no trip", ...base, expect: { "PRG_Tank.nTrips": { final: 0 }, "GVL_Par.eMode": { final: "E_TankMode.AUTO" }, pv_max: { max: 1.0 } } })).toMatch(/Saved scenario 'no trip'/);
+    expect(await sim.saveScenario({ name: "too strict", ...base, expect: { settling_time_s: { max: 1 } } })).toMatch(/\(2 scenario\(s\)\)/);
+    expect(readFileSync(join(root, "Tank.scenarios.toml"), "utf8")).toMatch(/name = "no trip"/);
+    const r = await sim.runScenarios();
+    expect(r.text).toMatch(/Started the simulation/);
+    expect(r.text).toMatch(/Scenarios: 1 passed, 1 failed \(2 total\)/);
+    expect(r.text).toMatch(/PASS no trip\n {2}ok {3}PRG_Tank\.nTrips: final 0/);
+    expect(r.text).toMatch(/FAIL too strict\n {2}FAIL settling_time_s: (not settled|[\d.]+) > max 1/);
+    expect(r.ok).toBe(false);
+    expect(await sim.saveScenario({ name: "too strict", duration_s: 1 }, { delete: true })).toMatch(/Deleted scenario 'too strict' .*\(1 scenario\(s\)\)/);
+    expect((await sim.runScenarios({ filter: "trip" })).text).toMatch(/^Scenarios: 1 passed, 0 failed/);
+  }, T);
+});

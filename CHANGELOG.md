@@ -30,6 +30,13 @@ Rewrite. See README "Migrating from v1".
 - `plant.toml`: truST plant models wired to ST variables by name, plus simple
   simulated device feedback (valve limit switches, pump running).
 - Options `--trust-runtime`, `--mirror-dir`, `--no-sim`.
+- `get_outline`, `get_io_list`: the project's structure and interfaces, and
+  its I/O variables, from one export instead of reading every object.
+- `get_library_api`: interfaces of referenced source libraries.
+- `checkpoint`, `get_changes`, `revert_object`: change tracking against
+  snapshots, with an automatic `session-start` snapshot on open.
+- `save_scenario`, `run_scenarios`: saved experiments with expectations, as
+  regression checks.
 - `run_tests`: unit tests that live in the CODESYS project as programs marked
   `{attribute 'test'}`, run in truST, with results by CODESYS object.
 - `open_sim_panel`: a live, read-only simulation panel (MCP App) with the

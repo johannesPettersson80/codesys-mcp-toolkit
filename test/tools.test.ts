@@ -33,6 +33,12 @@ describe("MCP tools over the real watcher", () => {
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "add_library",
+        "checkpoint",
+        "get_changes",
+        "get_io_list",
+        "get_library_api",
+        "get_outline",
+        "revert_object",
         "close_project",
         "codesys_status",
         "compile",

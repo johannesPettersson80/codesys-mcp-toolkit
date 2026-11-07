@@ -19,6 +19,7 @@ import type { TreeNode } from "../codesys/st.js";
 import { evaluateCondition, parseExpr } from "./expr.js";
 import { Journal } from "./journal.js";
 import { Recorder, type TrendPoint } from "./recorder.js";
+import { checkExpectations, parseScenarios, stringifyScenarios, validateScenario, type Scenario } from "./scenarios.js";
 import type { PanelLocation, PanelState, SignalRole, SourceView } from "./panel-types.js";
 import { composeMirror, fromMirror, HARNESS, HARNESS_FILE, partLines, toMirror, type TaskInfo } from "./mirror.js";
 import { readManifest, writeMirror, type Manifest, type SyncResult } from "./mirror-store.js";
@@ -84,6 +85,8 @@ export interface ExperimentResult {
   spec: ExperimentSpec;
   metrics: Record<string, number | string | null>;
   watch: Record<string, string>;
+  /** Numeric statistics of the watched variables (for scenario expectations). */
+  watchStats: Record<string, { final: number | null; finalText: string; min: number | null; max: number | null }>;
   samples: { t: number; values: Record<string, number | null> }[];
   summary: string;
 }
@@ -708,10 +711,17 @@ export class SimController {
   async runExperiment(spec: ExperimentSpec): Promise<string> {
     if (!(spec.duration_s > 0)) throw new SimError("bad_args", "duration_s must be > 0");
     this.ctl();
+    return (await this.runExperimentResult(spec)).summary;
+  }
+
+  /** Run an experiment and return the full result (metrics, watched-variable statistics, samples). */
+  async runExperimentResult(spec: ExperimentSpec): Promise<ExperimentResult> {
+    if (!(spec.duration_s > 0)) throw new SimError("bad_args", "duration_s must be > 0");
+    this.ctl();
     return this.busy(`Experiment "${spec.name ?? `experiment ${this.experiments.length + 1}`}" starting`, () => this.experimentImpl(spec));
   }
 
-  private async experimentImpl(spec: ExperimentSpec): Promise<string> {
+  private async experimentImpl(spec: ExperimentSpec): Promise<ExperimentResult> {
     const label = spec.name ?? `experiment ${this.experiments.length + 1}`;
     const cycle = this.manifest!.cycleMs;
     const total = Math.max(1, Math.round((spec.duration_s * 1000) / cycle));
@@ -787,14 +797,25 @@ export class SimController {
       const name = spec.name ?? `experiment ${n}`;
       const metrics = analyse(rows, spec);
       const watch: Record<string, string> = {};
-      for (const w of spec.watch ?? []) watch[w] = describeSeries(rows, w);
+      const watchStats: ExperimentResult["watchStats"] = {};
+      for (const w of spec.watch ?? []) {
+        watch[w] = describeSeries(rows, w);
+        const nums = rows.map((r) => r.values[w]).filter((v): v is number => typeof v === "number");
+        const last = rows.at(-1);
+        watchStats[w] = {
+          final: typeof last?.values[w] === "number" ? last.values[w] : null,
+          finalText: last?.raw[w] ?? "?",
+          min: nums.length ? Math.min(...nums) : null,
+          max: nums.length ? Math.max(...nums) : null,
+        };
+      }
       const prev = [...this.experiments].reverse().find((e) => e.name === name || (spec.pv && e.spec.pv === spec.pv));
       const summary = summarize(name, spec, metrics, watch, prev, Date.now() - t0);
-      const result: ExperimentResult = { n, name, at: new Date().toISOString(), spec, metrics, watch, samples: rows.map(({ t, values }) => ({ t, values })), summary };
+      const result: ExperimentResult = { n, name, at: new Date().toISOString(), spec, metrics, watch, watchStats, samples: rows.map(({ t, values }) => ({ t, values })), summary };
       this.experiments.push(result);
       this.journal.add("experiment", summary.split("\n")[0]!, { n, name, metrics });
       if (this.mirrorDir) await appendFile(join(this.mirrorDir, "experiments.jsonl"), JSON.stringify({ ...result, samples: undefined }) + "\n", "utf8").catch(() => undefined);
-      return summary;
+      return result;
     } finally {
       this.experimentSignals = [];
       await this.setHarnessBreakpoint(0).catch(() => undefined);
@@ -986,6 +1007,65 @@ export class SimController {
 
   trend(epoch: number, since: number): { epoch: number; points: TrendPoint[]; reset: boolean } {
     return this.recorder.since(epoch, since);
+  }
+
+  // ------------------------------------------------------------ scenarios
+
+  /** `<Project>.scenarios.toml` next to the project. */
+  scenariosFile(project = this.codesys.projectPath()): string {
+    if (!project) throw new SimError("no_project", "No CODESYS project is open. Call open_project first.");
+    return join(dirname(project), basename(project).replace(/\.project$/i, "") + ".scenarios.toml");
+  }
+
+  async loadScenarios(): Promise<Scenario[]> {
+    const f = this.scenariosFile();
+    if (!existsSync(f)) return [];
+    return parseScenarios(await readFile(f, "utf8"));
+  }
+
+  /** Add or replace a scenario by name (or delete it). */
+  async saveScenario(s: Scenario, o: { delete?: boolean } = {}): Promise<string> {
+    const list = await this.loadScenarios();
+    const i = list.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase());
+    if (o.delete) {
+      if (i < 0) return `No scenario '${s.name}'.`;
+      list.splice(i, 1);
+    } else {
+      const v = validateScenario(s as unknown as Record<string, unknown>);
+      if (i >= 0) list[i] = v;
+      else list.push(v);
+    }
+    const f = this.scenariosFile();
+    await writeFile(f, stringifyScenarios(list), "utf8");
+    return `${o.delete ? "Deleted" : i >= 0 ? "Updated" : "Saved"} scenario '${s.name}' in ${f} (${list.length} scenario(s)).`;
+  }
+
+  /** Run the saved scenarios (starting the simulation if needed) and check their expectations. */
+  async runScenarios(o: { filter?: string } = {}): Promise<{ ok: boolean; text: string }> {
+    let list = await this.loadScenarios();
+    if (o.filter) list = list.filter((s) => s.name.toLowerCase().includes(o.filter!.toLowerCase()));
+    if (!list.length) {
+      return { ok: true, text: o.filter ? `No scenario matches '${o.filter}'.` : "No scenarios yet. Save one with save_scenario (an experiment plus expectations)." };
+    }
+    const notes: string[] = [];
+    if (!this.running) {
+      await this.start({ sync: true });
+      notes.push("Started the simulation (mirror synced).");
+    }
+    const lines: string[] = [];
+    let passed = 0;
+    for (const s of list) {
+      const { expect, ...spec } = s;
+      const r = await this.runExperimentResult(spec);
+      const checks = checkExpectations(expect, r.metrics, r.watchStats);
+      const ok = checks.every((c) => c.ok);
+      if (ok) passed++;
+      lines.push(`${ok ? "PASS" : "FAIL"} ${s.name}${checks.length ? "" : " (no expectations)"}`);
+      for (const c of checks) lines.push(`  ${c.ok ? "ok  " : "FAIL"} ${c.text}`);
+    }
+    const failed = list.length - passed;
+    this.journal.add("experiment", `Scenarios: ${passed} passed, ${failed} failed`, { passed, failed });
+    return { ok: failed === 0, text: [...notes, `Scenarios: ${passed} passed, ${failed} failed (${list.length} total).`, ...lines].join("\n") };
   }
 
   experimentLog(): string {

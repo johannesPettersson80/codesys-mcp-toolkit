@@ -6,6 +6,9 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { BridgeError, type CodesysBridge } from "./bridge/bridge.js";
 import type { SimController } from "./sim/controller.js";
+import { buildOutline, ioList, type OutlineTask } from "./codesys/outline.js";
+import { diffObjects, formatDiff, lineDiff, snapshot, type ChangeStore, type SnapObject } from "./codesys/changes.js";
+import { parseDeclaration } from "./codesys/decl.js";
 import { checkDeclaration, kindLabel, normalizeText, type CreateKind, type TreeNode } from "./codesys/st.js";
 
 export interface AppContext {
@@ -24,6 +27,8 @@ export interface AppContext {
   project?: { path: string; application?: string };
   /** The truST simulation (absent when disabled). */
   sim?: SimController;
+  /** Checkpoints and change tracking (absent when disabled). */
+  changes?: ChangeStore;
 }
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
@@ -103,6 +108,12 @@ export function formatBuild(messages: BuildMessage[]): { text: string; errors: n
 
 export function registerTools(server: McpServer, ctx: AppContext): void {
   const b = ctx.bridge;
+  /** Take the session-start checkpoint the first time a project is opened in this process. */
+  const sessionStart = async (project: string): Promise<string> => {
+    if (!ctx.changes) return "";
+    const taken = await ctx.changes.sessionStart(project, async () => (await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 })).nodes);
+    return taken ? " Checkpoint 'session-start' saved (get_changes shows what changes from here)." : "";
+  };
   const save = () => ({ save: ctx.autosave });
   const savedNote = (r: { saved?: boolean }) => (r.saved ? " Project saved." : ctx.autosave ? "" : " (not saved; call save_project)");
 
@@ -144,7 +155,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
           { timeoutMs: 300_000 },
         );
         ctx.project = { path: r.path, application: r.application };
-        return `${r.reused ? "Already open" : "Opened"}: ${r.path}. Active application: ${r.application ?? "none"}.`;
+        const cp = await sessionStart(r.path);
+        return `${r.reused ? "Already open" : "Opened"}: ${r.path}. Active application: ${r.application ?? "none"}.${cp}`;
       }),
   );
 
@@ -172,6 +184,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         await copyFile(src, target);
         const r = await b.call<{ path: string; application?: string }>("project.open", { path: target }, { timeoutMs: 300_000 });
         ctx.project = { path: r.path, application: r.application };
+        await sessionStart(r.path);
         return `Created ${r.path} from ${t === "standard" ? "Standard.project" : src}. Active application: ${r.application ?? "none"}. Run compile to check that its libraries are installed.`;
       }),
   );
@@ -400,6 +413,240 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         return r.tasks
           .map((t) => `${t.name}: ${t.kind ?? "?"}${t.interval ? `, interval ${t.interval}${t.interval_unit && !/[a-z]/i.test(t.interval) ? " " + t.interval_unit : ""}` : ""}${t.priority ? `, priority ${t.priority}` : ""}; calls ${t.pous.join(", ") || "nothing"}`)
           .join("\n");
+      }),
+  );
+
+  server.registerTool(
+    "get_outline",
+    {
+      description:
+        "Outline of the project without reading every object: tasks and what they run, then each POU with its interface (inputs, outputs, methods, properties, actions), interfaces, DUTs (enum members, struct fields), GVLs and tests. Pass path for one object in detail (all variables with types, initial values, AT addresses and comments; method signatures) or for one folder.",
+      inputSchema: z.object({
+        path: pathArg.optional().describe("An object (details) or a folder (its overview). Omit for the whole application."),
+      }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ path }) =>
+      run(ctx, async () => {
+        const [e, t] = [await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 }), await b.call<{ tasks: OutlineTask[] }>("tasks.list")];
+        return buildOutline(e.nodes, t.tasks, { path });
+      }),
+  );
+
+  server.registerTool(
+    "get_io_list",
+    {
+      description:
+        "Variables mapped to I/O (AT %I, %Q, %M addresses, including the %I* / %Q* placeholders that the device tree maps), with type, owner (GVL or POU) and comment. Filter by text in the name, address or comment.",
+      inputSchema: z.object({ filter: z.string().optional() }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ filter }) =>
+      run(ctx, async () => {
+        const e = await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 });
+        let io = ioList(e.nodes);
+        if (filter) {
+          const f = filter.toLowerCase();
+          io = io.filter((x) => `${x.owner}.${x.name} ${x.at} ${x.comment ?? ""}`.toLowerCase().includes(f));
+        }
+        if (!io.length) return filter ? `No I/O variables match '${filter}'.` : "No variables with AT addresses in the project.";
+        const group = (d: string, label: string) => {
+          const xs = io.filter((x) => x.direction === d);
+          return xs.length ? [`${label} (${xs.length}):`, ...xs.map((x) => `  ${x.at.padEnd(9)} ${x.owner}.${x.name} : ${x.type}${x.comment ? ` // ${x.comment}` : ""}`)] : [];
+        };
+        const placeholders = io.filter((x) => x.placeholder).length;
+        return [
+          ...group("input", "Inputs"),
+          ...group("output", "Outputs"),
+          ...group("memory", "Memory"),
+          ...(placeholders ? [`${placeholders} placeholder(s) (%I* / %Q*): their addresses come from the device tree's I/O mapping, which isn't read yet.`] : []),
+        ].join("\n");
+      }),
+  );
+
+  // ---------------------------------------------------------------- libraries
+
+  type LibApi = { library: string; path: string; title?: string; version?: string; company?: string; compiled?: boolean; nodes: TreeNode[] };
+  const libCache = new Map<string, LibApi>();
+  server.registerTool(
+    "get_library_api",
+    {
+      description:
+        "The real interface of a referenced library's function blocks, functions, DUTs and GVLs (inputs, outputs, methods, types), read from the installed library, so calls use the right parameters. Pass symbol for one object in detail. Works for source libraries (.library); compiled libraries (.compiled-library) carry no readable declarations.",
+      inputSchema: z.object({
+        name: z.string().describe("Library as listed by list_libraries, e.g. 'Util' or 'Util, * (System)'"),
+        symbol: z.string().optional().describe("One object in the library, e.g. 'BLINK'"),
+      }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ name, symbol }) =>
+      run(ctx, async () => {
+        const key = name.toLowerCase();
+        let lib = libCache.get(key);
+        if (!lib) {
+          lib = await b.call<LibApi>("library.api", { name }, { timeoutMs: 180_000 });
+          lib.nodes = lib.nodes.map((n) => ({ ...n, path: n.path.replace(/^\/+/, "") }));
+          libCache.set(key, lib);
+        }
+        const head = `${lib.library}${lib.title ? ` (${lib.title}${lib.version ? ` ${lib.version}` : ""}${lib.company ? `, ${lib.company}` : ""})` : ""}`;
+        if (lib.compiled) return `${head} is a compiled library (${lib.path}). Its declarations can't be read by scripting; check the library's documentation in CODESYS, or test calls with compile.`;
+        if (symbol) {
+          const hit = lib.nodes.find((n) => n.name.toLowerCase() === symbol.toLowerCase() && ["pou", "dut", "gvl", "interface"].includes(n.kind));
+          if (!hit) return `${head} has no object '${symbol}'.`;
+          return `${head}\n${buildOutline(lib.nodes, [], { path: hit.path })}`;
+        }
+        return `${head}\n${buildOutline(lib.nodes, [], { maxLines: 300 })}`;
+      }),
+  );
+
+  // ---------------------------------------------------------------- changes
+
+  const exportNodes = async () => (await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 })).nodes;
+  const store = () => {
+    if (!ctx.changes) throw new Error("Change tracking is not enabled.");
+    if (!ctx.project) throw new Error("No project is open. Call open_project first.");
+    return { store: ctx.changes, project: ctx.project.path };
+  };
+
+  server.registerTool(
+    "checkpoint",
+    {
+      description:
+        "Save a named snapshot of all ST in the project, to compare against (get_changes) or go back to (revert_object). A 'session-start' checkpoint is taken automatically when a project is opened. Without a name, lists the checkpoints.",
+      inputSchema: z.object({ name: z.string().regex(/^[A-Za-z0-9_.-]+$/, "letters, digits, _ . -").optional() }),
+    },
+    async ({ name }) =>
+      run(ctx, async () => {
+        const { store: s, project } = store();
+        if (!name) {
+          const list = await s.list(project);
+          return list.length ? list.map((c) => `${c.name}  ${c.at}  (${c.objects} objects)`).join("\n") : "No checkpoints yet.";
+        }
+        const cp = await s.save(project, name, await exportNodes());
+        return `Checkpoint '${name}' saved (${cp.objects.length} objects).`;
+      }),
+  );
+
+  server.registerTool(
+    "get_changes",
+    {
+      description:
+        "What changed in the project's ST since a checkpoint (default 'session-start'): added, removed and modified objects with line counts. Pass path for the line diff of one object (declaration and implementation, with line numbers).",
+      inputSchema: z.object({ since: z.string().optional(), path: pathArg.optional() }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ since, path }) =>
+      run(ctx, async () => {
+        const { store: s, project } = store();
+        const name = since ?? "session-start";
+        const cp = await s.load(project, name);
+        if (!cp) {
+          const list = await s.list(project);
+          return `No checkpoint '${name}'.${list.length ? ` Checkpoints: ${list.map((c) => c.name).join(", ")}.` : ""}`;
+        }
+        const now = snapshot(await exportNodes());
+        if (path) {
+          const key = path.replace(/^\/+/, "").toLowerCase();
+          const old = cp.objects.find((o) => o.path.toLowerCase() === key);
+          const cur = now.find((o) => o.path.toLowerCase() === key);
+          if (!old && !cur) return `No object '${path}' now or in '${name}'.`;
+          const out = [`${cur?.path ?? old!.path}: ${!old ? "added" : !cur ? "removed" : "compared"} since '${name}' (${cp.at})`];
+          for (const [label, a, bb] of [
+            ["declaration", old?.declaration, cur?.declaration],
+            ["implementation", old?.implementation, cur?.implementation],
+          ] as const) {
+            const ops = lineDiff(normalizeText(a ?? "")!.replace(/\s+$/, ""), normalizeText(bb ?? "")!.replace(/\s+$/, ""));
+            if (ops.every((o) => o.op === " ")) continue;
+            out.push(`--- ${label}`, ...formatDiff(ops));
+          }
+          if (out.length === 1) out.push("No changes.");
+          return out.join("\n");
+        }
+        const changes = diffObjects(cp.objects, now);
+        if (!changes.length) return `No changes since '${name}' (${cp.at}).`;
+        const counts = (x?: { plus: number; minus: number }) => (x ? `+${x.plus} -${x.minus}` : "");
+        return [
+          `${changes.length} change(s) since '${name}' (${cp.at}):`,
+          ...changes.map((c) => {
+            const mark = c.change === "added" ? "A" : c.change === "removed" ? "D" : "M";
+            const detail = c.change === "modified" ? ` (${[c.decl && `declaration ${counts(c.decl)}`, c.impl && `implementation ${counts(c.impl)}`].filter(Boolean).join(", ")})` : "";
+            return `${mark} ${c.path} [${c.kind}]${detail}`;
+          }),
+          "Pass path to see one object's diff; revert_object puts it back.",
+        ].join("\n");
+      }),
+  );
+
+  server.registerTool(
+    "revert_object",
+    {
+      description:
+        "Put an object (and everything under it, e.g. an FB with its methods and properties) back to how it was at a checkpoint (default 'session-start'): modified objects are rewritten, objects added since are deleted, removed ones are recreated.",
+      inputSchema: z.object({ path: pathArg, to: z.string().optional() }),
+    },
+    async ({ path, to }) =>
+      run(ctx, async () => {
+        const { store: s, project } = store();
+        const name = to ?? "session-start";
+        const cp = await s.load(project, name);
+        if (!cp) throw new Error(`No checkpoint '${name}'.`);
+        const key = path.replace(/^\/+/, "").toLowerCase();
+        const inTree = (o: SnapObject) => o.path.toLowerCase() === key || o.path.toLowerCase().startsWith(key + "/");
+        const old = cp.objects.filter(inTree);
+        const now = snapshot(await exportNodes()).filter(inTree);
+        if (!old.length && !now.length) throw new Error(`No object '${path}' now or in '${name}'.`);
+        const oldBy = new Map(old.map((o) => [o.path.toLowerCase(), o] as const));
+        const nowBy = new Map(now.map((o) => [o.path.toLowerCase(), o] as const));
+        const done: string[] = [];
+        const same = (a?: string, c?: string) => (normalizeText(a ?? "") ?? "").replace(/\s+$/, "") === (normalizeText(c ?? "") ?? "").replace(/\s+$/, "");
+        // 1. delete what was added (top-most only; children go with their parent)
+        const added = now.filter((o) => !oldBy.has(o.path.toLowerCase()));
+        for (const o of added) {
+          if (added.some((p) => o.path.toLowerCase().startsWith(p.path.toLowerCase() + "/"))) continue;
+          await b.call("object.delete", { path: o.path, save: false });
+          done.push(`deleted ${o.path}`);
+        }
+        // 2. recreate what was removed (parents first) and rewrite what changed
+        const ordered = [...old].sort((x, y) => x.path.split("/").length - y.path.split("/").length);
+        for (const o of ordered) {
+          const cur = nowBy.get(o.path.toLowerCase());
+          if (!cur) {
+            if (o.kind === "accessor") {
+              // created with its property; write its text below
+            } else {
+              const parent = o.path.includes("/") ? o.path.slice(0, o.path.lastIndexOf("/")) : undefined;
+              const header = parseDeclaration(o.declaration).header;
+              const kind = o.kind === "pou" ? o.sub : o.kind === "interface_method" ? "method" : o.kind;
+              await b.call("object.create", {
+                parent,
+                kind,
+                name: o.name,
+                return_type: header.returnType,
+                dut_type: o.kind === "dut" ? o.sub : undefined,
+                base_interfaces: o.kind === "interface" ? "" : undefined,
+                declaration: o.kind === "folder" ? undefined : o.declaration,
+                implementation: o.implementation,
+                save: false,
+              });
+              done.push(`recreated ${o.path}`);
+              continue;
+            }
+          }
+          if (o.kind === "folder") continue;
+          const args: Record<string, unknown> = { path: o.path, save: false };
+          if (o.declaration !== undefined && !same(o.declaration, cur?.declaration)) args.declaration = o.declaration;
+          if (o.implementation !== undefined && !same(o.implementation, cur?.implementation)) args.implementation = o.implementation;
+          if (args.declaration === undefined && args.implementation === undefined) continue;
+          await b.call("object.write", args);
+          done.push(`restored ${o.path}`);
+        }
+        if (!done.length) return `${path} is already as it was at '${name}'.`;
+        let saved = "";
+        if (ctx.autosave) {
+          await b.call("project.save");
+          saved = " Project saved.";
+        }
+        return `Reverted ${path} to '${name}' (${cp.at}): ${done.join(", ")}.${saved}`;
       }),
   );
 }

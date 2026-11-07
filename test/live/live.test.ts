@@ -11,6 +11,7 @@ import { CodesysBridge } from "../../src/bridge/bridge.js";
 import { resolveCodesys } from "../../src/codesys/install.js";
 import { createServer } from "../../src/server.js";
 import type { AppContext } from "../../src/tools.js";
+import { ChangeStore } from "../../src/codesys/changes.js";
 import { tempDir, WATCHER } from "../helpers.js";
 
 const LONG = 600_000;
@@ -42,6 +43,7 @@ beforeAll(async () => {
     templatesDir: cs.install.templatesDir,
     codesys: { exe: cs.exe, profile: cs.profile, label: cs.install.label },
     startWaitMs: LONG,
+    changes: new ChangeStore(join(dir, "checkpoints")),
   };
   const server = createServer(ctx);
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -124,6 +126,51 @@ describe("live CODESYS", () => {
     expect((await call("search_code", { pattern: "itf.Reset" })).text).toContain("PLC_PRG [impl]");
     expect((await call("list_libraries")).isError).toBe(false);
     expect((await call("list_tasks")).text).toMatch(/calls .*PLC_PRG/);
+  }, LONG);
+
+  it("outlines the project and lists I/O", async () => {
+    await call("create_object", { kind: "gvl", name: "GVL_IO", declaration: "VAR_GLOBAL\n    xStart AT %IX0.0 : BOOL; // start button\n    xRun AT %Q* : BOOL; // pump contactor\nEND_VAR" });
+    const o = await call("get_outline");
+    expect(o.isError, o.text).toBe(false);
+    expect(o.text).toMatch(/Tasks: MainTask .*-> PLC_PRG/);
+    expect(o.text).toMatch(/FB_PI {2}FUNCTION_BLOCK IMPLEMENTS I_Resettable/);
+    expect(o.text).toMatch(/methods: Reset\(\) : BOOL/);
+    expect(o.text).toMatch(/F_Clamp {2}FUNCTION : REAL/);
+    const d = await call("get_outline", { path: "GVL_Par" });
+    expect(d.text).toMatch(/sTag : STRING := 'Nivå åäö'/);
+    const io = await call("get_io_list");
+    expect(io.text).toMatch(/%IX0\.0 +GVL_IO\.xStart : BOOL \/\/ start button/);
+    expect(io.text).toMatch(/%Q\* +GVL_IO\.xRun : BOOL/);
+    expect(io.text).toMatch(/1 placeholder/);
+  }, LONG);
+
+  it("tracks changes against checkpoints and reverts them", async () => {
+    const all = await call("get_changes");
+    expect(all.text).toMatch(/change\(s\) since 'session-start'/);
+    expect(all.text).toMatch(/A FB_PI \[pou\]/);
+    expect((await call("checkpoint", { name: "before-edit" })).text).toMatch(/Checkpoint 'before-edit' saved/);
+    await call("write_object", { path: "F_Clamp", implementation: "F_Clamp := LIMIT(0.0, x, 50.0);" });
+    await call("delete_object", { path: "FB_PI/Reset" });
+    const ch = await call("get_changes", { since: "before-edit" });
+    expect(ch.text).toMatch(/M F_Clamp \[pou\] \(implementation \+1 -1\)/);
+    expect(ch.text).toMatch(/D FB_PI\/Reset \[method\]/);
+    const diff = await call("get_changes", { since: "before-edit", path: "F_Clamp" });
+    expect(diff.text).toMatch(/- +\| F_Clamp := LIMIT\(0\.0, x, 100\.0\);\n\+ +1 \| F_Clamp := LIMIT\(0\.0, x, 50\.0\);/);
+    expect((await call("revert_object", { path: "F_Clamp", to: "before-edit" })).text).toMatch(/restored F_Clamp/);
+    expect((await call("revert_object", { path: "FB_PI", to: "before-edit" })).text).toMatch(/recreated FB_PI\/Reset/);
+    expect((await call("get_changes", { since: "before-edit" })).text).toMatch(/No changes since 'before-edit'/);
+    expect((await call("compile")).text).toMatch(/Build: 0 error\(s\)/);
+  }, LONG);
+
+  it("reads a referenced library's interface", async () => {
+    const libs = await call("list_libraries");
+    log.push(`libraries: ${libs.text}`);
+    for (const name of ["Standard", "Util"]) {
+      const r = await call("get_library_api", { name });
+      log.push(`get_library_api ${name}: ${r.isError} ${r.text.slice(0, 600)}`);
+      if (/No library reference/.test(r.text)) continue;
+      expect(r.isError, r.text).toBe(false);
+    }
   }, LONG);
 
   it("saves and reports status", async () => {

@@ -484,6 +484,25 @@ Changes to Phase 5:
 - **`run_scenarios` stays** for experiments and closed-loop regressions until
   tests can run with a plant in the loop.
 
+Phase 5 status (2026-11-07):
+- **Done:**
+  - `run_tests`;
+  - `get_outline` (parsed from the declarations);
+  - `get_io_list` (declarations only; the device tree's I/O mapping is not
+    read yet);
+  - `save_scenario` / `run_scenarios`;
+  - `checkpoint` / `get_changes` / `revert_object`;
+  - `get_library_api` (source `.library` files only). Live on SP21, the
+    system libraries are installed compiled (`Standard 3.5.18.0` is
+    `Standard.compiled-library-v3`), which scripting can't read, so the tool
+    reports that instead of an interface. A follow-up is to find another
+    source for compiled-library interfaces: CODESYS's library browsing APIs,
+    or truST shipping declaration stubs for the common CODESYS libraries.
+- **Waiting on truST:** `find_references` / `get_call_graph` (L1–L3).
+  truST has merged the A1–A3 language fixes on main but not released them;
+  when 0.34 ships, the mirror's `E.X` rewrite can depend on the truST
+  version.
+
 Order for Phase 5 (most value first):
 1. `run_tests`
 2. `get_outline`
