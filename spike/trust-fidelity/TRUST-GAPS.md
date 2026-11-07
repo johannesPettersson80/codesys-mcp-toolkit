@@ -51,6 +51,22 @@ pragmas beyond `qualified_only`, and CODESYS libraries (Util, CAA).
 | B9 | **Startup overrun at `--time-scale 10`** | One `TRUST-RT-OVERRUN-001` (`missed: 17`) right after start, then none. Probably catch-up during startup, but it shows up as a warning in every run. |
 | B10 | **Plant wiring is by `%I/%Q` address only** | CODESYS code usually maps I/O symbolically. Being able to wire `simulation.toml` plants to variable paths (`GVL_IO.lrLT101_Level`) would remove the need for generated `AT` mappings. (Nice-to-have: v2 can generate the mapping.) |
 
+### Found in Phase 2 (driving truST from the v2 simulation tools)
+
+The v2 toolkit works around each of these. The workaround is named so it can be removed once truST changes.
+
+| # | Gap | Detail |
+|---|-----|--------|
+| B11 | **`set` and `var.force` can't target a property** | `set {target: "global:PRG_Tank.fbPI.Kp", value: "70.0"}` answers `unsupported value '70.0'`. The *value* is blamed, but the problem is the property target. Same root as B3. **Ask:** a property write calls `SET`, and the error names the target. *Workaround:* write the backing variable (`fbPI._rKp`). |
+| B12 | **Value grammar rejects the CODESYS enum form** | `set`/`var.force` take `E_TankMode#AUTO` but refuse `E_TankMode.AUTO` (`unsupported value`). Under the codesys profile, accept `E.X` too. *Workaround:* the toolkit rewrites `E.X` to `E#X`. |
+| B13 | **Control `restart` doesn't reset the plant, and the plant runs during the restart** | `restart {mode:"cold"}` resets PLC memory (scan counter 0, `bInit` TRUE again) but the `gravity_tank` level carries over, although `plant.status` reports `restart_policy: reset_on_cold_and_warm_restart`. Worse, the plant keeps stepping while the restart runs with no scans: at time scale 50 the level drained about 20 s of simulated time with 0 scans. Lockstep is broken during a restart. **Ask:** a cold restart resets plants to `initial_state` and holds plant time until the first scan. *Workaround:* the toolkit restarts the whole process for a clean start (about 1.5 s). |
+| B14 | **No way to start paused (stop on entry)** | `play` always starts scanning. A tool can only pause once the control endpoint answers, so 5 to 140 scans have already run (they vary per start), and two identical experiments differ slightly (about 0.3 % here). **Ask:** `play --paused`, or `[runtime.control] start_paused = true`, holding before the first scan with plant time at 0. *Workaround:* the toolkit sends `pause` as its first request and reports the scan it stopped at. |
+| B15 | **Plant status and trace are unavailable while paused** | After any pause or breakpoint, `plant.status` and `plant.trace.read` answer `active plant runtime evidence is unavailable` until the program runs again. That is exactly when a debugger wants to show the plant. *Workaround:* read the plant-wired PLC variables with `eval`. |
+| B16 | **Build and check diagnostics are text with byte offsets** | `check --json` puts every diagnostic of a file into one `message` string (`src/X.st: expected ';' at 113..119\n...`). `build` prefixes with `Error: `. **Ask:** structured diagnostics `{file, line, column, end_line, end_column, code, severity, message}` in `--json`, for build too. *Workaround:* the toolkit parses the text and converts byte offsets to lines. |
+| B17 | **`var.force` on a variable mapped to `%I` doesn't reach the program** | With `lrLevel AT %IL0` fed by a plant, `var.force global:GVL_IO.lrLevel` answers `forced`, but the program keeps seeing the plant value (the input image overwrites it each scan), so an interlock never trips. `io.force %IL0` works. **Ask:** a variable force on an I/O-mapped variable forces the I/O point, or is refused with a hint. *Workaround:* the toolkit forces plant-wired variables with `io.force` on their address. |
+| B18 | **Each resume costs at least ~15 ms of wall time on Windows** | `resume` → 10 scans → harness breakpoint took 15 ms at time scale 100 (1 ms of scan time). Control requests themselves take 0.15 ms. This looks like the default Windows timer resolution in the scheduler's sleep. It caps sampled experiments at about 65 samples per second. **Ask:** a high-resolution timer (`timeBeginPeriod(1)` or a waitable timer) in simulation mode. |
+| B19 | **`eval` reads only variable paths, not expressions** | `eval "GVL_IO.lrLevel > 0.3"` → `unknown identifier`. Together with B1 this is why the toolkit evaluates breakpoint conditions itself (it reads each variable, then computes in TypeScript), which costs a round trip per hit. Fixing B1 removes the need. |
+
 ## C. Differences the v2 mirror handles (no truST change needed)
 
 | CODESYS | truST | Mirror does |
@@ -72,3 +88,13 @@ pragmas beyond `qualified_only`, and CODESYS libraries (Util, CAA).
 - **Breakpoint halts the scan and the plant freezes**: the level stayed at 0.97889… for 3 s of wall time while paused.
 - `step-over`, `step-in`, `resume`, `io-force`, `io-unforce`, `shutdown --exit`.
 - `runtime.web.enabled = false` and `discovery.enabled = false` are honoured.
+
+Verified in Phase 2 through the control protocol (v2 speaks it directly):
+
+- A program instance can have its POU's own name (`PROGRAM PRG_Tank WITH MainTask : PRG_Tank;`), so `PRG_Tank.nTrips` is the same path in CODESYS and truST.
+- `breakpoints.set` with `options: [{hit_condition: {op: "=", count: n}}]` stops exactly on the n-th hit; v2 uses it for scan-exact `run_scans`.
+- `config.set {"simulation.time_scale": 20}` changes the time scale live.
+- `debug.stops`, `debug.state`, `debug.stack` (frames across `step_in` into a method), `debug.scopes` and `debug.variables` (typed locals) all work while paused.
+- `set` / `var.force` / `var.unforce` with `global:<path>` targets, including FB instance members (`global:PRG_Tank.fbPI._rKp`) and non-ASCII strings.
+- `io.force` on a plant-fed `%IL` address holds the value the program sees.
+- One TCP connection carries many requests in sequence (about 0.15 ms each on loopback).

@@ -5,6 +5,7 @@ import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { BridgeError, type CodesysBridge } from "./bridge/bridge.js";
+import type { SimController } from "./sim/controller.js";
 import { checkDeclaration, kindLabel, normalizeText, type CreateKind, type TreeNode } from "./codesys/st.js";
 
 export interface AppContext {
@@ -21,6 +22,8 @@ export interface AppContext {
   startWaitMs: number;
   /** Last project opened through these tools (status never queries CODESYS). */
   project?: { path: string; application?: string };
+  /** The truST simulation (absent when disabled). */
+  sim?: SimController;
 }
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };

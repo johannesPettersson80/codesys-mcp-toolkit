@@ -53,6 +53,9 @@ profile.
 | `--session-dir <dir>` | Where session folders go (default: `%TEMP%\codesys-mcp-toolkit`) |
 | `--no-autostart` | Start CODESYS on the first tool call instead of at launch |
 | `--no-autosave` | Don't save after every change; use `save_project` |
+| `--trust-runtime <exe>` | `trust-runtime.exe` for the simulation (default: `TRUST_RUNTIME`, then `PATH`) |
+| `--mirror-dir <dir>` | Where simulation mirrors go (default: `%LOCALAPPDATA%\codesys-mcp-toolkit\mirrors`) |
+| `--no-sim` | Don't offer the simulation tools |
 
 CODESYS starts in the background when the server launches. A cold start takes
 1 to 3 minutes; later starts take about 10 seconds. `codesys_status` reports
@@ -108,6 +111,107 @@ A GVL must start with `VAR_GLOBAL`; a property accessor holds only `VAR` blocks.
 
 CODESYS only compiles POUs that a task reaches. A POU nothing calls is not
 checked, even if it contains errors.
+
+## Simulation (truST)
+
+The toolkit can run the project's Structured Text in the
+[truST](https://github.com/johannesPettersson80/trust-platform) runtime against a
+simulated plant. You or Claude can then step a setpoint, trip an interlock,
+stop at a breakpoint, step through code and compare tuning runs.
+CODESYS stays the source and the compile target.
+
+> **Simulation only.** The simulation runs in a local `trust-runtime` process
+> with the simulated I/O driver, on a control port on 127.0.0.1. The toolkit
+> checks this configuration before every start, refuses anything else, and
+> never connects to a controller. It reads the CODESYS project only through
+> export and the task list.
+
+### Setup
+
+1. Install truST 0.33 (Windows zip from the
+   [releases](https://github.com/johannesPettersson80/trust-platform/releases))
+   and put `trust-runtime.exe` on `PATH`, or pass `--trust-runtime <path>`.
+2. Install its compiler toolchain once (about 180 MB). The toolkit never
+   downloads it for you:
+   ```bash
+   trust-runtime toolchain install
+   ```
+3. Describe the plant in `plant.toml` next to the project
+   (`<Project>.plant.toml` or `plant.toml`), or let Claude pass it to
+   `sync_mirror`:
+
+```toml
+[[plant]]
+id = "T101"
+model = "gravity_tank"                    # any truST plant model
+inputs = ["GVL_IO.lrFV101_FlowCmd"]       # PLC -> plant, in channel order
+outputs = ["GVL_IO.lrLT101_Level"]        # plant -> PLC
+initial_state = [0.2]
+[plant.parameters]
+area_m2 = 1.0
+outflow_coefficient_m2_sqrt_m_per_s = 0.03
+
+[[feedback]]                              # simple device feedback, simulated in ST
+signal = "GVL_IO.xXV101_Opened"
+follows = "GVL_IO.xXV101_Open"
+delay_ms = 2000                           # valve stroke time
+```
+
+Plant signals are wired by variable name. The mirror adds the `%I`/`%Q`
+addresses truST needs. Plant variables must be in a GVL or a program, and be
+BOOL, an integer type, REAL or LREAL.
+
+### Tools
+
+| Tool | What it does |
+| --- | --- |
+| `sync_mirror` | Export the project's ST into a truST project (the mirror) and save `plant.toml` if given. Reports what changed and what can't be simulated. |
+| `sim_start` / `sim_stop` / `sim_status` | Build and start the simulation, paused at the start of a scan. |
+| `run_scans` / `run_for` | Run an exact number of scans, or a span of simulated time at a given speed, then pause. |
+| `set_breakpoint` / `clear_breakpoint` / `continue` | Breakpoints on CODESYS object lines, with an optional ST condition. `continue` returns the line, nearby source and locals. |
+| `step_over` / `step_in` / `step_out` | Step through code, including into methods and FBs. |
+| `read_vars` / `write_var` / `force_var` / `unforce_var` | Read, write or force variables (e.g. a sensor fault). |
+| `set_plant_param` | Change a plant parameter for this session. The simulation restarts, because truST applies plant changes only on restart. |
+| `run_experiment` / `experiment_log` | Repeatable runs from a fresh start: settings, a setpoint step, faults over time. Returns overshoot, rise and settling time, steady-state error and IAE, compared with the previous run of the same name. |
+
+Paths are CODESYS paths: `PRG_Tank.nTrips`, `GVL_IO.rLevel`,
+`PRG_Tank.fbPI.rY`, and `FB_PI/Reset` for breakpoints in a method.
+
+### How the mirror works
+
+`sync_mirror` writes one file per POU, with methods, properties and actions
+nested into their FB. It also writes:
+
+- a task configuration taken from the CODESYS tasks;
+- `simulation.toml` from `plant.toml`;
+- a small generated program, `MCP_SimHarness`, that counts scans and drives
+  `[[feedback]]` signals;
+- a line map, so breakpoints and build errors use CODESYS object names and
+  line numbers.
+
+The mirror lives in `%LOCALAPPDATA%\codesys-mcp-toolkit\mirrors\<project>`
+(change it with `--mirror-dir`). It is a git repository with a commit per
+sync. Objects with graphical bodies are reported and not simulated.
+
+### Current limits
+
+These come from truST 0.33; each is listed in
+[`spike/trust-fidelity/TRUST-GAPS.md`](spike/trust-fidelity/TRUST-GAPS.md):
+
+- **Repeatability.** truST can't start paused. Each fresh start runs a few
+  scans before the toolkit can pause it, so identical experiments differ
+  slightly (well under 1 % on the tank example).
+- **Conditional breakpoints** are evaluated by the toolkit at each hit, so
+  very frequent hits are slow.
+- **Properties** can't be read or written in the simulation. Use the backing
+  variable instead (`fbPI._rKp`).
+- **Unsupported ST.** Some CODESYS-only constructs don't build yet, for
+  example `VAR_INST`, implicit `FB_init` and `__ISVALIDREF`. `sim_start`
+  reports them by CODESYS object and line. (`E_Mode.AUTO` enum literals work:
+  the mirror rewrites them to the `E_Mode#AUTO` form truST needs.)
+- **First scan.** A fresh start always completes one scan before handing
+  over, so first-scan initialisation in your code has run. Settings written
+  at the start of an experiment apply after it.
 
 ## How it works
 

@@ -1,6 +1,6 @@
 # codesys-mcp-toolkit v2 — Step 0 findings and rewrite plan
 
-Status: proposal for review (2026-11-07). Nothing implemented yet.
+Status (2026-11-07): Phase 0 spike done, Phase 1 core done, Phase 2 simulation (text) done. Phases 3-4 (panel) not started.
 
 ## 1. Summary
 
@@ -236,7 +236,43 @@ What changes in the plan:
 Spike files: `spike/trust-fidelity/` (CODESYS script `cds_spike.py`,
 `compose_mirror.py`, `trust-template/`, `repros/` + `run_repro.py`).
 
-## 8. Open questions for you
+## 8. Phase 2 results (2026-11-07)
+
+Done: the acceptance demo steps 1-2, 4-5 and 7-8 run as text, through the MCP
+tools, against real CODESYS SP21 and truST 0.33 (`test/live/sim.live.test.ts`).
+The same flow runs against truST alone with a faked CODESYS export
+(`test/sim-trust.test.ts`, skipped when truST isn't installed).
+
+Code: `src/sim/` (mirror, plant, runtime, control client, controller, tools).
+
+Decisions made while building it:
+- **The control endpoint only, no DAP.** Breakpoints, stepping, the stack,
+  locals, forcing and the time scale all work over NDJSON on 127.0.0.1 with a
+  per-start token.
+- **Paused between calls.** `run_scans` is exact: a hit-count breakpoint sits
+  on the scan counter of a generated harness program that runs first in the
+  fastest task.
+- **CODESYS paths in truST.** Program instances get their POU's own name, so
+  `PRG_Tank.nTrips` works in both. Breakpoints and build errors use CODESYS
+  object lines through the mirror's line map.
+- **Symbolic plant wiring.** `plant.toml` wires plants by variable name, and
+  the mirror generates the AT addresses. Plant-fed variables are forced
+  through `io.force` (TRUST-GAPS B17).
+- **Enum literals.** The mirror rewrites `E.X` to `E#X`. CODESYS SP21 rejects
+  `E#X` and truST rejects `E.X` (A1), so there is no common form.
+- **Conditions in the toolkit** until truST compiles condition text (B1, B19).
+- **Experiments restart the process.** truST's control restart doesn't reset
+  plants (B13) and it can't start paused (B14). A fresh start always completes
+  one scan before handing over.
+- **Safety.** `src/sim/` reads CODESYS only through `export` and `tasks.list`,
+  and the controller module has no access to the bridge. A test checks this.
+  Before every start the toolkit checks for simulated I/O, simulation enabled,
+  web, discovery and mesh off, and a loopback control endpoint, and truST
+  always runs with `--simulation`.
+
+New truST gaps: B11-B19 in TRUST-GAPS.md.
+
+## 9. Open questions for you
 Answered: the spike used a copy of `PumpControl.project` plus the tank demo;
 truST gaps get fixed in truST (TRUST-GAPS.md), not worked around here.
 

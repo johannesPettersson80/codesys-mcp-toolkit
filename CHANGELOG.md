@@ -20,6 +20,17 @@ Rewrite. See README "Migrating from v1".
 - Structured Text only; graphical objects are listed as `[non-ST]`.
 - Offline only: no online/login/download APIs (enforced by tests).
 
+### Added
+- Simulation in [truST](https://github.com/johannesPettersson80/trust-platform)
+  (simulated I/O only, never a controller): `sync_mirror`, `sim_start`,
+  `sim_stop`, `sim_status`, `run_scans`, `run_for`, `set_breakpoint` (with ST
+  conditions), `clear_breakpoint`, `continue`, `step_over` / `step_in` /
+  `step_out`, `read_vars`, `write_var`, `force_var`, `unforce_var`,
+  `set_plant_param`, `run_experiment`, `experiment_log`.
+- `plant.toml`: truST plant models wired to ST variables by name, plus simple
+  simulated device feedback (valve limit switches, pump running).
+- Options `--trust-runtime`, `--mirror-dir`, `--no-sim`.
+
 ### Fixed
 - `compile` returns errors and warnings with object, line and code (#10).
 - Non-ASCII text round-trips (UTF-8 end to end) (#9).

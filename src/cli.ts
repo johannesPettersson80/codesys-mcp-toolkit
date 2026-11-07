@@ -10,6 +10,9 @@
  *   --session-dir <dir>       where session folders go (default: %TEMP%\codesys-mcp-toolkit)
  *   --no-autostart            start CODESYS on the first tool call instead of at launch
  *   --no-autosave             don't save after each change (use save_project)
+ *   --trust-runtime <exe>     trust-runtime for the simulation (default: TRUST_RUNTIME or PATH)
+ *   --mirror-dir <dir>        where simulation mirrors go (default: %LOCALAPPDATA%\codesys-mcp-toolkit\mirrors)
+ *   --no-sim                  don't offer the simulation tools
  */
 import { parseArgs } from "node:util";
 import { tmpdir } from "node:os";
@@ -20,6 +23,8 @@ import { CodesysBridge, pruneSessions } from "./bridge/bridge.js";
 import { resolveCodesys } from "./codesys/install.js";
 import { createServer, VERSION } from "./server.js";
 import type { AppContext } from "./tools.js";
+import { SimController } from "./sim/controller.js";
+import { codesysSource } from "./sim/tools.js";
 
 const log = (m: string) => process.stderr.write(`[codesys-mcp] ${m}\n`);
 
@@ -33,6 +38,9 @@ async function main() {
       "session-dir": { type: "string" },
       "no-autostart": { type: "boolean" },
       "no-autosave": { type: "boolean" },
+      "trust-runtime": { type: "string" },
+      "mirror-dir": { type: "string" },
+      "no-sim": { type: "boolean" },
       version: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
@@ -44,7 +52,7 @@ async function main() {
   }
   if (values.help) {
     process.stdout.write(
-      "codesys-mcp-tool [--codesys-path <CODESYS.exe>] [--codesys-profile <name>] [--workspace <dir>] [--project <file>] [--session-dir <dir>] [--no-autostart] [--no-autosave]\n",
+      "codesys-mcp-tool [--codesys-path <CODESYS.exe>] [--codesys-profile <name>] [--workspace <dir>] [--project <file>] [--session-dir <dir>] [--no-autostart] [--no-autosave] [--trust-runtime <exe>] [--mirror-dir <dir>] [--no-sim]\n",
     );
     return;
   }
@@ -69,6 +77,10 @@ async function main() {
     codesys: { exe: codesys.exe, profile: codesys.profile, label: codesys.install.label },
     startWaitMs: 90_000,
   };
+  if (!values["no-sim"]) {
+    const mirrorRoot = values["mirror-dir"] ?? join(process.env.LOCALAPPDATA ?? tmpdir(), "codesys-mcp-toolkit", "mirrors");
+    ctx.sim = new SimController(codesysSource(bridge, () => ctx.project?.path, ctx.startWaitMs), { trustRuntime: values["trust-runtime"], mirrorRoot, log });
+  }
   log(`v${VERSION}: ${codesys.install.label}, profile "${codesys.profile}", sessions in ${sessionRoot}`);
 
   const handle = serveStdio(() => createServer(ctx));
@@ -90,6 +102,7 @@ async function main() {
   const shutdown = async () => {
     if (stopping) return;
     stopping = true;
+    await ctx.sim?.stop().catch(() => undefined);
     await bridge.stop().catch(() => undefined);
     await handle.close();
     process.exit(0);
