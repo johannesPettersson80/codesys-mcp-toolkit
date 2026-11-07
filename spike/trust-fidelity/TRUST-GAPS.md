@@ -18,6 +18,106 @@ python -I run_repro.py <path>/trust-runtime.exe var_inst      # one case
 `run_repro.py` copies a case into a fresh temp project built from
 [`trust-template/`](trust-template/) and runs `trust-runtime check`.
 
+## Status: truST's answer of 8 November
+
+truST checked every item against its code and specifications. **truST 0.35.0
+fixes all of them, and the release waits for that.** Some B items are still
+being reproduced; truST will say if one turns out different.
+
+| Status | Items |
+|---|---|
+| Released in 0.34.0 | A1 (`E.X` enum literals), A2 (unassigned result returns the default, CODESYS profiles), A3 (`REAL_TO_INT(2.5)` = 3) |
+| Merged, in 0.35.0 | A4 (implicit `FB_init`), A5, A6, A7, `THIS^`/`SUPER^`, B5, B6, S1, S5 (`tune` fills requirements; new `inputs` verb), S6 |
+| Done, in review | A4 with inputs, `__QUERYINTERFACE`, B2, B4 (typed JSON `eval`), L1–L3, S2 (enum modes), S4 (both startup-flag patterns), S7 (own PI/PID in Kp/Ti/Td form, tuned from the model), T1 part 1 (`{attribute 'test'}` programs; multi-cycle tests with `TEST_FINISHED()`) |
+| Being fixed | A4 rest (`FB_reinit`, `FB_exit`), `__TRY`, attributes, B1+B19, B3+B11 (properties), B7, B8, B9, B10 (plants wired by variable path), B12, B13, B14 (`play --paused`), B15–B18, T1 rest (plant in tests), T2, T3, L2 rest, S9 (GVL signals; an ownership rule replaces the one-program rule), S10 (cancel ends the operation), S11+S16 (one cause, below), S12 (the step stops at the measurement band), S13 (step placed at the execution that applied it; recordings refittable), S15 (search runs while paused) |
+| By design | S3 (Identify steps only through the program's Manual path), S8 (a paused runtime is refused up front with a clear message) |
+| Not a gap | S14: Identify ends the hold once the response has settled (spec 35 B3.4 step 4). 0.35.0 will say so in the answer |
+
+**S11 + S16, one cause:** Identify's mode changes, and Validate's live model
+check that uses them, never took the reviewed `transferTolerance`. Their own
+allowance was 0.000001, finer than a REAL resolves at 30 % (about 0.0000019),
+so a 0.000002 % jump was refused against a 1 % tolerance. From 0.35.0 the
+reviewed tolerance applies to every mode change, the floor is the output's
+resolution, and the refusal names the jump and the tolerance.
+
+**Correction (8 November, second message): the B items checked in the code.**
+- **B1:** the expression compiler is already shared: the runtime library's,
+  used by the debugger and `ctl`. 0.35.0 adds `ctl breakpoints-set --condition`,
+  `--hit-condition` and `--log-message`, and `ctl evaluate <ST expression>`.
+  `eval` stays a read of one name, as specified.
+- **B3 + B11:** by the spec, `eval` reads names and runs no code, and a
+  property is code. 0.35.0 handles properties the way CODESYS's online
+  monitoring does:
+  - `{attribute 'monitoring' := 'variable'}`, or a GET that only returns a
+    field, reads and writes that field;
+  - `{attribute 'monitoring' := 'call'}` calls GET and SET;
+  - without either, the refusal names the property.
+- **Found with B3:** an integer `set` to a name the program doesn't have
+  answered `queued` and was dropped. 0.35.0 refuses it. *Toolkit, now:*
+  `write_var`, `force_var` and experiment settings read the name first and
+  refuse an unknown one.
+- **B8:** by design, and the name stays. One module serves every computer with
+  the same CPU; the x86-64 module is built for `x86_64-unknown-linux-gnu`
+  everywhere because it calls nothing of the OS.
+- **B13:** the restart does recreate the plant, but the new plant started at
+  time 0 while simulated time went on, so its first scan caught up all the
+  elapsed time (the drain we saw; beyond 100 s it faults). The fix: a restarted
+  plant starts at the restart's time.
+- **B15 + S15, one cause:** a production pause already answers. A debugger hold
+  (breakpoint, step, debug-mode pause) parks the scan thread that serves the
+  snapshot. Both will get the last completed snapshot without that thread.
+- **B16:** available today: `trust-lsp check --project <folder> --format json`
+  gives `{path, line, column, endLine, endColumn, severity, code, message}` per
+  diagnostic.
+- **B18:** Rust's sleep on Windows already uses a high-resolution timer; its
+  ~1 ms floor per sleep caps a scan at high time scales (our 15 ms for 10
+  scans). The fix: at high speeds the due scans run back to back. Simulated
+  time and results don't change.
+- **T2:** truST's spec and code report the test's declaration line (the
+  tutorial was wrong). 0.35.0 reports the failing assertion's line and text,
+  with typed actual and expected values.
+- **Our answers taken up:**
+  - attributes `pack_mode`, `to_string`, `instance-path` with `noinit`,
+    `call_after_init` and `no_init`/`noinit`, plus CODESYS's checks for
+    `qualified_only` and `strict`, go into 0.35.0; the others stay silently
+    ignored;
+  - for S10, truST will test both cases: a refused hand-back, and a failed fit
+    whose hand-back succeeds.
+
+**Until 0.35.0 the toolkit keeps its workarounds:** S2, S4, S7, S9, S10/S11/S16
+(cancel or clear the journal), S13 (setpoint step), S15 (run freely), B11
+(backing field), B12 (`E#X`), B13 (restart the process), B14 (pause as the first
+request), B15, B16 (parse text diagnostics), B17 (`io.force`), B19 (conditions
+evaluated by the toolkit) and T1 (the `TEST_PROGRAM` rewrite).
+
+**Toolkit work when 0.35.0 lands:**
+- Read `ctl` breakpoint lines as 1-based both ways (B5).
+- Parse the typed JSON from `eval` (B4).
+- Install the toolchain explicitly: `build` no longer downloads it (B7). The
+  toolkit already refuses to build without it.
+- ~~Read structured diagnostics (B16).~~ Done on 0.34: build and test
+  failures use `trust-lsp check --format json` when trust-lsp is installed,
+  and fall back to parsing the text.
+- Tuning:
+  - let loops name GVL signals and enum modes (S9, S2);
+  - offer the own Kp/Ti(/Td) PI/PID design instead of the grid search (S7);
+  - set requirements with `inputs` (S5) and drop the budget patch (S6);
+  - drop the cancel and journal workarounds (S10, S16);
+  - go back to the manual step where it suits (S13);
+  - stop free-running during search (S15).
+- Simulation:
+  - start paused (B14);
+  - use a cold restart instead of a new process (B13);
+  - let truST evaluate breakpoint conditions (B19);
+  - read and write properties where CODESYS monitoring would: simple GETs
+    and `{attribute 'monitoring' ...}` (B3, B11); otherwise keep the backing
+    variable;
+  - drop the enum-literal rewrite (B12).
+- Tests:
+  - run `{attribute 'test'}` programs directly (T1);
+  - support multi-cycle tests. The CODESYS project needs a `TEST_FINISHED()`
+    stub function (no inputs) in its assertion library.
+
 ## A. Language: blocks real CODESYS projects
 
 Sorted by how often the construct appears in real CODESYS code.
@@ -149,7 +249,7 @@ workarounds, plus these:
 | S11 | **The Auto-entry tolerance defaults to zero** | Without a reviewed `transferTolerance`, the hand-back to Auto after a manual step is refused even for a bumpless controller, because REAL/LREAL rounding alone differs from the held output. It can only be set through `serve` (S5), and only applies to operations started after it was set. **Ask:** a sensible default (e.g. a small fraction of the output span) and a CLI way to set it. |
 | S12 | **A large manual step drives a nonlinear plant into its trips** | Identify's default step amplitude comes from the loop file; 0.015 m³/s from 0.030 drove the tank from 1.0 m to 2.16 m, past its 2.0 m high-high trip, and the fit then failed ("a bounded input step with pre- and post-step data is required"). 0.005 m³/s worked. **Ask:** stop the step when the measurement leaves a declared safe band (the PV range or a trip level), and say so in the failure. |
 | S13 | **The step fit rejects some valid recordings at random** | With the same loop, plant and 0.005 m³/s step, `identify --method step` fitted 2 of 5 runs and failed 3 with "Step-response fit: A bounded input step with pre- and post-step data is required." The recordings were nearly identical (clean step, no trip). The difference is the sample at the step edge: samples are averages over 10–20 scans, so the edge sample lands partway between the old and new output depending on where the step falls in its block. It passed at 75 % and 95 % of the step and failed at 50 %, 50 % and 55 %. A failed recording can't be refitted ("the study keeps the experiment request only for the recording of its Identify result"). `--method setpoint-step` fitted 4 of 4 runs, with a better model check (3.7 % against 6 %). **Ask:** take the step time from the experiment request (the journal knows when it wrote the step), not from the averaged samples; and allow refitting a kept recording. *Toolkit:* identifies with `setpoint-step` by default. |
-| S14 | **Identify's recording stops at about 24,000 scans** | A 380 s experiment on a 10 ms task stopped with `finished_early` at 240 s (1,199–1,202 samples, scan range 20 to about 24,000), at 20x and at 40x alike; a 190 s experiment completed (`duration_complete`). The fit still ran on the shortened record. **Ask:** record the whole requested duration (decimate more for long experiments), or refuse up front when it can't, and say so in the answer. |
+| S14 | ~~Identify's recording stops at about 24,000 scans~~ **Not a gap** | A 380 s experiment on a 10 ms task ended with `finished_early` at about 240 s; a 190 s one ran its full duration. truST (8 November): Identify ends the step's hold once the response has settled (spec 35 B3.4 step 4); the tank (τ ≈ 75 s) had settled at about 240 s, and the fit used the settled record. 0.35.0 will say in the answer that the hold ended because the response settled, and when. |
 | S15 | **Search and Validate need a free-running target** | Tune and Validate run isolated simulations, but with the runtime paused between scans (as the toolkit's debugger keeps it) `tune` failed with "native simulation host status timed out", and Validate's live model check reported "still changing" until the loop had settled while running. **Ask:** let the isolated verbs run without polling the target, or document that the target must run; Validate could say what it waits for. *Toolkit:* runs the simulation freely (20x) during Identify, Search and Validate, and pauses it again at a scan start after. |
 | S16 | **Validate's live model check refuses a bumpless hand-back** | Found in the first run in Claude Desktop (TankTune: 50 ms task, MV `PRG_Tank.rPiOut` in %, a PI with a `Track` method that preloads the integral in Manual). Validate's provisional-model check stepped `rManualOut` 30 → 29.85 % and back, then the hand-back to Auto failed every time with "first controller output PRG_Tank.rPiOut violates reviewed transfer tolerance. The runtime reverted the transfer in the same scan", although the study's `transferTolerance` is 1 (%). Reproduced on a copy of the project outside the app. With truST holding the loop in Manual, switching `xManual` to FALSE by hand gave 30.000162 → 30.000160 % on the first Auto scan: a 0.000002 % jump, refused against a 1 % tolerance, so the check behaves as if the tolerance were zero. The operation runs under the derived binding id `loop:lt101-level:identification-mode`; our guess is that the tolerance reviewed for `loop:lt101-level` doesn't reach it. The loop is left in Manual with the operation journaled (S10), and the isolated validation runs never start. **Ask:** apply the loop's reviewed transfer tolerance to Validate's model-check operation (and Identify's), and name the measured jump and the tolerance in the failure. *Toolkit:* on this failure it cancels or clears the journal, sets the mode back to Auto, says it's not the program, and points to `run_experiment` to compare the candidate. |
 

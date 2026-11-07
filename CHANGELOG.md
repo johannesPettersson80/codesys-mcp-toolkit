@@ -87,6 +87,12 @@ Rewrite. See README "Migrating from v1".
 
 ### Fixed
 - `compile` returns errors and warnings with object, line and code (#10).
+- `write_var`, `force_var` and experiment settings refuse a name the program
+  doesn't have. truST 0.34 accepts such a write and drops it, so a typo looked
+  applied.
+- Build errors in the simulation map to CODESYS lines from truST's structured
+  diagnostics (`trust-lsp check --format json`, truST 0.34+), with the
+  error code; the text output is still parsed when trust-lsp is missing.
 - Non-ASCII text round-trips (UTF-8 end to end) (#9).
 - Reads work in Claude Desktop because they are tools, not resources (#6).
 - Declarations that drop or change the object header are rejected (#5).

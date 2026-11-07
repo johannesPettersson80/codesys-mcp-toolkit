@@ -10,7 +10,7 @@ import { evaluate, evaluateCondition, ExprError, parseExpr } from "../src/sim/ex
 import { composeMirror, declaredType, enumMembers, fromMirror, HARNESS_FILE, injectAddress, isTestPou, methodHeader, parseIntervalMs, partLines, propertyHeader, rewriteEnumLiterals, stripQueryInterface, toMirror, toTestHeader, usedAddressEnd } from "../src/sim/mirror.js";
 import { readManifest, writeMirror } from "../src/sim/mirror-store.js";
 import { applyOverride, parsePlantConfig, PlantConfigError, simulationToml } from "../src/sim/plant.js";
-import { assertSimulationOnly, parseDiagnostics, parseTestJson, runtimeToml } from "../src/sim/runtime.js";
+import { assertSimulationOnly, parseDiagnostics, parseLspJson, parseTestJson, runtimeToml } from "../src/sim/runtime.js";
 import { SIM_CODESYS_OPS } from "../src/sim/tools.js";
 import { formatValue, parseTrustValue, toTrustLiteral, type StValue } from "../src/sim/values.js";
 import { createServer } from "../src/server.js";
@@ -294,6 +294,16 @@ describe("truST output parsing", () => {
       { file: "src/FB_Counter.st", message: "expected ';'", start: 113, end: 119 },
       { file: "src/P.st", message: "expected expression", start: 486, end: 487 },
     ]);
+  });
+
+  it("parses trust-lsp check --format json", () => {
+    const out = `{"diagnostics":[{"code":"E101","column":1,"endColumn":17,"endLine":42,"line":42,"message":"undefined identifier 'nUndefinedThing'","path":"src\\\\PRG_Tank.st","severity":"error"},{"code":"W005","column":14,"endColumn":27,"endLine":21,"line":21,"message":"implicit conversion from 'SINT' to 'UDINT'","path":"src\\\\T.st","severity":"warning"}],"errors":1,"files":11,"version":1,"warnings":1}`;
+    expect(parseLspJson(out)).toEqual([
+      { file: "src/PRG_Tank.st", line: 42, column: 1, severity: "error", code: "E101", message: "error[E101]: undefined identifier 'nUndefinedThing'" },
+      { file: "src/T.st", line: 21, column: 14, severity: "warning", code: "W005", message: "warning[W005]: implicit conversion from 'SINT' to 'UDINT'" },
+    ]);
+    expect(parseLspJson("not json")).toBeUndefined();
+    expect(parseLspJson('{"other":1}')).toBeUndefined();
   });
 });
 

@@ -102,6 +102,13 @@ describe.skipIf(!exe || !toolchain)("simulation in truST", () => {
     expect(await sim.readVars(["GVL_Par.eMode"])).toBe("GVL_Par.eMode = E_TankMode.AUTO");
   }, T);
 
+  it("refuses to write or force a name the program doesn't have (truST would drop it silently)", async () => {
+    await expect(sim.writeVar("PRG_Tank.nTripz", "5")).rejects.toThrow(/PRG_Tank\.nTripz is not a variable/);
+    await expect(sim.forceVar("PRG_Tank.nTripz", "5")).rejects.toThrow(/is not a variable/);
+    await expect(sim.writeVar("GVL_Par.rLevelSPP", "0.5")).rejects.toThrow(/is not a variable/);
+    expect(await sim.writeVar("PRG_Tank.nTrips", "0")).toMatch(/PRG_Tank\.nTrips := 0/);
+  }, T);
+
   it("runs repeatable experiments and compares them", async () => {
     const spec = { name: "level step", duration_s: 300, pv: "GVL_IO.lrLT101_Level", sp: { var: "GVL_Par.rLevelSP", value: 0.6, at_s: 5 }, watch: ["PRG_Tank.nTrips"], samples: 60 };
     const a = await sim.runExperiment(spec);
@@ -178,7 +185,18 @@ describe.skipIf(!exe || !toolchain)("simulation in truST", () => {
 
   it("maps a truST build error back to the CODESYS object and line", async () => {
     nodes = tankNodes().map((n) => (n.path === "PRG_Tank" ? { ...n, implementation: PRG_TANK_IMPL.replace("nTrips := nTrips + 1;", "nTrips := nTrips + ;") } : n));
-    await expect(sim.start()).rejects.toThrow(new RegExp(`truST could not build the mirror:\\nPRG_Tank \\(implementation line ${LINES.trip}\\): expected expression`));
+    await expect(sim.start()).rejects.toThrow(new RegExp(`truST could not build the mirror:\\nPRG_Tank \\(implementation line ${LINES.trip}\\): (error\\[\\w+\\]: )?expected expression`));
+    nodes = tankNodes();
+  }, T);
+
+  it("maps every type error to its CODESYS line, with truST's code (trust-lsp JSON where installed)", async () => {
+    nodes = tankNodes().map((n) => (n.path === "PRG_Tank" ? { ...n, implementation: PRG_TANK_IMPL.replace("nTrips := nTrips + 1;", "nTrips := nTrips + 1;\nnUndefinedThing := 3;").replace("sStatus := 'OK';", "sStatus := 'OK';\nnTrips := TRUE;") } : n));
+    const err = await sim.start().then(
+      () => "",
+      (e: Error) => e.message,
+    );
+    expect(err).toMatch(new RegExp(`PRG_Tank \\(implementation line ${LINES.trip + 1}\\): error\\[E101\\]: undefined identifier 'nUndefinedThing'`));
+    expect(err).toMatch(/PRG_Tank \(implementation line \d+\): error\[E\d+\]: cannot assign 'BOOL' to 'UDINT'/);
     nodes = tankNodes();
   }, T);
 });

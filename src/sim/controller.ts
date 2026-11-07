@@ -271,9 +271,13 @@ export class SimController {
     const out: string[] = [];
     for (const d of diags) {
       let where = d.file;
-      if (d.start !== undefined && this.mirrorDir) {
+      let line0: number | undefined;
+      if (d.line !== undefined) line0 = d.line - 1;
+      else if (d.start !== undefined && this.mirrorDir) {
         const text = await readFile(join(this.mirrorDir, d.file), "utf8").catch(() => "");
-        const line0 = Buffer.from(text, "utf8").subarray(0, d.start).toString("utf8").split("\n").length - 1;
+        line0 = Buffer.from(text, "utf8").subarray(0, d.start).toString("utf8").split("\n").length - 1;
+      }
+      if (line0 !== undefined) {
         const o = fromMirror(this.files(), d.file, line0);
         where = o ? `${o.obj} (${o.part === "decl" ? "declaration" : "implementation"} line ${o.line})` : `${d.file} line ${line0 + 1} (generated)`;
       }
@@ -705,11 +709,31 @@ export class SimController {
       if (address) await c.request("io.unforce", { address });
       else await c.request("var.unforce", { target: `global:${name}` });
     } else if (address) await c.request("io.force", { address, value: toTrustLiteral(value) });
-    else await c.request("var.force", { target: `global:${name}`, value: toTrustLiteral(value) });
+    else {
+      await this.mustExist(name);
+      await c.request("var.force", { target: `global:${name}`, value: toTrustLiteral(value) });
+    }
   }
 
   private async rawWrite(name: string, value: string): Promise<void> {
+    await this.mustExist(name);
     await this.ctl().request("set", { target: `global:${name}`, value: toTrustLiteral(value) });
+  }
+
+  /**
+   * truST 0.34 answers `set` (and `var.force`) to a name the program doesn't
+   * have with "queued" and then drops it, so a typo would look applied.
+   * Read the name first; it fails for unknown names.
+   */
+  private async mustExist(name: string): Promise<void> {
+    try {
+      await this.readValue(name);
+    } catch (e) {
+      throw new SimError(
+        "unknown_variable",
+        `${name} is not a variable the simulation can read (${(e as Error).message}). Check the path (e.g. 'PRG_Tank.fbPI._rKp'); for a property, use its backing variable.`,
+      );
+    }
   }
 
   async writeVar(name: string, value: string): Promise<string> {

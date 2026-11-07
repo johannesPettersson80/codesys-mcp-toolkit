@@ -121,10 +121,49 @@ export function parseTestJson(stdout: string, projectDir: string): TestRun | und
 
 export interface Diagnostic {
   file: string;
-  /** Byte offsets in the file. */
+  /** Byte offsets in the file (from the text output). */
   start?: number;
   end?: number;
+  /** 1-based line and column (from trust-lsp's JSON). */
+  line?: number;
+  column?: number;
+  severity?: "error" | "warning" | "info";
+  code?: string;
   message: string;
+}
+
+/** trust-lsp (language server; `check --format json` gives structured diagnostics): next to trust-runtime, else PATH. */
+export function findTrustLsp(runtimeExe: string): string | undefined {
+  const name = process.platform === "win32" ? "trust-lsp.exe" : "trust-lsp";
+  const candidates = [join(dirname(runtimeExe), name)];
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) if (dir) candidates.push(join(dir, name));
+  return candidates.find((c) => existsSync(c));
+}
+
+/** Parse `trust-lsp check --format json`; undefined when it isn't that JSON. */
+export function parseLspJson(stdout: string): Diagnostic[] | undefined {
+  const start = stdout.indexOf("{");
+  if (start < 0) return undefined;
+  let doc: { diagnostics?: Record<string, unknown>[] };
+  try {
+    doc = JSON.parse(stdout.slice(start, stdout.lastIndexOf("}") + 1));
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(doc.diagnostics)) return undefined;
+  return doc.diagnostics.map((d) => {
+    const severity = d.severity === "error" || d.severity === "warning" || d.severity === "info" ? d.severity : undefined;
+    const code = typeof d.code === "string" ? d.code : undefined;
+    return {
+      file: String(d.path ?? "").replace(/\\/g, "/"),
+      line: typeof d.line === "number" ? d.line : undefined,
+      column: typeof d.column === "number" ? d.column : undefined,
+      severity,
+      code,
+      // the same form as the build's text output: "error[E101]: undefined identifier 'x'"
+      message: `${severity ?? "error"}${code ? `[${code}]` : ""}: ${String(d.message ?? "")}`,
+    };
+  });
 }
 
 /** Parse "src/X.st: message at 113..119" lines from truST check/build output. */
@@ -283,7 +322,7 @@ export class TrustRuntime {
     const parsed = parseTestJson(stdout, dir);
     if (parsed) return { ...parsed, output: stderr.trim() };
     const output = `${stdout}\n${stderr}`.trim();
-    return { ran: false, total: 0, passed: 0, failed: 0, errors: 0, durationMs: 0, tests: [], diagnostics: parseDiagnostics(output), output };
+    return { ran: false, total: 0, passed: 0, failed: 0, errors: 0, durationMs: 0, tests: [], diagnostics: await this.diagnose(dir, output), output };
   }
 
   /**
@@ -366,6 +405,25 @@ export class TrustRuntime {
     });
   }
 
+  /** Structured diagnostics from trust-lsp when it is installed (TRUST-GAPS B16); errors only. */
+  async check(dir: string): Promise<Diagnostic[] | undefined> {
+    const lsp = findTrustLsp(this.exe);
+    if (!lsp) return undefined;
+    let stdout = "";
+    try {
+      stdout = (await exec(lsp, ["check", "--project", dir, "--format", "json"], { windowsHide: true, maxBuffer: 16 << 20, timeout: 120_000 })).stdout;
+    } catch (e) {
+      stdout = (e as { stdout?: string }).stdout ?? ""; // exit 1 means errors were found
+    }
+    return parseLspJson(stdout)?.filter((d) => d.severity === "error");
+  }
+
+  /** The diagnostics of a failed compile: trust-lsp's JSON, else the text output parsed. */
+  private async diagnose(dir: string, output: string): Promise<Diagnostic[]> {
+    const lsp = await this.check(dir).catch(() => undefined);
+    return lsp?.length ? lsp : parseDiagnostics(output);
+  }
+
   async build(dir: string): Promise<BuildResult> {
     const t0 = Date.now();
     try {
@@ -374,7 +432,7 @@ export class TrustRuntime {
     } catch (e) {
       const err = e as { stdout?: string; stderr?: string; message: string };
       const output = `${err.stdout ?? ""}${err.stderr ?? ""}`.trim() || err.message;
-      return { ok: false, output, diagnostics: parseDiagnostics(output), ms: Date.now() - t0 };
+      return { ok: false, output, diagnostics: await this.diagnose(dir, output), ms: Date.now() - t0 };
     }
   }
 
