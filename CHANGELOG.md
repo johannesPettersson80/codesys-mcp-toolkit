@@ -52,7 +52,8 @@ Rewrite. See README "Migrating from v1".
   Identifies the plant on the free-running simulation, searches the program's
   own controller coefficients against the fitted model and validates the
   candidate with the actual ST. Works around truST 0.34's gaps (search
-  budget, requirements and Auto-entry tolerance, stuck journals) and refuses
+  budget, requirements and Auto-entry tolerance, stuck journals, a refused
+  hand-back after validation) and refuses
   GVL loop signals with what to change. The Tuning view shows the model fit,
   the candidates and the validation (app-only tool `get_tuning`).
 - Tool annotations (read-only, non-destructive, destructive; all local), so

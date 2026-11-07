@@ -28,6 +28,8 @@ export interface TuningHost {
   trust(): TrustRuntime;
   /** Run fn while the simulation runs freely at `speed` (breakpoints off); paused at a scan start after. */
   freeRun<T>(label: string, speed: number, fn: () => Promise<T>): Promise<T>;
+  /** Write a variable in the simulation (applies at the next scan). */
+  writeVar(name: string, value: string): Promise<unknown>;
   /** Mark the simulation busy (shown in the panel) while fn runs. */
   runBusy<T>(label: string, fn: () => Promise<T>): Promise<T>;
   journal: { add(kind: string, text: string, data?: Record<string, unknown>): void };
@@ -193,7 +195,7 @@ type Json = Record<string, unknown>;
 /** The loop as the panel shows it, from its loop file (control-loops/<slug>.json). */
 export function loopFromFile(j: Json): TuningLoop {
   const sig = (j.signals ?? {}) as Record<string, { symbol?: string; unit?: string } | undefined>;
-  const ctl = (j.controller ?? {}) as { modeSignal?: string; manualOutputSignal?: string; project?: { axes?: { symbol: string; values: number[] }[] } };
+  const ctl = (j.controller ?? {}) as { modeSignal?: string; modeWhenTrue?: string; manualOutputSignal?: string; project?: { axes?: { symbol: string; values: number[] }[] } };
   const params = ((j.parameterBinding as { parameters?: { symbol: string; unit?: string }[] } | undefined)?.parameters ?? []) as { symbol: string; unit?: string }[];
   return {
     id: String(j.id),
@@ -203,6 +205,7 @@ export function loopFromFile(j: Json): TuningLoop {
       sp: sig.setpoint?.symbol,
       mv: sig.manipulatedVariable?.symbol ?? "",
       mode: ctl.modeSignal,
+      ...(ctl.modeWhenTrue === "Manual" || ctl.modeWhenTrue === "Auto" ? { modeTrueMeans: ctl.modeWhenTrue } : {}),
       manualOutput: ctl.manualOutputSignal,
       pvUnit: sig.processVariable?.unit,
       mvUnit: sig.manipulatedVariable?.unit,
@@ -285,6 +288,7 @@ export function selectedTrial(loop: TuningLoop): { parameters: Record<string, nu
 const fmtNum = (x: number) => (Math.abs(x) >= 1000 || (Math.abs(x) < 0.01 && x !== 0) ? x.toPrecision(3) : String(Number(x.toPrecision(4))));
 const short = (symbol: string) => symbol.split(".").pop()!;
 const STILL_CHANGING = /still changing|settl/i;
+const TRANSFER_REFUSED = /violates reviewed transfer tolerance/i;
 
 /** Loop tuning on the simulation's mirror (one per SimController). */
 export class Tuning {
@@ -347,7 +351,9 @@ export class Tuning {
     let hint = "";
     if (/unfinished operation/i.test(f.message)) hint = "\nA previous operation is still journaled: call tune_run with step 'cancel', then try again.";
     else if (/program instance not found|belong to one compiled program/i.test(f.message)) hint = "\nThe loop's signals must all be variables of one PROGRAM, not GVL members (TRUST-GAPS S9).";
-    else if (/transfer tolerance/i.test(f.message)) hint = "\nThe hand-back to Auto was refused: make the controller bumpless (track the manual output while in Manual) or raise requirements.transfer_tolerance in tune_setup.";
+    else if (TRANSFER_REFUSED.test(f.message))
+      hint =
+        "\nThe hand-back to Auto was refused. If the controller does not yet follow the manual output while in Manual, make it bumpless; if it already does, this is truST 0.34 (TRUST-GAPS S16) and changing the code won't help. Then call tune_run with step 'cancel'.";
     else if (/bounded input step|pre- and post-step/i.test(f.message))
       hint =
         "\ntruST 0.34's step fit rejects some recordings at random (TRUST-GAPS S13): identify again with method 'setpoint-step'. If the plant hit a limit or trip, use a smaller step (S12; tune_setup with replace: true).";
@@ -535,6 +541,7 @@ export class Tuning {
     if (r.failure && !r.result) {
       loop.error = { step: "validate", message: r.failure.message, nextAction: r.failure.nextAction };
       this.changed(loop);
+      if (TRANSFER_REFUSED.test(r.failure.message)) throw new TuningError("validate_failed", await this.refusedHandBack(loop, r.failure.message));
       throw new TuningError("validate_failed", this.failText("Validate", r));
     }
     loop.validation = parseValidation(r.result ?? {});
@@ -552,6 +559,41 @@ export class Tuning {
     ]
       .filter(Boolean)
       .join("\n");
+  }
+
+  /**
+   * S16: after Validate's live model check, truST 0.34 refuses the hand-back
+   * to Auto even when the controller is bumpless (the reviewed tolerance is
+   * not applied), and leaves the loop in Manual with the operation journaled.
+   * End the operation, put the mode back to Auto, and say what to do instead.
+   */
+  private async refusedHandBack(loop: TuningLoop, message: string): Promise<string> {
+    const done: string[] = [];
+    const c = await this.host.trust().studio(this.dir(), "cancel", ["--loop", loop.id]).catch(() => ({ failure: { message: "cancel failed" } }));
+    if (c.failure) await this.clearJournal(); // S10
+    done.push(c.failure ? "cleared truST's stuck operation journal" : "cancelled truST's operation");
+    const mode = loop.signals.mode;
+    if (mode) {
+      const auto = loop.signals.modeTrueMeans === "Auto" ? "TRUE" : "FALSE";
+      try {
+        await this.host.writeVar(mode, auto);
+        done.push(`set ${mode} := ${auto} (Auto) in the simulation`);
+      } catch (e) {
+        done.push(`could not set ${mode} back to Auto (${(e as Error).message}); do it with write_var`);
+      }
+    }
+    const sel = selectedTrial(loop);
+    const set = sel ? JSON.stringify(sel.parameters) : undefined;
+    this.host.journal.add("tuning", `Validate of ${loop.id}: hand-back refused by truST (S16)`, { loop: loop.id });
+    return [
+      `Validate failed: ${message}`,
+      "This is a truST 0.34 bug (TRUST-GAPS S16), not the program: after Validate's live model check truST refuses the hand-back to Auto even when the controller is bumpless. Do not change the controller code for it.",
+      `Recovered: ${done.join("; ")}.`,
+      "The model and the search result still stand; truST's isolated validation runs did not get to run.",
+      sel
+        ? `Confirm the candidate with run_experiment instead: one run with the current settings and one with set ${set}, the same setpoint step (e.g. +${loop.requirements?.referenceChange ?? "0.1"}) and pv ${loop.signals.pv}; compare settling, overshoot and trips.`
+        : "Confirm the candidate with run_experiment (current settings against the selected ones).",
+    ].join("\n");
   }
 
   async cancel(id: string): Promise<string> {

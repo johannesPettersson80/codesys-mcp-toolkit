@@ -19,7 +19,7 @@ import { TrustControl, TrustError } from "./control.js";
 
 const exec = promisify(execFile);
 
-export const TESTED_TRUST_VERSION = "0.33.0";
+export const TESTED_TRUST_VERSION = "0.34.0";
 
 export function findTrustRuntime(explicit?: string): string | undefined {
   const candidates: string[] = [];

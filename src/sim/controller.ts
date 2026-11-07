@@ -139,6 +139,7 @@ export class SimController {
       mirrorPath: () => this.mirrorDir,
       trust: () => this.getRuntime(),
       freeRun: (label, speed, fn) => this.freeRun(label, speed, fn),
+      writeVar: (name, value) => this.writeVar(name, value),
       runBusy: (label, fn) => this.busy(label, fn),
       journal: this.journal,
     });

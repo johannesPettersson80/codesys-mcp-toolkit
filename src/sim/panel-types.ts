@@ -89,7 +89,7 @@ export interface TuningLoop {
   id: string;
   name: string;
   /** What the loop's signals and searched coefficients are. */
-  signals: { pv: string; sp?: string; mv: string; mode?: string; manualOutput?: string; pvUnit?: string; mvUnit?: string };
+  signals: { pv: string; sp?: string; mv: string; mode?: string; modeTrueMeans?: "Manual" | "Auto"; manualOutput?: string; pvUnit?: string; mvUnit?: string };
   coefficients: { symbol: string; values: number[]; unit?: string }[];
   requirements?: Record<string, number | string>;
   /** The step running now, or the last one that failed. */

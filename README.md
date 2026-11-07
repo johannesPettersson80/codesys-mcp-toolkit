@@ -144,9 +144,13 @@ CODESYS stays the source and the compile target.
 
 ### Setup
 
-1. Install truST 0.33 (Windows zip from the
+1. Install truST 0.34 or later (from the
    [releases](https://github.com/johannesPettersson80/trust-platform/releases))
    and put `trust-runtime.exe` on `PATH`, or pass `--trust-runtime <path>`.
+   Loop tuning also needs `trust-control-studio.exe` next to it; in 0.34 it
+   ships in the VS Code extension package (`trust-lsp-win32-x64-0.34.0.vsix`,
+   a zip: the programs are in its `bin` folder). Simulation and unit tests
+   work from truST 0.33.
 2. Install its compiler toolchain once (about 180 MB). The toolkit never
    downloads it for you:
    ```bash
@@ -218,7 +222,7 @@ gains, Claude changes them in CODESYS (`write_object`) and confirms them with
 `run_experiment`.
 
 truST 0.34 asks a few things of the program (see
-[TRUST-GAPS.md](spike/trust-fidelity/TRUST-GAPS.md), S1 to S15):
+[TRUST-GAPS.md](spike/trust-fidelity/TRUST-GAPS.md), S1 to S16):
 
 - **One program.** Every loop signal must be a variable of one `PROGRAM`, not
   a GVL member: the measurement and the output mapped to the I/O there
@@ -234,6 +238,11 @@ truST 0.34 asks a few things of the program (see
 The toolkit works around the rest: it raises the search budget, sets the
 requirements and the Auto-entry tolerance, and keeps the simulation running
 while Control Studio works.
+
+On truST 0.34, `validate` can fail with "violates reviewed transfer tolerance"
+even when the controller is bumpless (S16). The toolkit then ends truST's
+operation, puts the loop back in Auto and says so. Confirm the candidate with
+`run_experiment` instead: current settings against the candidate.
 
 ### Unit tests
 
@@ -375,7 +384,7 @@ sync. Objects with graphical bodies are reported and not simulated.
 
 ### Current limits
 
-These come from truST 0.33; each is listed in
+These were found on truST 0.33 and 0.34; each is listed in
 [`spike/trust-fidelity/TRUST-GAPS.md`](spike/trust-fidelity/TRUST-GAPS.md):
 
 - **Repeatability.** truST can't start paused. Each fresh start runs a few

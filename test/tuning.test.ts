@@ -47,6 +47,7 @@ function loopFile(id = "loop:lt101-level"): Record<string, unknown> {
     controller: {
       instance: "PRG_Tank",
       modeSignal: "PRG_Tank.bManual",
+      modeWhenTrue: "Manual",
       manualOutputSignal: "PRG_Tank.lrManualFlow",
       project: {
         axes: [
@@ -214,6 +215,7 @@ function fakeTuning(answers: Partial<Record<string, StudioAnswer<unknown>[]>>) {
   const calls: { verb: string; args: string[] }[] = [];
   const rpc: { method: string; params: unknown }[] = [];
   const freeRuns: { label: string; speed: number }[] = [];
+  const writes: [string, string][] = [];
   const trust = {
     studio: async (_dir: string, verb: string, args: string[] = []) => {
       calls.push({ verb, args });
@@ -241,10 +243,11 @@ function fakeTuning(answers: Partial<Record<string, StudioAnswer<unknown>[]>>) {
       freeRuns.push({ label, speed });
       return fn();
     },
+    writeVar: async (name, value) => void writes.push([name, value]),
     runBusy: (_label, fn) => fn(),
     journal: { add: (_k, t) => void journal.push(t) },
   });
-  return { dir, tuning, calls, rpc, freeRuns, journal };
+  return { dir, tuning, calls, rpc, freeRuns, journal, writes };
 }
 
 describe("tuning: the flow against a fake Control Studio", () => {
@@ -315,6 +318,23 @@ describe("tuning: the flow against a fake Control Studio", () => {
     expect(text).toContain("S10");
     expect(existsSync(join(f.dir, ".control-studio", "control-studio"))).toBe(false);
     expect(existsSync(join(f.dir, ".control-studio", "draft-lt101-level.json"))).toBe(true);
+  });
+
+  it("recovers from truST refusing a bumpless hand-back in Validate (S16)", async () => {
+    const refused = { failure: { cause: "settings", message: "first controller output PRG_Tank.lrFlowCmd violates reviewed transfer tolerance." } };
+    const f = fakeTuning({ tune: [{ result: TUNE }], validate: [refused], cancel: [{ failure: { message: "first controller output PRG_Tank.lrFlowCmd violates reviewed transfer tolerance." } }] });
+    await f.tuning.setup(TANK);
+    await f.tuning.search("lt101-level");
+    mkdirSync(join(f.dir, ".control-studio", "control-studio"), { recursive: true });
+    let msg = "";
+    await f.tuning.validate("lt101-level").catch((e: Error) => (msg = e.message));
+    expect(msg).toContain("TRUST-GAPS S16");
+    expect(msg).toContain("Do not change the controller code");
+    expect(msg).toContain("set PRG_Tank.bManual := FALSE (Auto)");
+    expect(msg).toContain('set {"PRG_Tank.fbPI._rKp":300,"PRG_Tank.fbPI._rTi":20}');
+    expect(f.writes).toEqual([["PRG_Tank.bManual", "FALSE"]]);
+    expect(existsSync(join(f.dir, ".control-studio", "control-studio"))).toBe(false);
+    expect(f.tuning.panelLoops()[0]!.error?.step).toBe("validate");
   });
 
   it("names unknown loops", async () => {
