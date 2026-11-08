@@ -24,7 +24,7 @@ SCRIPTS = os.environ.get("CODESYS_MCP_SCRIPTS")
 if SCRIPTS and SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
-from mcp_compat import current_pid, now, pid_alive, read_json, to_text, write_json_atomic  # noqa: E402
+from mcp_compat import current_pid, now, pid_alive, read_json, remove_file, to_text, write_json_atomic  # noqa: E402
 
 SESSION = os.environ["CODESYS_MCP_DIR"]
 PARENT_PID = int(os.environ.get("CODESYS_MCP_PARENT_PID") or "0")
@@ -50,12 +50,18 @@ def log(msg):
 
 
 def beat(state, op=None, rid=None, deadline_ms=None):
+    # A heartbeat that cannot be written (file held open past the retries) must not
+    # kill the watcher: log it and go on. If it keeps failing, the server sees a
+    # stale heartbeat and reports the watcher as hung, which is the right signal.
     t = now()
-    write_json_atomic(HEARTBEAT, {
-        "pid": PID, "ts": t, "state": state, "op": op, "id": rid,
-        "deadline": (t + deadline_ms / 1000.0) if deadline_ms else None,
-        "count": STATE["count"],
-    })
+    try:
+        write_json_atomic(HEARTBEAT, {
+            "pid": PID, "ts": t, "state": state, "op": op, "id": rid,
+            "deadline": (t + deadline_ms / 1000.0) if deadline_ms else None,
+            "count": STATE["count"],
+        })
+    except Exception as e:
+        log("heartbeat write failed (%s): %s" % (state, to_text(e)))
     STATE["last_beat"] = t
 
 
@@ -99,11 +105,11 @@ def handle(ops_mod, fname):
     try:
         req = read_json(path)
     except Exception as e:
-        os.remove(path)
+        remove_file(path)
         write_json_atomic(os.path.join(RES_DIR, rid + ".json"), {
             "id": rid, "ok": False, "error": {"code": "bad_request", "message": "Unreadable request: %s" % e}})
         return True
-    os.remove(path)
+    remove_file(path)
     rid = req.get("id") or rid
     op = req.get("op")
     args = req.get("args") or {}
@@ -128,9 +134,11 @@ def handle(ops_mod, fname):
                     "code": "codesys_error", "message": to_text(e) or e.__class__.__name__,
                     "detail": to_text(traceback.format_exc())}}
     res["ms"] = int((now() - started) * 1000)
+    # Go idle before publishing the result: once the server sees the result it may
+    # read the heartbeat right away, and it must not find this op still "busy".
+    beat("idle")
     write_json_atomic(os.path.join(RES_DIR, rid + ".json"), res)
     log("%s %s %s %dms" % (rid, op, "ok" if res.get("ok") else res["error"]["code"], res["ms"]))
-    beat("idle")
     return not stop
 
 

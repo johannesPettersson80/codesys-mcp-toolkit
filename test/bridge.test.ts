@@ -1,3 +1,5 @@
+import { closeSync, openSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BridgeError, type CodesysBridge } from "../src/bridge/bridge.js";
 import { fakeBridge, fakeProjectFile } from "./helpers.js";
@@ -18,6 +20,35 @@ describe("CodesysBridge with the real watcher (fake scriptengine)", () => {
     expect(h.state).toBe("ready");
     expect(h.verdict).toBe("healthy");
     expect(h.heartbeat?.state).toBe("idle");
+    // The watcher goes idle before it publishes a result, so a health check right
+    // after any call never sees the finished op as still busy.
+    for (let i = 0; i < 20; i++) {
+      await bridge.call("ping");
+      expect(bridge.health()).toMatchObject({ verdict: "healthy", heartbeat: { state: "idle" } });
+    }
+  });
+
+  it("survives the heartbeat file being held open (Windows sharing violation)", async () => {
+    // On Windows, replacing a file another process has open fails with "access denied".
+    // The server reads heartbeat.json while the watcher rewrites it every second; under
+    // load the two collide. The watcher must retry, not crash.
+    bridge = fakeBridge();
+    await bridge.start();
+    const { sessionDir, pid } = bridge.health();
+    const hbPath = join(sessionDir!, "heartbeat.json");
+    const before = bridge.readHeartbeat()!.ts;
+    const fd = openSync(hbPath, "r");
+    try {
+      await new Promise((r) => setTimeout(r, 1_500));
+    } finally {
+      closeSync(fd);
+    }
+    const r = await bridge.call<{ engine: string }>("ping");
+    expect(r.engine).toBe("fake");
+    // Same watcher process, no silent restart.
+    expect(bridge.health()).toMatchObject({ state: "ready", restarts: 0, sessionDir, pid });
+    expect(bridge.readHeartbeat()!.ts).toBeGreaterThan(before);
+    expect(bridge.logTail(50)).not.toMatch(/crashed|heartbeat write failed/);
   });
 
   it("returns watcher errors as BridgeError with code", async () => {

@@ -63,15 +63,42 @@ def _replace(src, dst):
     os.rename(src, dst)
 
 
+FS_RETRY_S = 3.0
+
+
+def retry_fs(fn, *args):
+    """Run a file operation, retrying while Windows reports the file as in use.
+
+    On Windows, replacing or removing a file fails with "access denied" (WinError 5,
+    or IOException in .NET) while another process holds it open: the server polling
+    heartbeat.json, an antivirus scan, the search indexer. That lasts milliseconds,
+    so retry for up to FS_RETRY_S before giving up and raising the last error.
+    """
+    deadline = time.time() + FS_RETRY_S
+    delay = 0.005
+    while True:
+        try:
+            return fn(*args)
+        except Exception:
+            if time.time() + delay > deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)
+
+
 def write_json_atomic(path, obj):
     tmp = path + ".tmp"
     data = json.dumps(obj, ensure_ascii=False, indent=None, separators=(",", ":"))
-    f = codecs.open(tmp, "w", "utf-8")
+    f = retry_fs(codecs.open, tmp, "w", "utf-8")
     try:
         f.write(to_text(data))
     finally:
         f.close()
-    _replace(tmp, path)
+    retry_fs(_replace, tmp, path)
+
+
+def remove_file(path):
+    retry_fs(os.remove, path)
 
 
 def current_pid():

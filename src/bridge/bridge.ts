@@ -86,6 +86,25 @@ interface WatcherResult {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const FILE_IN_USE = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+/**
+ * Run a file operation, retrying while Windows reports the file as in use (another
+ * process such as the watcher, an antivirus scan or the indexer has it open). That
+ * lasts milliseconds; after `totalMs` the last error is thrown. Other errors throw at once.
+ */
+async function retryFs<T>(fn: () => Promise<T>, totalMs = 3_000): Promise<T> {
+  const until = Date.now() + totalMs;
+  for (let delay = 5; ; delay = Math.min(delay * 2, 100)) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!FILE_IN_USE.has((e as NodeJS.ErrnoException).code ?? "") || Date.now() + delay > until) throw e;
+      await sleep(delay);
+    }
+  }
+}
+
 export class CodesysBridge {
   private opts: Required<Omit<BridgeOptions, "args" | "profile" | "env" | "log">> &
     Pick<BridgeOptions, "args" | "profile" | "env" | "log">;
@@ -234,14 +253,14 @@ export class CodesysBridge {
     const id = `${String(++this.seq).padStart(8, "0")}-${randomBytes(2).toString("hex")}`;
     const reqPath = join(dir, "requests", `${id}.json`);
     const resPath = join(dir, "results", `${id}.json`);
-    await writeFile(`${reqPath}.tmp`, JSON.stringify({ id, op, args, deadline_ms: timeoutMs }), "utf8");
-    await rename(`${reqPath}.tmp`, reqPath);
+    await retryFs(() => writeFile(`${reqPath}.tmp`, JSON.stringify({ id, op, args, deadline_ms: timeoutMs }), "utf8"));
+    await retryFs(() => rename(`${reqPath}.tmp`, reqPath));
     this.calls++;
     const started = Date.now();
     let lastCheck = 0;
     for (;;) {
       if (existsSync(resPath)) {
-        const raw = await readFile(resPath, "utf8");
+        const raw = await retryFs(() => readFile(resPath, "utf8"));
         await unlink(resPath).catch(() => undefined);
         const res = JSON.parse(raw.replace(/^﻿/, "")) as WatcherResult;
         if (res.ok) return res.result as T;
