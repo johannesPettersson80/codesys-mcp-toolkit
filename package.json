@@ -1,6 +1,6 @@
 {
   "name": "@codesys/mcp-toolkit",
-  "version": "2.0.0-alpha.0",
+  "version": "2.0.0",
   "description": "MCP server for CODESYS V3.5: read, write and compile Structured Text through a persistent CODESYS session",
   "type": "module",
   "main": "dist/server.js",
@@ -25,8 +25,7 @@
     "prepublishOnly": "npm run build"
   },
   "publishConfig": {
-    "access": "public",
-    "tag": "next"
+    "access": "public"
   },
   "keywords": [
     "codesys",

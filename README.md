@@ -5,7 +5,7 @@
 **Let Claude read, write, compile and simulate Structured Text in your CODESYS V3.5 projects.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-![Status: 2.0 alpha](https://img.shields.io/badge/status-2.0%20alpha-orange)
+[![npm](https://img.shields.io/npm/v/@codesys/mcp-toolkit)](https://www.npmjs.com/package/@codesys/mcp-toolkit)
 ![CODESYS V3.5](https://img.shields.io/badge/CODESYS-V3.5-c8102e)
 ![Node.js 20 or later](https://img.shields.io/badge/node-%E2%89%A520-339933)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4)
@@ -49,11 +49,11 @@ Schneider EcoStruxure Machine Expert isn't supported yet. If you have it, the
 ### Install
 
 ```bash
-npm install -g @codesys/mcp-toolkit@next
+npm install -g @codesys/mcp-toolkit
 ```
 
-Version 2 is in alpha, so it's published under the `next` tag. Without `@next`,
-npm installs version 1.
+Coming from version 1? The tools have changed: see
+[Migrating from v1](#migrating-from-v1).
 
 ### Connect it to Claude Desktop
 
