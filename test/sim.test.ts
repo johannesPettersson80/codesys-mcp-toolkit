@@ -21,6 +21,33 @@ import { fakeBridge, fakeProjectFile, ROOT, tempDir } from "./helpers.js";
 const compose = () => composeMirror(tankNodes(), tankTasks(), { plant: parsePlantConfig(TANK_PLANT) });
 const file = (c: ReturnType<typeof compose>, name: string) => c.files.find((f) => f.path === `src/${name}.st`)!;
 
+describe("mirror: build properties and conditional compilation", () => {
+  it("leaves out objects CODESYS excludes from the build", () => {
+    const nodes = [...tankNodes(), { path: "FB_Spare", name: "FB_Spare", kind: "pou" as const, sub: "function_block", st: true, depth: 0, declaration: "FUNCTION_BLOCK FB_Spare", implementation: "x := ;", build: { excluded: true } }];
+    const c = composeMirror(nodes, tankTasks(), { plant: parsePlantConfig(TANK_PLANT) });
+    expect(c.files.some((f) => f.path === "src/FB_Spare.st")).toBe(false);
+    expect(c.notes.join("\n")).toContain("Excluded from build in CODESYS, so not simulated: FB_Spare");
+  });
+
+  it("resolves {IF defined (X)} with the project's defines, keeping CODESYS line numbers", () => {
+    const impl = "{IF defined (FAST)}\nnTrips := 1;\n{ELSE}\nnTrips := 2;\n{END_IF}\n" + PRG_TANK_IMPL_FOR_DEFINES;
+    const nodes = tankNodes().map((n) => (n.path === "PRG_Tank" ? { ...n, implementation: impl } : n));
+    const fast = composeMirror(nodes, tankTasks(), { plant: parsePlantConfig(TANK_PLANT), defines: { defines: ["FAST"] } });
+    const text = fast.files.find((f) => f.path === "src/PRG_Tank.st")!.text;
+    expect(text).toContain("nTrips := 1;");
+    expect(text).not.toContain("nTrips := 2;");
+    expect(text).not.toContain("{IF");
+    expect(fast.notes.join("\n")).toContain("Conditional compilation resolved with the defines FAST");
+    // line 2 of the implementation still maps to the line that holds it
+    const m = toMirror(fast.files, "PRG_Tank", 2)!;
+    expect(text.split("\n")[m.line0]).toContain("nTrips := 1;");
+    const plain = composeMirror(nodes, tankTasks(), { plant: parsePlantConfig(TANK_PLANT) });
+    expect(plain.files.find((f) => f.path === "src/PRG_Tank.st")!.text).toContain("nTrips := 2;");
+  });
+});
+
+const PRG_TANK_IMPL_FOR_DEFINES = "sStatus := 'OK';";
+
 describe("mirror composition", () => {
   it("nests methods, properties and accessors into the FB", () => {
     const t = file(compose(), "FB_PI").text;
@@ -353,8 +380,9 @@ describe("simulation safety (never a controller)", () => {
     await expect(assertSimulationOnly(dir)).rejects.toThrow(/web UI/);
   });
 
-  it("reads CODESYS only through export and tasks.list", () => {
-    expect([...SIM_CODESYS_OPS]).toEqual(["export", "tasks.list"]);
+  it("reads CODESYS only through export, tasks.list and project.info", () => {
+    // All three only read: the objects' text, the tasks, and the project's path, application and defines.
+    expect([...SIM_CODESYS_OPS]).toEqual(["export", "tasks.list", "project.info"]);
     const simDir = join(ROOT, "src", "sim");
     for (const f of readdirSync(simDir)) {
       const src = readFileSync(join(simDir, f), "utf8");

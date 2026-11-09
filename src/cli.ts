@@ -46,6 +46,7 @@ async function main() {
     options: {
       "codesys-path": { type: "string" },
       "codesys-profile": { type: "string" },
+      "codesys-additional-folder": { type: "string" },
       workspace: { type: "string" },
       project: { type: "string" },
       "session-dir": { type: "string" },
@@ -70,7 +71,7 @@ async function main() {
   }
   if (values.help) {
     process.stdout.write(
-      "codesys-mcp-tool [--codesys-path <CODESYS.exe>] [--codesys-profile <name>] [--workspace <dir>] [--project <file>] [--session-dir <dir>] [--no-autostart] [--no-autosave] [--trust-runtime <exe>] [--mirror-dir <dir>] [--no-sim] [--viewer-port <port>] [--no-viewer] [--no-shared]\n",
+      "codesys-mcp-tool [--codesys-path <CODESYS.exe>] [--codesys-profile <name>] [--codesys-additional-folder <dir>] [--workspace <dir>] [--project <file>] [--session-dir <dir>] [--no-autostart] [--no-autosave] [--trust-runtime <exe>] [--mirror-dir <dir>] [--no-sim] [--viewer-port <port>] [--no-viewer] [--no-shared]\n",
     );
     return;
   }
@@ -108,7 +109,7 @@ async function main() {
     }
   }
 
-  const codesys = resolveCodesys(values["codesys-path"], values["codesys-profile"]);
+  const codesys = resolveCodesys(values["codesys-path"], values["codesys-profile"], values["codesys-additional-folder"]);
   const watcherSource = join(dirname(fileURLToPath(import.meta.url)), "..", "watcher");
   const sessionRoot = values["session-dir"] ?? join(tmpdir(), "codesys-mcp-toolkit");
   await pruneSessions(sessionRoot);
@@ -116,6 +117,7 @@ async function main() {
   const bridge = new CodesysBridge({
     command: codesys.exe,
     profile: codesys.profile,
+    additionalFolder: codesys.install.additionalFolder,
     watcherSource,
     sessionRoot,
     log,
@@ -135,7 +137,7 @@ async function main() {
     const mirrorRoot = values["mirror-dir"] ?? join(process.env.LOCALAPPDATA ?? tmpdir(), "codesys-mcp-toolkit", "mirrors");
     ctx.sim = new SimController(codesysSource(bridge, () => ctx.project?.path, ctx.startWaitMs, (nodes) => ctx.cache?.setAll(nodes)), { trustRuntime: values["trust-runtime"], mirrorRoot, log });
   }
-  log(`v${VERSION}: ${codesys.install.label}, profile "${codesys.profile}", sessions in ${sessionRoot}`);
+  log(`v${VERSION}: ${codesys.install.label}, profile "${codesys.profile}"${codesys.install.additionalFolder ? `, add-ons in ${codesys.install.additionalFolder}` : ""}, sessions in ${sessionRoot}`);
 
   // The viewer shows the panel, which comes with the simulation tools.
   if (ctx.sim && !values["no-viewer"]) {

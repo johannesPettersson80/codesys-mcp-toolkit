@@ -32,6 +32,7 @@ beforeAll(async () => {
   const bridge = new CodesysBridge({
     command: cs.exe,
     profile: cs.profile,
+    additionalFolder: cs.install.additionalFolder,
     watcherSource: WATCHER,
     sessionRoot: join(dir, "sessions"),
     log: (m) => log.push(m),
@@ -122,6 +123,60 @@ describe("live CODESYS", () => {
     expect((await call("compile")).text).toMatch(/Build: 0 error\(s\)/);
   }, LONG);
 
+  it("checks POUs no task calls only with check_all, and generates code with deep", async () => {
+    const created = await call("create_object", {
+      kind: "function_block",
+      name: "FB_Unused",
+      declaration: "FUNCTION_BLOCK FB_Unused\nVAR\n    n : INT;\nEND_VAR",
+      implementation: "n := 'not a number';",
+    });
+    expect(created.isError, created.text).toBe(false);
+    const plain = await call("compile", { check_all: false });
+    log.push(`plain: ${plain.text}`);
+    expect(plain.text).not.toMatch(/FB_Unused/); // CODESYS skips POUs no task reaches
+    const all = await call("compile");
+    log.push(`check_all: ${all.text}`);
+    expect(all.text).toMatch(/ERROR \S+ FB_Unused \(Line \d+, Column \d+ \(Impl\)\)/);
+    expect(all.text).toContain("Checked every POU");
+    expect((await call("delete_object", { path: "FB_Unused" })).isError).toBe(false);
+    const deep = await call("compile", { deep: true, clean: true });
+    log.push(`deep: ${deep.text}`);
+    expect(deep.text).toMatch(/Build: 0 error\(s\)/);
+    expect(deep.text).toContain("Code generated.");
+  }, LONG);
+
+  it("creates and configures a task with program calls and a watchdog", async () => {
+    expect((await call("create_object", { kind: "program", name: "PRG_Fast", implementation: ";" })).isError).toBe(false);
+    const r = await call("configure_task", { name: "FastTask", create: true, kind: "cyclic", interval: "t#2ms", priority: 2, watchdog: { enabled: true, time: "t#10ms", sensitivity: 3 }, add_calls: ["PRG_Fast"] });
+    log.push(`configure_task: ${r.text}`);
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toMatch(/^Created task FastTask: Cyclic, interval t#2ms, priority 2, watchdog/);
+    expect(r.text).toContain("calls PRG_Fast");
+    const fb = await call("configure_task", { name: "FastTask", add_calls: ["FB_PI"] });
+    expect(fb.text).toContain("FB_PI is not a PROGRAM");
+    const tasks = (await call("list_tasks")).text;
+    log.push(`list_tasks: ${tasks}`);
+    expect(tasks).toMatch(/FastTask: Cyclic, interval t#2ms, priority 2.*calls PRG_Fast/);
+    expect((await call("compile")).text).toMatch(/Build: 0 error\(s\)/);
+    // SP21's scripting can't remove a call; the toolkit says so instead of failing silently.
+    const removed = await call("configure_task", { name: "FastTask", remove_calls: ["PRG_Fast"] });
+    log.push(`remove_calls: ${removed.text}`);
+    if (removed.isError) expect(removed.text).toContain("can't remove a program call from a task");
+    else expect(removed.text).toMatch(/calls nothing/);
+  }, LONG);
+
+  it("lists the device tree and reports the compiler version", async () => {
+    const d = await call("get_devices");
+    log.push(`get_devices: ${d.text}`);
+    expect(d.isError, d.text).toBe(false);
+    expect(d.text).toMatch(/\(type \d+, id [^,]+, version [\d.]+\)/);
+    const s = (await call("codesys_status")).text;
+    log.push(`status: ${s}`);
+    // Scripting 4.2+ reports the project's compiler version
+    if (/ScriptEngine|Compiler version/.test(s)) expect(s).toMatch(/Compiler version \d+\.\d+\.\d+\.\d+/);
+    expect((await call("get_project_tree")).isError).toBe(false);
+  }, LONG);
+
   it("searches, lists libraries and tasks", async () => {
     expect((await call("search_code", { pattern: "itf.Reset" })).text).toContain("PLC_PRG [impl]");
     expect((await call("list_libraries")).isError).toBe(false);
@@ -176,5 +231,29 @@ describe("live CODESYS", () => {
   it("saves and reports status", async () => {
     expect((await call("save_project")).isError).toBe(false);
     expect((await call("codesys_status")).text).toMatch(/Bridge: ready \/ healthy/);
+  }, LONG);
+
+  it("adds and removes a library", async () => {
+    const add = await call("add_library", { name: "Util, * (System)" });
+    log.push(`add_library: ${add.text}`);
+    if (add.isError) return; // Util isn't installed in every CODESYS
+    const rm = await call("remove_library", { name: "Util" });
+    log.push(`remove_library: ${rm.text}`);
+    expect(rm.isError, rm.text).toBe(false);
+    expect((await call("list_libraries")).text).not.toMatch(/^Util,/m);
+  }, LONG);
+
+  it("writes a project archive and opens it again", async () => {
+    const archive = join(dir, "Snapshot.projectarchive");
+    const saved = await call("save_project", { archive });
+    log.push(`save archive: ${saved.text}`);
+    expect(saved.text).toContain(`Archive written: ${archive}.`);
+    const opened = await call("open_project", { path: archive, extractTo: join(dir, "FromArchive.project") });
+    log.push(`open archive: ${opened.text}`);
+    expect(opened.isError, opened.text).toBe(false);
+    expect(opened.text).toContain("(extracted from");
+    expect((await call("read_objects", { paths: ["PLC_PRG"] })).text).toContain("fbPI(rPV := 0.5, rSP := 1.0);");
+    const again = await call("open_project", { path: archive, extractTo: join(dir, "FromArchive.project") });
+    expect(again.text).toContain("already exists");
   }, LONG);
 });

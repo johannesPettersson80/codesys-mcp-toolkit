@@ -48,6 +48,7 @@ profile.
 | --- | --- |
 | `--codesys-path <exe>` | `CODESYS.exe` to run |
 | `--codesys-profile <name>` | Profile, e.g. `"CODESYS V3.5 SP21"` (file name in `CODESYS\Profiles`, without `.profile.xml`) |
+| `--codesys-additional-folder <dir>` | CODESYS's add-on folder, passed as `--additionalfolder`. SP22 installs add-ons such as Scripting there; the toolkit finds `CODESYS\AdditionalFolders\Default` by itself |
 | `--workspace <dir>` | Base folder for relative project paths (default: the working directory) |
 | `--project <file>` | Open this project as soon as CODESYS is up |
 | `--session-dir <dir>` | Where session folders go (default: `%TEMP%\codesys-mcp-toolkit`) |
@@ -78,20 +79,22 @@ progress without waiting.
 | Tool | What it does |
 | --- | --- |
 | `codesys_status` | Connection state, CODESYS version, last project. Never waits on CODESYS. |
-| `open_project` | Open a `.project`. Opened without version upgrades. Refuses to drop unsaved changes unless `discardChanges`. |
+| `open_project` | Open a `.project`, or a `.projectarchive` (extracted next to it, never over an existing project). Opened without version upgrades. Reports the compiler version and defines. Refuses to drop unsaved changes unless `discardChanges`. |
 | `create_project` | New project from CODESYS's `Standard.project` (default), `empty`, or your own template file. |
-| `save_project` / `close_project` | Save, or close the project. |
-| `get_project_tree` | Objects with their kinds. Graphical objects (SFC, CFC, LD, FBD) are marked `[non-ST]`. |
-| `read_objects` | Declaration and implementation of up to 50 objects. |
+| `save_project` / `close_project` | Save (optionally also as a `.projectarchive` snapshot), or close the project. |
+| `get_project_tree` | Objects with their kinds. Graphical objects (SFC, CFC, LD, FBD) are marked `[non-ST]`, objects excluded from the build `[excluded from build]`. |
+| `read_objects` | Declaration and implementation of up to 50 objects. Graphical bodies come as PLCopenXML (read-only). |
 | `write_object` | Replace a declaration and/or implementation. The header must match the object (see below). |
 | `create_object` | `program`, `function_block`, `function`, `method`, `property`, `action`, `interface`, `dut`, `gvl`, `folder`, optionally with code. |
 | `delete_object` / `rename_object` | Delete or rename an object. |
 | `search_code` | Text or regex search over all ST. |
-| `compile` | Build the application and return errors and warnings with object, line and code. |
-| `list_libraries` / `add_library` | Library references. Use the full name, e.g. `Util, * (System)`. |
-| `list_tasks` | Tasks with interval, priority and the POUs they call. |
+| `compile` | Build the application and return errors and warnings with object, line and code. Also checks POUs no task calls (default); `deep` generates code too, `clean` builds from scratch. |
+| `list_libraries` / `add_library` / `remove_library` | Library references. Use the full name, e.g. `Util, * (System)`. |
+| `list_tasks` | Tasks with kind, interval, priority, event, watchdog and the programs they call. |
+| `configure_task` | Create or change a task (kind, interval, priority, event, core, watchdog) and add the programs it calls. |
 | `get_outline` | The project at a glance without reading every object: tasks and what they run, each POU's interface (inputs, outputs, methods, properties), interfaces, enums, structs, GVLs, tests. Pass `path` for one object in full or one folder. |
-| `get_io_list` | Variables mapped to I/O (`AT %I…`, `%Q…`, `%M…` and the `%I*` / `%Q*` placeholders), with type, owner and comment. |
+| `get_io_list` | Variables mapped to I/O (`AT %I…`, `%Q…`, `%M…` and the `%I*` / `%Q*` placeholders), with type, owner and comment, and the channels mapped to variables in the device tree. |
+| `get_devices` | The device tree: identification, enabled state, and each device's I/O channels with the variable mapped to each (from CODESYS's I/O mapping export). |
 | `get_library_api` | The real interface of a referenced library's FBs, functions and types, read from the installed source library (`.library`). Compiled libraries carry no readable declarations. |
 | `checkpoint` / `get_changes` / `revert_object` | Snapshots of the project's ST (one is taken automatically when a project is opened: `session-start`), what changed since one (with a line diff per object), and putting an object back, including its methods and properties. |
 
@@ -123,10 +126,22 @@ object's kind or name. For example, replacing a program's declaration without
 its `PROGRAM X` line ([#5](https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues/5)).
 A GVL must start with `VAR_GLOBAL`; a property accessor holds only `VAR` blocks.
 
-### Compile caveat
+### What compile checks
 
-CODESYS only compiles POUs that a task reaches. A POU nothing calls is not
-checked, even if it contains errors.
+A CODESYS build only compiles POUs that a task reaches. So `compile` marks
+every other POU, GVL and DUT "link always" for that one build, then puts the
+flags back. New code that nothing calls yet is checked too. If the project had
+no unsaved changes before, it is saved again afterwards with the same content,
+so nothing is left behind. Unit tests (`{attribute 'test'}` programs) are
+left out: they use truST's assertions. Pass `check_all: false` for CODESYS's
+plain build.
+
+### Task calls
+
+`configure_task` can add a program call to a task. CODESYS V3.5 SP21's
+scripting can't remove one: `remove()` leaves the call in place. The tool
+says so, and you remove it in CODESYS (Task Configuration > the task > select
+the call > Remove Call).
 
 ## Simulation (truST)
 

@@ -9,6 +9,7 @@ import * as z from "zod/v4";
 import { BridgeError, type CodesysBridge } from "./bridge/bridge.js";
 import type { SimController } from "./sim/controller.js";
 import { buildOutline, ioList, type OutlineTask } from "./codesys/outline.js";
+import { describeDevices, parseIoMappingCsv, shortVariable, type DeviceInfo } from "./codesys/devices.js";
 import { diffObjects, formatDiff, lineDiff, snapshot, type ChangeStore, type SnapObject } from "./codesys/changes.js";
 import { parseDeclaration } from "./codesys/decl.js";
 import type { ProjectCache } from "./codesys/cache.js";
@@ -28,7 +29,7 @@ export interface AppContext {
   /** How long a tool call waits for CODESYS to finish starting. */
   startWaitMs: number;
   /** Last project opened through these tools (status never queries CODESYS). */
-  project?: { path: string; application?: string };
+  project?: ProjectInfo;
   /** The truST simulation (absent when disabled). */
   sim?: SimController;
   /** Checkpoints and change tracking (absent when disabled). */
@@ -90,6 +91,73 @@ const CREATE_TO_NODE: Record<CreateKind, { kind: TreeNode["kind"]; sub?: string 
   folder: { kind: "folder" },
 };
 
+/** What project.open / project.info report about the open project. */
+export interface ProjectInfo {
+  path: string;
+  application?: string;
+  reused?: boolean;
+  /** The application's compiler defines. */
+  defines?: string[];
+  /** Project-level defines (Scripting 4.2+). */
+  project_defines?: string[];
+  /** The project's compiler version (Scripting 4.2+). */
+  compiler_version?: string;
+}
+
+/** " Compiler 3.5.21.0. Defines: FAST, MODE." plus a note when CODESYS is newer than the project. */
+export function describeBuildSettings(r: ProjectInfo, codesysLabel?: string): string {
+  const out: string[] = [];
+  if (r.compiler_version) {
+    const installed = /(\d+\.\d+\.\d+)\.\d+/.exec(codesysLabel ?? "")?.[1];
+    const older = installed && !r.compiler_version.startsWith(installed);
+    out.push(`Compiler version ${r.compiler_version}${older ? ` (this CODESYS is ${codesysLabel?.replace(/^CODESYS\s*/i, "")}; the project keeps its version unless you update it in CODESYS)` : ""}.`);
+  }
+  if (r.defines?.length) out.push(`Compiler defines: ${r.defines.join(", ")}.`);
+  if (r.project_defines?.length) out.push(`Project defines: ${r.project_defines.join(", ")}.`);
+  return out.length ? ` ${out.join(" ")}` : "";
+}
+
+/**
+ * The useful part of CODESYS's PLCopenXML export of one object: its <pou> (or <dataType>)
+ * element, without the vendor <addData> blocks (GUID-coded attributes, layout data).
+ */
+export function compactPlcOpen(xml: string): string {
+  const start = xml.search(/<(pou|dataType)\s/);
+  let body = xml;
+  if (start >= 0) {
+    const tag = /<(pou|dataType)\s/.exec(xml.slice(start))![1]!;
+    const end = xml.indexOf(`</${tag}>`, start);
+    body = end > start ? xml.slice(start, end + tag.length + 3) : xml.slice(start);
+  }
+  return body
+    .replace(/<addData>[\s\S]*?<\/addData>\s*/g, "")
+    .replace(/^\s*\n/gm, "")
+    .trim();
+}
+
+interface TaskInfo {
+  name: string;
+  path: string;
+  interval?: string;
+  interval_unit?: string;
+  priority?: string;
+  kind?: string;
+  event?: string | null;
+  core_binding?: number | null;
+  watchdog?: { enabled: boolean; time?: string; time_unit?: string; sensitivity?: string } | null;
+  pous: string[];
+}
+
+/** One line per task, as list_tasks and configure_task show it. */
+export function describeTask(t: TaskInfo): string {
+  const interval = t.interval ? `, interval ${t.interval}${t.interval_unit && !/[a-z]/i.test(t.interval) ? " " + t.interval_unit : ""}` : "";
+  const wd = t.watchdog?.enabled ? `, watchdog ${t.watchdog.time ?? "?"}${t.watchdog.time && /[a-z]/i.test(t.watchdog.time) ? "" : ` ${t.watchdog.time_unit ?? ""}`.trimEnd()} ×${t.watchdog.sensitivity ?? "1"}` : "";
+  return (
+    `${t.name}: ${t.kind ?? "?"}${interval}${t.priority ? `, priority ${t.priority}` : ""}${t.event ? `, event ${t.event}` : ""}` +
+    `${typeof t.core_binding === "number" && t.core_binding >= 0 ? `, core ${t.core_binding}` : ""}${wd}; calls ${t.pous.join(", ") || "nothing"}`
+  );
+}
+
 interface BuildMessage {
   category: string;
   severity: string;
@@ -119,7 +187,7 @@ export function formatBuild(messages: BuildMessage[]): { text: string; errors: n
 export function registerTools(server: McpServer, ctx: AppContext): void {
   const b = ctx.bridge;
   /** Tools that change the project are held while the user has paused Claude (panel). */
-  const HELD = new Set(["write_object", "create_object", "delete_object", "rename_object", "revert_object", "add_library", "create_project", "open_project", "close_project"]);
+  const HELD = new Set(["write_object", "create_object", "delete_object", "rename_object", "revert_object", "add_library", "remove_library", "configure_task", "create_project", "open_project", "close_project"]);
   const reg = ((name: string, config: unknown, cb: (...a: unknown[]) => unknown) =>
     server.registerTool(
       name,
@@ -193,7 +261,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       ];
       if (h.heartbeat) lines.push(`Watcher: ${h.heartbeat.state}${h.heartbeat.op ? ` (${h.heartbeat.op})` : ""}, heartbeat ${Math.round(h.heartbeat.ageMs / 1000)}s ago`);
       if (h.lastError) lines.push(`Last error: ${h.lastError}`);
-      lines.push(ctx.project ? `Project (last opened): ${ctx.project.path}, application ${ctx.project.application ?? "none"}` : "Project: none opened in this session");
+      lines.push(ctx.project ? `Project (last opened): ${ctx.project.path}, application ${ctx.project.application ?? "none"}.${describeBuildSettings(ctx.project, ctx.codesys?.label)}` : "Project: none opened in this session");
       if (h.sessionDir) lines.push(`Session folder: ${h.sessionDir}`);
       return text(lines.join("\n"));
     },
@@ -202,22 +270,25 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   reg(
     "open_project",
     {
-      description: "Open a CODESYS .project file. All other tools work on the open project. Refuses to drop unsaved changes in a different open project unless discardChanges is true. Projects are opened without version upgrades.",
+      description:
+        "Open a CODESYS .project file, or a .projectarchive (extracted next to the archive, or to extractTo; an existing project is never overwritten). All other tools work on the open project. Refuses to drop unsaved changes in a different open project unless discardChanges is true. Projects are opened without version upgrades.",
       inputSchema: z.object({
-        path: z.string().describe("Path to the .project file (absolute, or relative to the workspace)"),
+        path: z.string().describe("Path to the .project or .projectarchive file (absolute, or relative to the workspace)"),
         discardChanges: z.boolean().optional(),
+        extractTo: z.string().optional().describe("For an archive: the .project file to extract to (default: next to the archive)"),
       }),
     },
-    async ({ path, discardChanges }) =>
+    async ({ path, discardChanges, extractTo }) =>
       run(ctx, async () => {
-        const r = await b.call<{ path: string; application?: string; reused?: boolean }>(
+        const r = await b.call<ProjectInfo & { extracted_from?: string }>(
           "project.open",
-          { path: absPath(ctx, path), discard_changes: !!discardChanges },
+          { path: absPath(ctx, path), discard_changes: !!discardChanges, ...(extractTo ? { extract_to: absPath(ctx, extractTo) } : {}) },
           { timeoutMs: 300_000 },
         );
-        ctx.project = { path: r.path, application: r.application };
+        ctx.project = r;
         const cp = await sessionStart(r.path);
-        return `${r.reused ? "Already open" : "Opened"}: ${r.path}. Active application: ${r.application ?? "none"}.${cp}`;
+        const from = r.extracted_from ? ` (extracted from ${r.extracted_from})` : "";
+        return `${r.reused ? "Already open" : "Opened"}: ${r.path}${from}. Active application: ${r.application ?? "none"}.${describeBuildSettings(r, ctx.codesys?.label)}${cp}`;
       }),
   );
 
@@ -244,17 +315,24 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         const src = t === "standard" ? (ctx.templatesDir ? join(ctx.templatesDir, "Standard.project") : "") : absPath(ctx, t);
         if (!src || !existsSync(src)) throw new Error(`Template not found: ${src || "CODESYS Templates folder unknown"}`);
         await copyFile(src, target);
-        const r = await b.call<{ path: string; application?: string }>("project.open", { path: target }, { timeoutMs: 300_000 });
-        ctx.project = { path: r.path, application: r.application };
+        const r = await b.call<ProjectInfo>("project.open", { path: target }, { timeoutMs: 300_000 });
+        ctx.project = r;
         await sessionStart(r.path);
-        return `Created ${r.path} from ${t === "standard" ? "Standard.project" : src}. Active application: ${r.application ?? "none"}. Run compile to check that its libraries are installed.`;
+        return `Created ${r.path} from ${t === "standard" ? "Standard.project" : src}. Active application: ${r.application ?? "none"}.${describeBuildSettings(r, ctx.codesys?.label)} Run compile to check that its libraries are installed.`;
       }),
   );
 
   reg(
     "save_project",
-    { description: "Save the open project.", inputSchema: z.object({}) },
-    async () => run(ctx, async () => `Saved ${(await b.call<{ path: string }>("project.save")).path}.`),
+    {
+      description: "Save the open project. Pass archive to also write a .projectarchive (e.g. a snapshot before a big change); an existing file is never overwritten.",
+      inputSchema: z.object({ archive: z.string().optional().describe("Path of a .projectarchive to write as well") }),
+    },
+    async ({ archive }) =>
+      run(ctx, async () => {
+        const r = await b.call<{ path: string; archive?: string }>("project.save", archive ? { archive: absPath(ctx, archive) } : {}, { timeoutMs: 300_000 });
+        return `Saved ${r.path}.${r.archive ? ` Archive written: ${r.archive}.` : ""}`;
+      }),
   );
 
   reg(
@@ -287,7 +365,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       run(ctx, async () => {
         const r = await b.call<{ nodes: TreeNode[]; application?: string }>("tree", { root, whole_project: !!wholeProject, max_depth: maxDepth ?? null });
         const head = root ? `Tree under ${root}:` : wholeProject ? "Project tree:" : `Application ${r.application ?? "?"} (paths are relative to it):`;
-        const lines = r.nodes.map((n) => `${"  ".repeat(n.depth)}${n.name}  [${kindLabel(n)}]${n.st === false ? " [non-ST]" : ""}`);
+        const lines = r.nodes.map((n) => `${"  ".repeat(n.depth)}${n.name}  [${kindLabel(n)}]${n.st === false ? " [non-ST]" : ""}${n.build?.excluded ? " [excluded from build]" : ""}`);
         return [head, ...(lines.length ? lines : ["(empty)"])].join("\n");
       }),
   );
@@ -295,7 +373,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   reg(
     "read_objects",
     {
-      description: "Read the declaration and implementation text of ST objects: POUs, methods, property accessors (path 'FB/Prop/Get'), actions, interfaces, DUTs and GVLs.",
+      description:
+        "Read the declaration and implementation text of ST objects: POUs, methods, property accessors (path 'FB/Prop/Get'), actions, interfaces, DUTs and GVLs. Objects with a graphical body (SFC, CFC, LD, FBD) come with their PLCopenXML, to read (they stay read-only).",
       inputSchema: z.object({ paths: z.array(pathArg).min(1).max(50) }),
       annotations: { readOnlyHint: true },
     },
@@ -307,7 +386,13 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
           const last = r.objects.filter((o) => !o.error).at(-1);
           if (last) cache.touch(last.path, "read");
         }
-        return r.objects.map(formatObject).join("\n\n");
+        const graphical = r.objects.filter((o) => !o.error && o.st === false).map((o) => o.path);
+        const xml = new Map<string, string>();
+        if (graphical.length) {
+          const x = await b.call<{ objects: { path: string; xml?: string; truncated?: boolean; error?: string }[] }>("objects.xml", { paths: graphical }, { timeoutMs: 180_000 }).catch(() => ({ objects: [] }));
+          for (const o of x.objects) if (o.xml) xml.set(o.path, `${compactPlcOpen(o.xml)}${o.truncated ? "\n(truncated)" : ""}`);
+        }
+        return r.objects.map((o) => formatObject(o) + (xml.has(o.path) ? `\n--- graphical body as PLCopenXML (read-only) ---\n${xml.get(o.path)}` : "")).join("\n\n");
       }),
   );
 
@@ -441,12 +526,20 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   reg(
     "compile",
     {
-      description: "Build the active application and return errors and warnings with object and line. CODESYS only compiles POUs reachable from a task.",
-      inputSchema: z.object({}),
+      description: [
+        "Build the active application and return errors and warnings with object and line.",
+        "A plain build only compiles POUs a task reaches; check_all (default true) also checks every other POU, so new code that nothing calls yet is checked too.",
+        "deep: also generate code, which finds errors the build alone doesn't (slower). clean: build from scratch.",
+      ].join(" "),
+      inputSchema: z.object({
+        check_all: z.boolean().optional().describe("Also check POUs no task calls (default true)"),
+        deep: z.boolean().optional().describe("Also generate code (default false)"),
+        clean: z.boolean().optional().describe("Clean first, for a build from scratch (default false)"),
+      }),
     },
-    async () =>
+    async ({ check_all, deep, clean }) =>
       run(ctx, async () => {
-        const r = await b.call<{ messages: BuildMessage[] }>("build", {}, { timeoutMs: 600_000 });
+        const r = await b.call<{ messages: BuildMessage[]; steps?: string[] }>("build", { check_all: check_all ?? true, deep: !!deep, clean: !!clean }, { timeoutMs: 900_000 });
         const f = formatBuild(r.messages);
         if (cache) {
           const counted = r.messages.filter((m) => /error|warning/i.test(m.severity));
@@ -457,7 +550,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
             messages: counted.map((m) => ({ severity: /error/i.test(m.severity) ? "error" : "warning", text: m.text, object: m.object, position: m.position, ...(m.prefix ? { code: `${m.prefix}${m.number ?? ""}` } : {}) })),
           });
         }
-        return f.text;
+        const checked = r.steps?.includes("check_all") ? " Checked every POU, including those no task calls." : "";
+        return `${f.text}${checked}${r.steps?.includes("generate_code") ? " Code generated." : ""}`;
       }),
   );
 
@@ -471,6 +565,19 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         return r.libraries
           .map((l) => `${l.name}${l.is_placeholder ? " (placeholder)" : ""}${l.namespace ? `, namespace ${l.namespace}` : ""}${l.effective_resolution ? ` -> ${l.effective_resolution}` : ""}`)
           .join("\n");
+      }),
+  );
+
+  reg(
+    "remove_library",
+    {
+      description: "Remove a library reference from the application's Library Manager, by its full name as list_libraries shows it, or by its name alone (e.g. 'Util').",
+      inputSchema: z.object({ name: z.string().min(1) }),
+    },
+    async ({ name }) =>
+      run(ctx, async () => {
+        const r = await b.call<{ removed: string; saved?: boolean }>("libraries.remove", { name, ...save() });
+        return `Removed library ${r.removed}.${savedNote(r)}`;
       }),
   );
 
@@ -492,11 +599,52 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     { description: "List the application's tasks with interval, priority and the POUs each one calls.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
     async () =>
       run(ctx, async () => {
-        const r = await b.call<{ tasks: { name: string; interval?: string; interval_unit?: string; priority?: string; kind?: string; pous: string[] }[] }>("tasks.list");
-        if (!r.tasks.length) return "No tasks found.";
-        return r.tasks
-          .map((t) => `${t.name}: ${t.kind ?? "?"}${t.interval ? `, interval ${t.interval}${t.interval_unit && !/[a-z]/i.test(t.interval) ? " " + t.interval_unit : ""}` : ""}${t.priority ? `, priority ${t.priority}` : ""}; calls ${t.pous.join(", ") || "nothing"}`)
-          .join("\n");
+        const r = await b.call<{ tasks: TaskInfo[] }>("tasks.list");
+        if (!r.tasks.length) return "No tasks found. Create one with configure_task.";
+        return r.tasks.map(describeTask).join("\n");
+      }),
+  );
+
+  reg(
+    "configure_task",
+    {
+      description: [
+        "Create or change a task in the application's task configuration, and which programs it calls.",
+        "A PROGRAM that no task calls never runs, and a plain compile doesn't check it: add it to a task with add_calls.",
+        "Settings: kind (cyclic, freewheeling, event, external_event, status), interval with its unit (e.g. 't#10ms'), priority (0 = highest),",
+        "event (the BOOL variable that triggers an event task), core_binding, and the watchdog (enabled, time, time_unit, sensitivity).",
+        "Only names a program; FBs and functions run from inside programs.",
+      ].join(" "),
+      inputSchema: z.object({
+        name: z.string().min(1).describe("Task name, e.g. 'MainTask'"),
+        create: z.boolean().optional().describe("Create the task (and the task configuration) if it doesn't exist"),
+        kind: z.enum(["cyclic", "freewheeling", "event", "external_event", "status"]).optional(),
+        interval: z.string().optional().describe("Cycle time for a cyclic task, e.g. 't#10ms'"),
+        interval_unit: z.string().optional().describe("Unit for the interval field, e.g. 'ms' or 'us'"),
+        priority: z.union([z.string(), z.number()]).optional().describe("0 (highest) to 31"),
+        event: z.string().optional().describe("Event task: the BOOL variable whose rising edge starts it"),
+        core_binding: z.number().int().min(0).optional(),
+        watchdog: z
+          .object({ enabled: z.boolean().optional(), time: z.string().optional(), time_unit: z.string().optional(), sensitivity: z.union([z.string(), z.number()]).optional() })
+          .optional(),
+        add_calls: z.array(z.string().min(1)).optional().describe("Programs the task should call (appended in this order)"),
+        remove_calls: z
+          .array(z.string().min(1))
+          .optional()
+          .describe("Programs the task should no longer call. CODESYS V3.5 SP21's scripting can't remove a call: the tool then says so, and the user removes it in CODESYS"),
+      }),
+    },
+    async (a) =>
+      run(ctx, async () => {
+        const r = await b.call<TaskInfo & { created: boolean; saved?: boolean }>("task.configure", {
+          ...a,
+          ...(a.priority !== undefined ? { priority: String(a.priority) } : {}),
+          ...(a.watchdog?.sensitivity !== undefined ? { watchdog: { ...a.watchdog, sensitivity: String(a.watchdog.sensitivity) } } : {}),
+          ...save(),
+        });
+        if (r.created) await exportNodes().catch(() => undefined); // the tree has a new task
+        cache?.touch(r.path, r.created ? "create" : "write");
+        return `${r.created ? "Created" : "Updated"} task ${describeTask(r)}${savedNote(r)}`;
       }),
   );
 
@@ -533,18 +681,41 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
           const f = filter.toLowerCase();
           io = io.filter((x) => `${x.owner}.${x.name} ${x.at} ${x.comment ?? ""}`.toLowerCase().includes(f));
         }
-        if (!io.length) return filter ? `No I/O variables match '${filter}'.` : "No variables with AT addresses in the project.";
         const group = (d: string, label: string) => {
           const xs = io.filter((x) => x.direction === d);
           return xs.length ? [`${label} (${xs.length}):`, ...xs.map((x) => `  ${x.at.padEnd(9)} ${x.owner}.${x.name} : ${x.type}${x.comment ? ` // ${x.comment}` : ""}`)] : [];
         };
+        // Channels mapped to variables in the device tree (not in the ST).
+        const devices = (await b.call<{ devices: DeviceInfo[] }>("devices.list", { io: true }, { timeoutMs: 180_000 }).catch(() => ({ devices: [] }))).devices;
+        let mapped = devices.flatMap((d) => (d.io_csv ? parseIoMappingCsv(d.io_csv) : [])).filter((c) => c.variable);
+        if (filter) {
+          const f = filter.toLowerCase();
+          mapped = mapped.filter((c) => `${c.variable} ${c.address} ${c.description} ${c.device}`.toLowerCase().includes(f));
+        }
+        if (!io.length && !mapped.length) return filter ? `No I/O variables match '${filter}'.` : "No variables with AT addresses and no device-tree mappings in the project.";
         const placeholders = io.filter((x) => x.placeholder).length;
         return [
           ...group("input", "Inputs"),
           ...group("output", "Outputs"),
           ...group("memory", "Memory"),
-          ...(placeholders ? [`${placeholders} placeholder(s) (%I* / %Q*): their addresses come from the device tree's I/O mapping, which isn't read yet.`] : []),
+          ...(mapped.length ? [`Mapped in the device tree (${mapped.length}):`, ...mapped.map((c) => `  ${(c.address || "-").padEnd(9)} ${shortVariable(c.variable)}  <- ${c.device} ${c.parameter}${c.description ? ` ${c.description}` : ""}`)] : []),
+          ...(placeholders && !mapped.length ? [`${placeholders} placeholder(s) (%I* / %Q*): no device maps them yet.`] : []),
         ].join("\n");
+      }),
+  );
+
+  reg(
+    "get_devices",
+    {
+      description:
+        "The device tree: each device with its identification (type, id, version) and whether it is enabled, and its I/O channels with address, description and the variable mapped to each (from CODESYS's I/O mapping export). Read-only; never goes online.",
+      inputSchema: z.object({ io: z.boolean().optional().describe("Include I/O channels (default true)") }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ io }) =>
+      run(ctx, async () => {
+        const r = await b.call<{ devices: DeviceInfo[] }>("devices.list", { io: io ?? true }, { timeoutMs: 180_000 });
+        return describeDevices(r.devices);
       }),
   );
 

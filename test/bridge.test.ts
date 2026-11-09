@@ -1,7 +1,7 @@
 import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { BridgeError, type CodesysBridge } from "../src/bridge/bridge.js";
+import { BridgeError, startupHint, type CodesysBridge } from "../src/bridge/bridge.js";
 import { fakeBridge, fakeProjectFile } from "./helpers.js";
 
 let bridge: CodesysBridge | undefined;
@@ -103,5 +103,13 @@ describe("CodesysBridge with the real watcher (fake scriptengine)", () => {
     await bridge.stop();
     expect(bridge.health().state).toBe("stopped");
     expect(bridge.health().heartbeat?.state).toBe("stopped");
+  });
+});
+
+describe("start-up hints", () => {
+  it("explain a CODESYS install without the scripting add-on", () => {
+    expect(startupHint("The command line option 'runscript' has been set. However, there is no script engine implementation available.")).toMatch(/add the "CODESYS Scripting" add-on/);
+    expect(startupHint("When running in --noUI mode, you must specify a profile using --profile=\"profile name\".")).toMatch(/--codesys-profile/);
+    expect(startupHint("")).toBe("");
   });
 });

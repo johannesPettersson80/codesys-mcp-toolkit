@@ -57,6 +57,14 @@ class DutType(object):
     Union = "Union"
 
 
+class KindOfTask(object):
+    Cyclic = "Cyclic"
+    Freewheeling = "Freewheeling"
+    Event = "Event"
+    ExternalEvent = "ExternalEvent"
+    Status = "Status"
+
+
 class PromptHandling(object):
     LogSimplePrompts = _Enum("LogSimplePrompts", 2)
 
@@ -182,6 +190,48 @@ class FakeObject(object):
         _mark_dirty()
         return FakeObject(name, G_FOLDER, self, folder=True)
 
+    # PLCopenXML (graphical bodies get an SFC; the shape follows CODESYS V3.5 SP21's export)
+    def export_xml(self, reporter, path, recursive):
+        body = ('<SFC>\n<step localId="0" initialStep="true" name="Init">\n<addData><data name="x"><attributes /></data></addData>\n</step>\n</SFC>'
+                if self._graphical else '<ST><xhtml xmlns="http://www.w3.org/1999/xhtml">%s</xhtml></ST>' % (self._impl.text if self._impl else ""))
+        with open(path, "w", encoding="utf-8-sig") as f:
+            f.write('<?xml version="1.0" encoding="utf-8"?>\n<project xmlns="http://www.plcopen.org/xml/tc6_0200">\n'
+                    '<types><pous>\n<pou name="%s" pouType="program">\n<interface><addData><data name="a" /></addData></interface>\n'
+                    '<body>\n%s\n</body>\n</pou>\n</pous></types>\n</project>\n' % (self._name, body))
+
+    # device
+    def get_device_identification(self):
+        class _Id(object):
+            type, id, version = 4096, "0000 0001", "3.5.21.0"
+        return _Id()
+
+    def is_enabled(self):
+        return True
+
+    def export_io_mappings_as_csv(self, path):
+        with open(path, "w") as f:
+            f.write("//CoDeSys Mapping Export V1.2\n"
+                    "//Mapped variable,//Parameter name @ counter in device,//Unit,//Description,//IEC address,//Device name\n"
+                    "Application.GVL_IO.rLevel,Input@1,m,Level,%ID0,Device\n"
+                    ",Input@2,,Spare,%ID4,Device\n")
+
+    # application
+    def clean(self):
+        system._messages = [_Msg("Text", "Clean: done")]
+
+    def generate_code(self):
+        system._messages.append(_Msg("Text", "Generate code: done"))
+
+    def create_task_configuration(self):
+        _mark_dirty()
+        return FakeObject("Task Configuration", G_TASKCFG, self)
+
+    # task configuration
+    def create_task(self, name):
+        self._check(name)
+        _mark_dirty()
+        return FakeTask(name, self, [])
+
     # application
     def build(self):
         system._messages = []
@@ -207,6 +257,10 @@ class FakeLibMan(FakeObject):
     def get_libraries(self, recursive=False):
         return list(self._libs)
 
+    def remove_library(self, name):
+        self._libs = [n for n in self._libs if n != name]
+        _mark_dirty()
+
     def add_library(self, name):
         if "," not in name:
             raise Exception("Library '%s' not found in repository" % name)
@@ -221,6 +275,49 @@ class _LibRef(object):
         self.is_managed = True
 
 
+class _PouCall(object):
+    def __init__(self, name):
+        self.pou_name = name
+
+
+class _PouCalls(object):
+    """A task's program calls (IScriptPouObjectCollection)."""
+    def __init__(self, names):
+        self._calls = [_PouCall(n) for n in names]
+
+    def __iter__(self):
+        return iter(list(self._calls))
+
+    def __len__(self):
+        return len(self._calls)
+
+    def add(self, name, comment=""):
+        self._calls.append(_PouCall(name))
+        _mark_dirty()
+
+    def insert(self, index, name, comment=""):
+        self._calls.insert(index, _PouCall(name))
+        _mark_dirty()
+
+    def remove(self, key):
+        if isinstance(key, int):
+            del self._calls[key]
+        else:
+            self._calls = [c for c in self._calls if c.pou_name.lower() != key.lower()]
+        _mark_dirty()
+
+    def names(self):
+        return [c.pou_name for c in self._calls]
+
+
+class _Watchdog(object):
+    def __init__(self):
+        self.enabled = False
+        self.time = ""
+        self.time_unit = "ms"
+        self.sensitivity = "1"
+
+
 class FakeTask(FakeObject):
     def __init__(self, name, parent, pous):
         FakeObject.__init__(self, name, G_TASK, parent)
@@ -228,7 +325,10 @@ class FakeTask(FakeObject):
         self.interval_unit = "ms"
         self.priority = "1"
         self.kind_of_task = "Cyclic"
-        self.pous = list(pous)
+        self.event = ""
+        self.core_binding = -2  # CODESYS: not bound to a core
+        self.watchdog = _Watchdog()
+        self.pous = _PouCalls(pous)
 
 
 class _Msg(object):
@@ -257,6 +357,10 @@ class FakeProject(object):
 
     def close(self):
         projects.primary = None
+
+    def save_archive(self, path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(_dump(self), f, ensure_ascii=False)
 
 
 def _mark_dirty():
@@ -292,7 +396,7 @@ def _dump(proj):
         if isinstance(o, FakeLibMan):
             d["libs"] = o._libs
         if isinstance(o, FakeTask):
-            d["pous"] = o.pous
+            d["pous"] = o.pous.names()
         return d
     return {"fake": True, "roots": [rec(r) for r in proj._roots]}
 
@@ -335,6 +439,12 @@ class _Projects(object):
         proj = FakeProject(path)
         self.primary = proj
         return proj
+
+    def open_archive(self, archivefile, projectpath, overwrite, password, user=None, user_password=None, update_flags=None):
+        # the fake's archive is a copy of the project file
+        with open(archivefile, "r", encoding="utf-8") as src, open(projectpath, "w", encoding="utf-8") as dst:
+            dst.write(src.read())
+        return self.open(projectpath)
 
 
 class _System(object):

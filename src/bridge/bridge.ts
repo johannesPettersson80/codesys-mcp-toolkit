@@ -23,6 +23,8 @@ export interface BridgeOptions {
   /** Full argument list; when omitted, CODESYS arguments are built from profile/noUI. */
   args?: (scriptPath: string) => string[];
   profile?: string;
+  /** CODESYS's additional folder (SP22 keeps its add-ons there, e.g. Scripting). */
+  additionalFolder?: string;
   /** Run CODESYS without UI (default true). */
   noUI?: boolean;
   /** Folder that holds watcher.py and its modules (copied into the session). */
@@ -86,6 +88,14 @@ interface WatcherResult {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** What to do about a start-up failure CODESYS explains in its output. */
+export function startupHint(output: string): string {
+  if (/no script engine implementation/i.test(output))
+    return "This CODESYS installation has no scripting engine: add the \"CODESYS Scripting\" add-on to it with the CODESYS Installer. SP22 and later keep add-ons in an additional folder (CODESYS\\AdditionalFolders\\Default), which the toolkit passes as --additionalfolder: check it, or pass --codesys-additional-folder.\n";
+  if (/must specify a profile/i.test(output)) return "CODESYS didn't accept the profile: check --codesys-profile (a file name in CODESYS\\Profiles, without .profile.xml).\n";
+  return "";
+}
+
 const FILE_IN_USE = new Set(["EPERM", "EACCES", "EBUSY"]);
 
 /**
@@ -120,6 +130,8 @@ export class CodesysBridge {
   private readyAt?: number;
   private lastError?: string;
   private exitInfo?: string;
+  /** The end of CODESYS's own console output (for start-up errors). */
+  private output = "";
 
   constructor(options: BridgeOptions) {
     this.opts = {
@@ -182,6 +194,7 @@ export class CodesysBridge {
           ...(this.opts.profile ? [`--profile="${this.opts.profile}"`] : []),
           ...(this.opts.noUI ? ["--noUI"] : []),
           `--runscript="${script}"`,
+          ...(this.opts.additionalFolder ? [`--additionalfolder="${this.opts.additionalFolder}"`] : []),
         ];
     this.log(`starting ${this.opts.command} ${args.join(" ")}`);
     const child = spawn(this.opts.command, args, {
@@ -192,12 +205,19 @@ export class CodesysBridge {
         CODESYS_MCP_SCRIPTS: scripts,
         CODESYS_MCP_PARENT_PID: String(process.pid),
       },
-      stdio: ["ignore", "ignore", "ignore"],
+      // stdout/stderr are kept (the last 4 KB) so a failed start can say why.
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       // CODESYS wants --option="value with spaces"; pass our own quoting through.
       windowsVerbatimArguments: !this.opts.args,
     });
     this.child = child;
+    this.output = "";
+    const keep = (d: Buffer) => {
+      this.output = (this.output + d.toString()).slice(-4096);
+    };
+    child.stdout?.on("data", keep);
+    child.stderr?.on("data", keep);
     child.on("exit", (code, signal) => {
       this.exitInfo = `exit code ${code ?? "?"}${signal ? ` signal ${signal}` : ""}`;
       this.log(`CODESYS process ${child.pid} ended: ${this.exitInfo}`);
@@ -225,7 +245,8 @@ export class CodesysBridge {
         return;
       }
       if ((this.state as BridgeState) === "dead") {
-        const msg = `CODESYS exited during startup (${this.exitInfo}). ${this.logTail()}`;
+        await sleep(200); // let the last output arrive
+        const msg = `CODESYS exited during startup (${this.exitInfo}). ${startupHint(this.output)}${this.output.trim() ? `CODESYS said: ${this.output.trim().slice(-800)}\n` : ""}${this.logTail()}`;
         this.lastError = msg;
         throw new BridgeError("startup_failed", msg);
       }

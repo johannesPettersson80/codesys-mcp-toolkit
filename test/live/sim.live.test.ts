@@ -50,7 +50,7 @@ const trip = LINES.trip;
 describe.skipIf(!findTrustRuntime())("live CODESYS + truST simulation", () => {
   beforeAll(async () => {
     const cs = resolveCodesys(process.env.CODESYS_PATH, process.env.CODESYS_PROFILE);
-    const bridge = new CodesysBridge({ command: cs.exe, profile: cs.profile, watcherSource: WATCHER, sessionRoot: join(dir, "sessions"), log: (m) => log.push(m) });
+    const bridge = new CodesysBridge({ command: cs.exe, profile: cs.profile, additionalFolder: cs.install.additionalFolder, watcherSource: WATCHER, sessionRoot: join(dir, "sessions"), log: (m) => log.push(m) });
     ctx = { bridge, autosave: true, workspace: dir, templatesDir: cs.install.templatesDir, codesys: { exe: cs.exe, profile: cs.profile, label: cs.install.label }, startWaitMs: LONG };
     ctx.sim = new SimController(codesysSource(bridge, () => ctx.project?.path, LONG), { mirrorRoot: join(dir, "mirrors"), log: (m) => log.push(m) });
     const server = createServer(ctx);

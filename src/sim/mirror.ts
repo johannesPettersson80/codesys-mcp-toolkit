@@ -22,6 +22,7 @@
 import { createHash } from "node:crypto";
 import type { TreeNode } from "../codesys/st.js";
 import type { PlantConfig } from "./plant.js";
+import { resolveConditionals, type Defines } from "./conditionals.js";
 
 export const HARNESS = "MCP_SimHarness";
 export const HARNESS_FILE = `src/${HARNESS}.st`;
@@ -267,11 +268,24 @@ export function injectAddress(decl: string, name: string, address: string): stri
 
 export interface ComposeOptions {
   plant?: PlantConfig;
+  /** The application's compiler defines, and the project defines (for {IF defined (X)}). */
+  defines?: Defines;
 }
 
-export function composeMirror(nodes: TreeNode[], tasks: TaskInfo[], opts: ComposeOptions = {}): Composition {
+export function composeMirror(source: TreeNode[], tasks: TaskInfo[], opts: ComposeOptions = {}): Composition {
   const notes: string[] = [];
   const warnings: string[] = [];
+  // Resolve conditional compilation as CODESYS would (truST can't take defines; see conditionals.ts).
+  const conditional: string[] = [];
+  const nodes = source.map((n) => {
+    const d = n.declaration !== undefined ? resolveConditionals(n.declaration, opts.defines) : undefined;
+    const i = n.implementation !== undefined ? resolveConditionals(n.implementation, opts.defines) : undefined;
+    for (const c of [...(d?.unresolved ?? []), ...(i?.unresolved ?? [])]) conditional.push(`${n.path}: {IF ${c}}`);
+    return d?.changed || i?.changed ? { ...n, ...(d ? { declaration: d.text } : {}), ...(i ? { implementation: i.text } : {}) } : n;
+  });
+  if (conditional.length) warnings.push(`Conditional compilation left for truST to decide (it may differ from CODESYS): ${conditional.join("; ")}`);
+  const defs = [...(opts.defines?.defines ?? []), ...(opts.defines?.projectDefines ?? []).map((x) => `${x} (project)`)];
+  if (defs.length && source.some((n) => /\{\s*IF\b/i.test(`${n.declaration ?? ""}\n${n.implementation ?? ""}`))) notes.push(`Conditional compilation resolved with the defines ${defs.join(", ")}`);
   const byPath = new Map(nodes.map((n) => [n.path, n] as const));
   const parentOf = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
   const kids = new Map<string, TreeNode[]>();
@@ -285,7 +299,11 @@ export function composeMirror(nodes: TreeNode[], tasks: TaskInfo[], opts: Compos
   // Top-level ST objects: POUs, DUTs, GVLs, interfaces, at any folder depth,
   // whose parent is a folder or the application (not another POU).
   const isContainer = (p: string) => p === "" || byPath.get(p)?.kind === "folder";
-  const tops = nodes.filter((n) => ["pou", "dut", "gvl", "interface"].includes(n.kind) && isContainer(parentOf(n.path)));
+  const candidates = nodes.filter((n) => ["pou", "dut", "gvl", "interface"].includes(n.kind) && isContainer(parentOf(n.path)));
+  // Objects excluded from the build don't exist for CODESYS's compiler, so not for the simulation either.
+  const excluded = candidates.filter((n) => n.build?.excluded).map((n) => n.path);
+  if (excluded.length) notes.push(`Excluded from build in CODESYS, so not simulated: ${excluded.join(", ")}`);
+  const tops = candidates.filter((n) => !n.build?.excluded);
 
   // Declarations may be rewritten (plant addresses), so work on copies.
   const decl = new Map<string, string>();

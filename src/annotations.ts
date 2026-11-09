@@ -22,6 +22,7 @@ const KIND: Record<string, Kind> = {
   list_tasks: "read",
   get_outline: "read",
   get_io_list: "read",
+  get_devices: "read",
   get_library_api: "read",
   get_changes: "read",
   compile: "read",
@@ -32,12 +33,14 @@ const KIND: Record<string, Kind> = {
   close_project: "safe",
   create_object: "safe",
   add_library: "safe",
+  remove_library: "destructive",
   checkpoint: "safe",
   // project: changes that overwrite or remove content
   write_object: "destructive",
   delete_object: "destructive",
   rename_object: "destructive",
   revert_object: "destructive",
+  configure_task: "destructive",
   // simulation (truST only, never a controller)
   sim_status: "read",
   read_vars: "read",

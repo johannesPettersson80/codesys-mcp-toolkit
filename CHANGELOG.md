@@ -57,6 +57,27 @@ Rewrite. See README "Migrating from v1".
   hand-back after validation) and refuses
   GVL loop signals with what to change. The Tuning view shows the model fit,
   the candidates and the validation (app-only tool `get_tuning`).
+- `compile` checks every POU, GVL and DUT, including those no task calls (it
+  sets "link always" for the build and restores it); `deep` also generates
+  code, `clean` builds from scratch.
+- CODESYS V3.5 SP22: the toolkit passes the install's additional folder
+  (`CODESYS\AdditionalFolders\Default`, where SP22 keeps add-ons such as
+  Scripting) as `--additionalfolder`, and reads profiles from it.
+  `--codesys-additional-folder` overrides it.
+- Build properties: objects excluded from the build are marked in the tree
+  and left out of the simulation. The application's compiler defines and,
+  with Scripting 4.2, the project defines and compiler version are reported;
+  the simulation mirror resolves `{IF defined (X)}` blocks with them, line
+  for line (truST can't take defines).
+- `get_devices`: the device tree and its I/O channels with their mapped
+  variables; `get_io_list` includes the device-tree mappings.
+- `read_objects` returns graphical bodies (SFC, CFC, LD, FBD) as PLCopenXML.
+- `open_project` opens `.projectarchive` files; `save_project` can write one.
+- `remove_library`.
+- `configure_task`: create and configure tasks (kind, interval, priority,
+  event, core, watchdog) and add program calls; `list_tasks` shows the event,
+  core and watchdog. Removing a call is refused with an explanation: SP21's
+  scripting can't do it.
 - Tool annotations (read-only, non-destructive, destructive; all local), so
   clients can tell harmless tools from ones that overwrite project code.
 - Shared session: server processes started with the same options share one

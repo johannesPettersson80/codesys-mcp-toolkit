@@ -33,3 +33,7 @@ docs/script_documentation.txt
 # Test/runtime scratch
 /test-output/
 scripts/dev-host/.build/
+
+# CODESYS API probes: local only (user and machine names, CODESYS-generated)
+spike/codesys-api/*.json
+spike/codesys-api/*.txt

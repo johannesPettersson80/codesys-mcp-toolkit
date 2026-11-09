@@ -14,7 +14,7 @@ import { TuningError } from "./tuning.js";
 import { heldMessage, type Driver } from "../driver.js";
 
 /** CODESYS ops the simulation may use. Read-only; nothing that writes or goes online. */
-export const SIM_CODESYS_OPS = ["export", "tasks.list"] as const;
+export const SIM_CODESYS_OPS = ["export", "tasks.list", "project.info"] as const;
 
 export function codesysSource(bridge: CodesysBridge, project: () => string | undefined, startWaitMs: number, onExport?: (nodes: TreeNode[]) => void): CodesysSource {
   const call = async <T>(op: (typeof SIM_CODESYS_OPS)[number]): Promise<T> => {
@@ -28,6 +28,10 @@ export function codesysSource(bridge: CodesysBridge, project: () => string | und
       return nodes;
     },
     tasks: async () => (await call<{ tasks: TaskInfo[] }>("tasks.list")).tasks,
+    defines: async () => {
+      const i = await call<{ defines?: string[]; project_defines?: string[] }>("project.info");
+      return { defines: i.defines ?? [], projectDefines: i.project_defines ?? [] };
+    },
     projectPath: project,
   };
 }

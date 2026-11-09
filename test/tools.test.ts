@@ -35,6 +35,7 @@ describe("MCP tools over the real watcher", () => {
         "add_library",
         "checkpoint",
         "get_changes",
+        "get_devices",
         "get_io_list",
         "get_library_api",
         "get_outline",
@@ -42,6 +43,7 @@ describe("MCP tools over the real watcher", () => {
         "close_project",
         "codesys_status",
         "compile",
+        "configure_task",
         "create_object",
         "create_project",
         "delete_object",
@@ -50,6 +52,7 @@ describe("MCP tools over the real watcher", () => {
         "list_tasks",
         "open_project",
         "read_objects",
+        "remove_library",
         "rename_object",
         "save_project",
         "search_code",
@@ -132,6 +135,14 @@ describe("MCP tools over the real watcher", () => {
     const r = await call("compile");
     expect(r.text).toContain("Build: 1 error(s), 0 warning(s).");
     expect(r.text).toContain("ERROR C46 F_Add (Line 1, Column 1 (Impl)): Unknown identifier 'ERROR_HERE'");
+    expect(r.text).toContain("Checked every POU, including those no task calls.");
+  });
+
+  it("compiles only what tasks reach, or deeper, when asked", async () => {
+    const plain = await call("compile", { check_all: false });
+    expect(plain.text).not.toContain("Checked every POU");
+    const deep = await call("compile", { deep: true, clean: true });
+    expect(deep.text).toContain("Code generated.");
   });
 
   it("searches code", async () => {
@@ -146,10 +157,47 @@ describe("MCP tools over the real watcher", () => {
     expect((await call("add_library", { name: "CAA Types, * (CAA Technology Group)" })).isError).toBe(false);
     const bad = await call("add_library", { name: "NoSuchLib" });
     expect(bad.isError).toBe(true);
+    expect((await call("remove_library", { name: "CAA Types" })).text).toContain("Removed library CAA Types, * (CAA Technology Group).");
+    expect((await call("list_libraries")).text).not.toContain("CAA Types");
+    const missing = await call("remove_library", { name: "NoSuchLib" });
+    expect(missing.isError).toBe(true);
+    expect(missing.text).toContain("NoSuchLib is not referenced");
+  });
+
+  it("reads a graphical object as PLCopenXML", async () => {
+    const r = (await call("read_objects", { paths: ["SEQ_Fill"] })).text;
+    expect(r).toContain("--- graphical body as PLCopenXML (read-only) ---");
+    expect(r).toContain('<pou name="SEQ_Fill" pouType="program">');
+    expect(r).toContain('<step localId="0" initialStep="true" name="Init">');
+    expect(r).not.toContain("addData");
+    expect(r).not.toContain("<?xml");
+  });
+
+  it("lists devices and their I/O mapping", async () => {
+    const d = (await call("get_devices")).text;
+    expect(d).toContain("Device (type 4096, id 0000 0001, version 3.5.21.0): 2 channel(s), 1 mapped");
+    expect(d).toContain("%ID0       Input@1 Level [m] -> GVL_IO.rLevel");
+    expect(d).toContain("-> (not mapped)");
+    expect((await call("get_io_list")).text).toContain("Mapped in the device tree (1):");
   });
 
   it("lists tasks", async () => {
     expect((await call("list_tasks")).text).toContain("MainTask: Cyclic, interval t#20ms, priority 1; calls PLC_PRG");
+  });
+
+  it("creates and configures tasks and their program calls", async () => {
+    const r = await call("configure_task", { name: "FastTask", create: true, kind: "cyclic", interval: "t#2ms", priority: 0, watchdog: { enabled: true, time: "t#6ms", sensitivity: 2 }, add_calls: ["PLC_PRG"] });
+    expect(r.isError).toBe(false);
+    expect(r.text).toMatch(/^Created task FastTask: Cyclic, interval t#2ms, priority 0, watchdog t#6ms ×2; calls PLC_PRG/);
+    expect((await call("configure_task", { name: "FastTask", add_calls: ["SEQ_Fill"], remove_calls: ["PLC_PRG"] })).text).toContain("calls SEQ_Fill");
+    const fb = await call("configure_task", { name: "FastTask", add_calls: ["FB_Pump"] });
+    expect(fb.isError).toBe(true);
+    expect(fb.text).toContain("FB_Pump is not a PROGRAM");
+    const missing = await call("configure_task", { name: "NoSuchTask", interval: "t#5ms" });
+    expect(missing.text).toContain("No task NoSuchTask (tasks: MainTask, FastTask). Pass create to make it.");
+    const tasks = (await call("list_tasks")).text;
+    expect(tasks).toContain("MainTask: Cyclic, interval t#20ms, priority 1; calls PLC_PRG");
+    expect(tasks).toContain("FastTask: Cyclic, interval t#2ms, priority 0, watchdog t#6ms ×2; calls SEQ_Fill");
   });
 
   it("renames and deletes objects", async () => {

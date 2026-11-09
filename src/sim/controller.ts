@@ -28,12 +28,15 @@ import { TrustError } from "./control.js";
 import { findTrustRuntime, TrustRuntime, TESTED_TRUST_VERSION, type Diagnostic, type TestRun } from "./runtime.js";
 import { formatValue, numeric, parseTrustValue, toTrustLiteral, type StValue } from "./values.js";
 import { Tuning } from "./tuning.js";
+import type { Defines } from "./conditionals.js";
 
 /** Read-only view of the CODESYS project: the only CODESYS access the simulation has. */
 export interface CodesysSource {
   exportSt(): Promise<TreeNode[]>;
   tasks(): Promise<TaskInfo[]>;
   projectPath(): string | undefined;
+  /** The compiler and project defines (for {IF defined (X)}); optional. */
+  defines?(): Promise<Defines>;
 }
 
 export class SimError extends Error {
@@ -220,8 +223,9 @@ export class SimController {
     const dir = this.mirrorFolder(project);
     await this.loadPlant(plantFile);
     const [nodes, tasks] = [await this.codesys.exportSt(), await this.codesys.tasks()];
+    const defines = (await this.codesys.defines?.().catch(() => undefined)) ?? {};
     const plant = this.effectivePlant();
-    const c = composeMirror(nodes, tasks, { plant });
+    const c = composeMirror(nodes, tasks, { plant, defines });
     const simToml = simulationToml(plant, { timeScale: this.timeScale, traceCapacity: 1000, addresses: c.addresses });
     const r = await writeMirror(dir, c, simToml, project, this.o.git ?? true);
     this.manifest = r.manifest;

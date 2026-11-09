@@ -9,10 +9,11 @@ from __future__ import print_function
 
 import os
 import re
+import sys
 
 import scriptengine as se
 
-from mcp_compat import to_text
+from mcp_compat import PY2, to_text
 
 
 class OpError(Exception):
@@ -203,13 +204,53 @@ def _norm(p):
     return os.path.normcase(os.path.abspath(p)) if p else p
 
 
+def _build_props(obj):
+    """An object's build properties, only those that are set (they are rare)."""
+    out = {}
+    if _safe(lambda: obj.effectively_excluded_from_build, False):
+        out["excluded"] = True
+    bp = _safe(lambda: obj.build_properties)
+    if bp is not None:
+        if _safe(lambda: bp.link_always_is_valid, False) and _safe(lambda: bp.link_always, False):
+            out["link_always"] = True
+        if _safe(lambda: bp.external_is_valid, False) and _safe(lambda: bp.external, False):
+            out["external"] = True
+    return out
+
+
+def _split_defines(text):
+    """CODESYS compiler defines: 'A, B:=2; C' -> ['A', 'B', 'C']."""
+    out = []
+    for part in re.split(r"[,;\s]+", to_text(text) or ""):
+        name = part.split(":=")[0].strip()
+        if name:
+            out.append(name)
+    return out
+
+
 def _project_info(proj, ctx=None):
     ctx = ctx or Ctx()
-    return {
+    info = {
         "path": to_text(_safe(lambda: proj.path)),
         "dirty": bool(_safe(lambda: proj.dirty, False)),
         "application": name_of(ctx.app) if ctx.app is not None else None,
     }
+    if ctx.app is not None:
+        bp = _safe(lambda: ctx.app.build_properties)
+        if bp is not None and _safe(lambda: bp.compiler_defines_is_valid, False):
+            info["defines"] = _split_defines(_safe(lambda: bp.compiler_defines, ""))
+    settings = _safe(lambda: proj.project_settings)
+    if settings is not None:
+        # Scripting 4.2 and later
+        cv = _safe(lambda: settings.get_compilerversion())
+        if cv is None:
+            cv = _safe(lambda: settings.compilerversion)
+        if cv is not None:
+            info["compiler_version"] = to_text(cv)
+        pd = _safe(lambda: settings.project_defines)
+        if pd is not None:
+            info["project_defines"] = _split_defines(pd if isinstance(pd, (str, type(u""))) else ", ".join(to_text(x) for x in pd))
+    return info
 
 
 def _node(ctx, obj, names, depth, with_text):
@@ -227,6 +268,10 @@ def _node(ctx, obj, names, depth, with_text):
     st = is_st(obj, kind)
     if st is not None:
         node["st"] = st
+    if kind in ("pou", "gvl", "dut", "folder", "interface"):
+        b = _build_props(obj)
+        if b:
+            node["build"] = b
     if with_text:
         if decl is not None:
             node["declaration"] = decl
@@ -273,6 +318,18 @@ def op_project_open(args):
         flags = se.VersionUpdateFlags.NoUpdates | se.VersionUpdateFlags.SilentMode
     except AttributeError:
         flags = None
+    if path.lower().endswith(".projectarchive"):
+        # Extract next to the archive (or where asked); never over an existing project.
+        target = args.get("extract_to") or (os.path.splitext(path)[0] + ".project")
+        if os.path.exists(target):
+            raise OpError("exists", "%s already exists. Open it directly, or pass extractTo for another file name." % target)
+        proj = (se.projects.open_archive(path, target, False, None, None, None, flags) if flags is not None
+                else se.projects.open_archive(path, target, False, None))
+        if proj is None:
+            raise OpError("open_failed", "CODESYS returned no project for archive %s" % path)
+        info = _project_info(proj)
+        info["extracted_from"] = path
+        return info
     proj = se.projects.open(path, update_flags=flags) if flags is not None else se.projects.open(path)
     if proj is None:
         raise OpError("open_failed", "CODESYS returned no project for %s" % path)
@@ -305,7 +362,13 @@ def op_project_info(args):
 def op_project_save(args):
     c = Ctx()
     c.proj.save()
-    return _project_info(c.proj, c)
+    info = _project_info(c.proj, c)
+    if args.get("archive"):
+        if os.path.exists(args["archive"]):
+            raise OpError("exists", "%s already exists." % args["archive"])
+        c.proj.save_archive(args["archive"])
+        info["archive"] = args["archive"]
+    return info
 
 
 def op_project_close(args):
@@ -441,24 +504,66 @@ def op_build(args):
     c = Ctx()
     if c.app is None:
         raise OpError("no_application", "The project has no active application to build.")
-    c.app.build()
+    steps = []
+    linked = []
+    was_dirty = bool(_safe(lambda: c.proj.dirty, True))
+    try:
+        if args.get("check_all"):
+            # A build only compiles what a task reaches. Mark every other POU, GVL and
+            # DUT "link always" for this build, then put the flags back.
+            # (project.check_all_pool_objects() checks the POU pool, not the
+            # application, and clears the build's messages.)
+            for o in _walk_all(c, c.app):
+                if kind_of(o, c.app_guid) not in ("pou", "gvl", "dut"):
+                    continue
+                if _TEST_ATTR.search(decl_of(o) or ""):
+                    continue  # unit tests use truST's assertions, which CODESYS doesn't know
+                bp = _safe(lambda: o.build_properties)
+                if bp is None or not _safe(lambda: bp.link_always_is_valid, False):
+                    continue
+                if _safe(lambda: bp.exclude_from_build, False) or _safe(lambda: bp.link_always, True):
+                    continue
+                bp.link_always = True
+                linked.append(bp)
+            steps.append("check_all")
+        if args.get("clean"):
+            c.app.clean()
+            steps.append("clean")
+        if args.get("deep"):
+            # Code generation finds errors the build alone doesn't.
+            c.app.generate_code()
+            steps.append("generate_code")
+        else:
+            c.app.build()
+            steps.append("build")
+    finally:
+        for bp in linked:
+            _safe(lambda: setattr(bp, "link_always", False))
+        if linked and not was_dirty:
+            _safe(lambda: c.proj.save())  # same content as before; leaves no unsaved change behind
     msgs = []
+    seen = set()
     for cat in se.system.get_message_categories(True):
         if (to_text(cat) or "").strip("{}").lower() == SCRIPT_MESSAGE_CATEGORY:
             continue
         desc = to_text(_safe(lambda: se.system.get_message_category_description(cat), ""))
         for m in se.system.get_message_objects(cat):
             obj = _safe(lambda: m.object)
+            opath = c.path_of(obj) if obj is not None else None
+            key = (to_text(_safe(lambda: m.text, "")), to_text(_safe(lambda: m.position_text)), opath)
+            if key in seen:  # the same message from the build and the full check
+                continue
+            seen.add(key)
             msgs.append({
                 "category": desc,
                 "severity": to_text(_safe(lambda: m.severity, "")),
                 "text": to_text(_safe(lambda: m.text, "")),
                 "prefix": to_text(_safe(lambda: m.prefix)),
                 "number": _safe(lambda: int(m.number)),
-                "object": c.path_of(obj) if obj is not None else None,
+                "object": opath,
                 "position": to_text(_safe(lambda: m.position_text)),
             })
-    return {"messages": msgs}
+    return {"messages": msgs, "steps": steps}
 
 
 def _library_manager(c):
@@ -540,6 +645,21 @@ def op_libraries_add(args):
     return {"added": args["name"], "saved": c.save_if(args)}
 
 
+def op_libraries_remove(args):
+    c = Ctx()
+    lm = _library_manager(c)
+    name = args["name"]
+    names = [to_text(n) for n in (_safe(lambda: list(lm.get_libraries(False)), []) or [])]
+    match = [n for n in names if n.lower() == name.lower()] or [n for n in names if n.lower().split(",")[0].strip() == name.lower().split(",")[0].strip()]
+    if not match:
+        raise OpError("not_found", "%s is not referenced. Referenced: %s" % (name, ", ".join(names) or "none"))
+    lm.remove_library(match[0])
+    left = [to_text(n) for n in (_safe(lambda: list(lm.get_libraries(False)), []) or [])]
+    if match[0] in left:
+        raise OpError("codesys_error", "CODESYS did not remove %s." % match[0])
+    return {"removed": match[0], "saved": c.save_if(args)}
+
+
 def op_tasks_list(args):
     c = Ctx()
     tasks = []
@@ -549,23 +669,363 @@ def op_tasks_list(args):
         for ch in children(obj):
             k = kind_of(ch, c.app_guid)
             if k == "task":
-                tasks.append({
-                    "name": name_of(ch),
-                    "path": c.path_of(ch),
-                    "interval": to_text(_safe(lambda: ch.interval)),
-                    "interval_unit": to_text(_safe(lambda: ch.interval_unit)),
-                    "priority": to_text(_safe(lambda: ch.priority)),
-                    "kind": to_text(_safe(lambda: ch.kind_of_task)),
-                    "pous": [to_text(getattr(p, "pou_name", None) or getattr(p, "name", None) or p)
-                             for p in (_safe(lambda: list(ch.pous), []) or [])],
-                })
+                tasks.append(_task_info(c, ch))
             elif k in ("task_config", "folder"):
                 rec(ch)
     rec(root)
     return {"tasks": tasks}
 
 
+def op_objects_xml(args):
+    """Objects as PLCopenXML (export_xml), e.g. graphical bodies (SFC, CFC, LD, FBD) that
+    have no ST text. Read-only: the XML goes through a temp file in the session folder."""
+    import io
+    c = Ctx()
+    tmp = os.environ.get("CODESYS_MCP_DIR") or os.environ.get("TEMP") or "."
+    limit = int(args.get("max_chars") or 200000)
+    res = []
+    for k, p in enumerate(args.get("paths", [])):
+        f = os.path.join(tmp, "export-%d.xml" % k)
+        try:
+            obj = c.resolve(p)
+            obj.export_xml(None, f, True)
+            with io.open(f, "r", encoding="utf-8-sig") as fh:
+                xml = fh.read()
+            res.append({"path": c.path_of(obj), "kind": kind_of(obj, c.app_guid), "xml": xml[:limit], "truncated": len(xml) > limit, "chars": len(xml)})
+        except OpError as e:
+            res.append({"path": p, "error": e.message, "code": e.code})
+        except Exception as e:
+            res.append({"path": p, "error": to_text(e), "code": "codesys_error"})
+        finally:
+            _safe(lambda: os.remove(f))
+    return {"objects": res}
+
+
+def op_devices_list(args):
+    """The device tree with identification and state, and each device's I/O mapping
+    as CODESYS exports it (export_io_mappings_as_csv: 'CoDeSys Mapping Export V1.2').
+    Read-only: the CSV goes to a temp file in the session folder."""
+    c = Ctx()
+    tmp = os.environ.get("CODESYS_MCP_DIR") or os.environ.get("TEMP") or "."
+    out = []
+
+    def rec(obj, names, depth):
+        for ch in children(obj):
+            nm = name_of(ch)
+            if _safe(lambda: ch.is_device, False):
+                ident = _safe(lambda: ch.get_device_identification())
+                info = {
+                    "path": "/".join(names + [nm]),
+                    "name": nm,
+                    "depth": depth,
+                    "type": _safe(lambda: int(ident.type)),
+                    "id": to_text(_safe(lambda: ident.id)),
+                    "version": to_text(_safe(lambda: ident.version)),
+                    "enabled": _safe(lambda: bool(ch.is_enabled())),
+                }
+                if args.get("io", True):
+                    p = os.path.join(tmp, "io-mapping-%d.csv" % len(out))
+                    try:
+                        ch.export_io_mappings_as_csv(p)
+                        with open(p) as f:
+                            text = f.read()
+                        if any(l.strip() and not l.startswith("//") for l in text.splitlines()):
+                            info["io_csv"] = text
+                    except Exception as e:
+                        info["io_error"] = to_text(e)
+                    finally:
+                        _safe(lambda: os.remove(p))
+                out.append(info)
+                rec(ch, names + [nm], depth + 1)
+            elif kind_of(ch, c.app_guid) in ("folder", "other"):
+                rec(ch, names + [nm], depth)  # devices sit under "Plc Logic" and folders
+    rec(c.proj, [], 0)
+    return {"devices": out}
+
+
+def _task_info(c, t):
+    wd = _safe(lambda: t.watchdog)
+    return {
+        "name": name_of(t),
+        "path": c.path_of(t),
+        "interval": to_text(_safe(lambda: t.interval)),
+        "interval_unit": to_text(_safe(lambda: t.interval_unit)),
+        "priority": to_text(_safe(lambda: t.priority)),
+        "kind": to_text(_safe(lambda: t.kind_of_task)),
+        "event": to_text(_safe(lambda: t.event)) or None,
+        "core_binding": _safe(lambda: int(t.core_binding)),
+        "watchdog": {
+            "enabled": bool(_safe(lambda: wd.enabled, False)),
+            "time": to_text(_safe(lambda: wd.time)),
+            "time_unit": to_text(_safe(lambda: wd.time_unit)),
+            "sensitivity": to_text(_safe(lambda: wd.sensitivity)),
+        } if wd is not None else None,
+        "pous": [to_text(getattr(p, "pou_name", None) or getattr(p, "name", None) or p)
+                 for p in (_safe(lambda: list(t.pous), []) or [])],
+    }
+
+
+def _find_kind(c, root, kind):
+    out = []
+
+    def rec(obj):
+        for ch in children(obj):
+            k = kind_of(ch, c.app_guid)
+            if k == kind:
+                out.append(ch)
+            if k in ("task_config", "folder"):
+                rec(ch)
+    rec(root)
+    return out
+
+
+_TASK_KINDS = {"cyclic": "Cyclic", "freewheeling": "Freewheeling", "event": "Event", "external_event": "ExternalEvent", "status": "Status"}
+
+
+def op_task_configure(args):
+    """Create or change a task: kind, interval, priority, event, watchdog, and its program calls."""
+    c = Ctx()
+    if c.app is None:
+        raise OpError("no_application", "The project has no active application.")
+    name = args["name"]
+    tasks = [t for t in _find_kind(c, c.app, "task") if name_of(t).lower() == name.lower()]
+    created = False
+    if tasks:
+        task = tasks[0]
+    elif args.get("create"):
+        cfgs = _find_kind(c, c.app, "task_config")
+        cfg = cfgs[0] if cfgs else c.app.create_task_configuration()
+        task = cfg.create_task(name)
+        created = True
+    else:
+        known = ", ".join(name_of(t) for t in _find_kind(c, c.app, "task")) or "none"
+        raise OpError("not_found", "No task %s (tasks: %s). Pass create to make it." % (name, known))
+
+    if args.get("kind"):
+        k = _TASK_KINDS.get(args["kind"].lower())
+        if k is None:
+            raise OpError("bad_args", "kind must be one of %s" % ", ".join(sorted(_TASK_KINDS)))
+        task.kind_of_task = getattr(se.KindOfTask, k)
+    for key in ("interval", "interval_unit", "priority", "event"):
+        if args.get(key) is not None:
+            setattr(task, key, to_text(args[key]))
+    if args.get("core_binding") is not None:
+        task.core_binding = int(args["core_binding"])
+    wd = args.get("watchdog")
+    if wd:
+        w = task.watchdog
+        if wd.get("enabled") is not None:
+            w.enabled = bool(wd["enabled"])
+        for key in ("time", "time_unit", "sensitivity"):
+            if wd.get(key) is not None:
+                setattr(w, key, to_text(wd[key]))
+
+    calls = [to_text(getattr(p, "pou_name", None) or getattr(p, "name", None) or p).lower() for p in list(task.pous)]
+    for prog in args.get("remove_calls") or []:
+        if prog.lower() not in calls:
+            raise OpError("not_found", "Task %s doesn't call %s." % (name_of(task), prog))
+        _remove_call(task, calls.index(prog.lower()), prog)
+        calls.remove(prog.lower())
+    if args.get("add_calls"):
+        programs = dict((name_of(p).lower(), name_of(p)) for p in _walk_kind(c, c.app, "pou") if subkind("pou", decl_of(p)) == "program")
+        for prog in args["add_calls"]:
+            real = programs.get(prog.lower())
+            if real is None:
+                raise OpError("not_found", "%s is not a PROGRAM in the application; a task can only call programs." % prog)
+            if real.lower() in calls:
+                continue
+            task.pous.add(real, "")
+            calls.append(real.lower())
+    info = _task_info(c, task)
+    info["created"] = created
+    info["saved"] = c.save_if(args)
+    return info
+
+
+def _remove_call(task, index, name):
+    """Remove a task's program call, and check that it is gone. CODESYS V3.5 SP21's
+    scripting can't do this: pous.remove(name) returns without removing anything,
+    and pous.remove(index) fails with "not found in the specified Collection"
+    (verified 9 November 2026). Say so instead of pretending."""
+    before = [to_text(x).lower() for x in task.pous]
+    for attempt in (lambda: task.pous.remove(name), lambda: task.pous.remove(index)):
+        try:
+            attempt()
+        except Exception:
+            pass
+        if len([x for x in task.pous]) < len(before):
+            return
+    raise OpError(
+        "not_supported",
+        "CODESYS's scripting can't remove a program call from a task (Scripting 4.1 and 4.2, on SP21 and SP22: "
+        "remove() leaves the call in place). Remove it in CODESYS: Task Configuration > %s > select %s > Remove Call. "
+        "Adding calls works." % (name_of(task), name))
+
+
+_TEST_ATTR = re.compile(r"\{\s*attribute\s+'test'\s*\}", re.I)
+
+
+def _walk_all(c, root):
+    """Every object directly in root or in its folders (not inside POUs)."""
+    out = []
+
+    def rec(obj):
+        for ch in children(obj):
+            if kind_of(ch, c.app_guid) == "folder":
+                rec(ch)
+            else:
+                out.append(ch)
+    rec(root)
+    return out
+
+
+def _walk_kind(c, root, kind):
+    """Every object of a kind below root, through folders."""
+    out = []
+
+    def rec(obj):
+        for ch in children(obj):
+            k = kind_of(ch, c.app_guid)
+            if k == kind:
+                out.append(ch)
+            if k == "folder":
+                rec(ch)
+    rec(root)
+    return out
+
+
+def _members(obj):
+    """Public member names of a scripting object (names only; nothing is called).
+    CODESYS's script objects are dynamic, so dir() can be empty: then the .NET
+    type's members are listed instead."""
+    if obj is None:
+        return None
+    names = [n for n in (_safe(lambda: dir(obj), []) or []) if not n.startswith("_")]
+    if not names:
+        t = _safe(lambda: obj.GetType())
+        if t is not None:
+            names = [to_text(m.Name) for m in (_safe(lambda: t.GetMembers(), []) or [])]
+            names = ["%s" % n for n in names if n and not n.startswith("_") and not n.startswith("get_") and not n.startswith("set_") and n not in (".ctor", "GetType", "ToString", "Equals", "GetHashCode")]
+            names.append("<.NET %s>" % to_text(_safe(lambda: t.FullName)))
+    return sorted(set(names))
+
+
+def _versionish(obj):
+    """Values of non-callable members named like a version or define (to compare CODESYS versions)."""
+    out = {}
+    for n in _members(obj) or []:
+        low = n.lower()
+        if "version" not in low and "define" not in low:
+            continue
+        v = _safe(lambda: getattr(obj, n))
+        if v is None or callable(v):
+            continue
+        out[n] = to_text(v)
+    return out
+
+
+def _reflect_api(path):
+    """Every public type and member of the loaded scripting assemblies, through .NET
+    reflection, in the shape of system.dump_scripting_api (which Scripting 4.2 removed)."""
+    try:
+        import System  # IronPython only
+    except ImportError:
+        return "not available (no .NET)"
+    import json
+    types = []
+    for asm in System.AppDomain.CurrentDomain.GetAssemblies():
+        aname = to_text(_safe(lambda: asm.GetName().Name, ""))
+        if "script" not in aname.lower():
+            continue
+        exported = _safe(lambda: asm.GetExportedTypes(), []) or []
+        for t in exported:
+            members = []
+            for m in _safe(lambda: t.GetMembers(), []) or []:
+                mt = to_text(m.MemberType)
+                if mt == "Method":
+                    params = [{"Type": to_text(_safe(lambda: p.ParameterType.FullName) or _safe(lambda: p.ParameterType.Name))} for p in (_safe(lambda: m.GetParameters(), []) or [])]
+                    rt = _safe(lambda: m.ReturnType)
+                elif mt == "Property":
+                    params = [{"Type": to_text(_safe(lambda: p.ParameterType.FullName) or _safe(lambda: p.ParameterType.Name))} for p in (_safe(lambda: m.GetIndexParameters(), []) or [])]
+                    rt = _safe(lambda: m.PropertyType)
+                else:
+                    continue
+                members.append({"Name": to_text(m.Name), "MemberType": mt, "Parameters": params,
+                                "Type": to_text(_safe(lambda: rt.FullName) or _safe(lambda: rt.Name)) if rt is not None else None})
+            types.append({"Namespace": to_text(t.Namespace), "Name": to_text(t.Name), "Assembly": aname, "Members": members})
+    doc = {"MetaData": {"Generator": "reflection, %s" % to_text(sys.version).replace("\n", " ")[:120]}, "Types": types}
+    text = json.dumps(doc)
+    with open(path, "w") as f:
+        f.write(text.encode("utf-8") if PY2 and isinstance(text, unicode) else text)  # noqa: F821
+    return "%d types" % len(types)
+
+
+def op_api_probe(args):
+    """The scripting API this CODESYS offers: member names of the main objects, the
+    enums the watcher relies on, version-like values, and the object type GUIDs of
+    the open project with their kinds. For comparing service packs (docs/sp22-plan.md)."""
+    c = Ctx(require_project=False)
+    objs = {"se": se, "system": _safe(lambda: se.system), "projects": _safe(lambda: se.projects), "project": c.proj, "application": c.app}
+    samples = {}
+    types = {}
+    if c.proj is not None:
+        stack = [c.proj]
+        while stack and len(types) < 200:
+            o = stack.pop()
+            t = (to_text(_safe(lambda: o.type)) or "").strip("{}").lower()
+            k = kind_of(o, c.app_guid)
+            if t and t not in types:
+                types[t] = {"kind": k, "example": name_of(o)}
+            if k in ("pou", "method", "property", "accessor", "action", "dut", "gvl", "interface", "folder") and k not in samples:
+                samples[k] = o
+            stack.extend(_safe(lambda: children(o), []) or [])
+    for k, o in samples.items():
+        objs["obj_" + k] = o
+    pou = samples.get("pou")
+    if pou is not None:
+        objs["textual_declaration"] = _safe(lambda: pou.textual_declaration)
+        objs["textual_implementation"] = _safe(lambda: pou.textual_implementation)
+    enums = {}
+    for n in ("VersionUpdateFlags", "PouType", "DutType", "ScriptPromptHandling", "PromptHandling", "ImplementationLanguages", "ProjectProperties"):
+        e = _safe(lambda: getattr(se, n))
+        enums[n] = _members(e) if e is not None else None
+    reflected = None
+    if args.get("reflect_path"):
+        reflected = _reflect_api(args["reflect_path"])
+    dump = None
+    if args.get("dump_path"):
+        # CODESYS's own description of its scripting API (system.dump_scripting_api).
+        fn = _safe(lambda: se.system.dump_scripting_api)
+        if fn is None:
+            dump = "not available"
+        else:
+            try:
+                r = fn(args["dump_path"])
+                dump = "written" if os.path.exists(args["dump_path"]) else ("returned: %s" % to_text(r)[:200])
+            except Exception as e:
+                try:
+                    r = fn()
+                    text = to_text(r) or ""
+                    if text:
+                        with open(args["dump_path"], "w") as f:
+                            f.write(text.encode("utf-8") if PY2 else text)
+                    dump = "returned %d chars (no-argument form; with a path: %s)" % (len(text), to_text(e))
+                except Exception as e2:
+                    dump = "failed: %s / %s" % (to_text(e), to_text(e2))
+    return {
+        "python": to_text(_safe(lambda: sys.version, "")).replace("\n", " ")[:120],
+        "dump": dump,
+        "reflected": reflected,
+        "members": dict((k, _members(v)) for k, v in objs.items()),
+        "versions": dict((k, _versionish(v)) for k, v in objs.items() if v is not None),
+        "enums": enums,
+        "types": types,
+        "unknown_types": sorted(t for t, v in types.items() if v["kind"] == "other"),
+    }
+
+
 OPS = {
+    "api.probe": op_api_probe,
     "ping": op_ping,
     "project.open": op_project_open,
     "project.create_empty": op_project_create_empty,
@@ -582,6 +1042,10 @@ OPS = {
     "build": op_build,
     "libraries.list": op_libraries_list,
     "libraries.add": op_libraries_add,
+    "libraries.remove": op_libraries_remove,
     "tasks.list": op_tasks_list,
+    "task.configure": op_task_configure,
+    "devices.list": op_devices_list,
+    "objects.xml": op_objects_xml,
     "library.api": op_library_api,
 }
