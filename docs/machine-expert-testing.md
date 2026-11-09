@@ -4,7 +4,7 @@ Machine Expert is built on CODESYS V3.5, but **this toolkit has never been run
 against it**, so it isn't supported yet. These steps find out what works. Every
 result helps, including "it failed at step 1" with the error text.
 
-Use a copy of a project. `write_object` and the other changing tools save to it.
+Use a copy of a project. `write_object` and the other changing actions save to it.
 
 ## 1. Get the toolkit
 
@@ -65,7 +65,7 @@ Add the server to your client (Cursor, Claude Desktop and so on):
 
 Then try these in order, on a copy of a project, and note which work:
 
-| Step | Tool | What it tells us |
+| Step | Action of the `codesys` tool | What it tells us |
 | --- | --- | --- |
 | 1 | `codesys_status` | It started, and which program and Scripting version it found |
 | 2 | `open_project` | Projects open without a dialog |

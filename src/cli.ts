@@ -127,6 +127,7 @@ async function main() {
     templatesDir: codesys.install.templatesDir,
     codesys: { exe: codesys.exe, profile: codesys.profile, label: codesys.install.label },
     startWaitMs: 90_000,
+    log,
   };
   ctx.changes = new ChangeStore(join(process.env.LOCALAPPDATA ?? tmpdir(), "codesys-mcp-toolkit", "checkpoints"));
   ctx.cache = new ProjectCache();

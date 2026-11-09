@@ -8,7 +8,7 @@ import { codesysSimLabel } from "../panel/src/views.js";
 import { currentCodesysSim } from "../src/codesys/simulation.js";
 import { createServer } from "../src/server.js";
 import type { AppContext } from "../src/tools.js";
-import { fakeBridge, tempDir } from "./helpers.js";
+import { fakeBridge, tempDir, viaCodesys } from "./helpers.js";
 
 let client: Client | undefined;
 let ctx: AppContext | undefined;
@@ -35,7 +35,7 @@ async function open(content = "FAKE") {
 }
 
 async function call(name: string, args: Record<string, unknown> = {}) {
-  const r = (await client!.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+  const r = (await client!.callTool(viaCodesys(name, args))) as { content: { text: string }[]; isError?: boolean };
   return { text: r.content.map((c) => c.text).join("\n"), isError: !!r.isError };
 }
 

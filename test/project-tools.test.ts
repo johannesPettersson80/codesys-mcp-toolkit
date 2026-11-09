@@ -14,7 +14,7 @@ import type { AppContext } from "../src/tools.js";
 import { tankNodes, tankTasks, tankTestNodes } from "./fixtures/tank.js";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { Driver } from "../src/driver.js";
-import { fakeBridge, fakeProjectFile, tempDir } from "./helpers.js";
+import { fakeBridge, fakeProjectFile, tempDir, viaCodesys } from "./helpers.js";
 
 describe("declaration parser", () => {
   it("reads headers with modifiers, EXTENDS, IMPLEMENTS and return types", () => {
@@ -156,7 +156,7 @@ describe("create_project", () => {
     await server.connect(a);
     const client = new Client({ name: "t", version: "1" });
     await client.connect(b);
-    const call = async (name: string, args: Record<string, unknown>) => ((await client.callTool({ name, arguments: args })) as { content: { text: string }[] }).content[0]!.text;
+    const call = async (name: string, args: Record<string, unknown>) => ((await client.callTool(viaCodesys(name, args))) as { content: { text: string }[] }).content[0]!.text;
     try {
       expect(await call("create_project", { path: "New.project" })).toMatch(/Device updated to 3\.5\.22\.40\./);
       expect((JSON.parse(readFileSync(join(workspace, "New.project"), "utf8")) as { roots: { device_version: string }[] }).roots[0]!.device_version).toBe("3.5.22.40");
@@ -180,26 +180,111 @@ describe("create_project", () => {
 describe("project tools over MCP (fake CODESYS)", () => {
   let client: Client;
   let ctx: AppContext;
+  let firstOpen = "";
+  const browserOpens: boolean[] = [];
   const call = async (name: string, args: Record<string, unknown> = {}) => {
-    const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+    const r = (await client.callTool(viaCodesys(name, args))) as { content: { text: string }[]; isError?: boolean };
     return { text: r.content.map((c) => c.text).join("\n"), isError: !!r.isError };
   };
 
   beforeAll(async () => {
     // generous heartbeat limits: other test files start processes in parallel
-    ctx = { bridge: fakeBridge({ staleHeartbeatMs: 30_000, hungGraceMs: 10_000 }), autosave: true, workspace: tempDir(), startWaitMs: 20_000, changes: new ChangeStore(tempDir("cmcp-cps-")), cache: new ProjectCache(), driver: new Driver() };
+    const viewer = { url: "http://viewer/", open: (force = false) => (browserOpens.push(force), true) };
+    ctx = { bridge: fakeBridge({ staleHeartbeatMs: 30_000, hungGraceMs: 10_000 }), autosave: true, workspace: tempDir(), startWaitMs: 20_000, changes: new ChangeStore(tempDir("cmcp-cps-")), cache: new ProjectCache(), driver: new Driver(), viewer };
     const server = createServer(ctx);
     const [a, b] = InMemoryTransport.createLinkedPair();
     await server.connect(a);
     // a client with MCP Apps support, so the panel's user-action tools exist
     client = new Client({ name: "t", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } } as never });
     await client.connect(b);
-    expect((await call("open_project", { path: fakeProjectFile() })).text).toMatch(/Checkpoint 'session-start' saved/);
+    firstOpen = (await call("open_project", { path: fakeProjectFile() })).text;
+    expect(firstOpen).toMatch(/Checkpoint 'session-start' saved/);
   });
 
   afterAll(async () => {
     await client?.close();
     await ctx?.bridge.stop();
+  });
+
+  it("asks for the card and never opens the browser by itself", async () => {
+    expect(browserOpens).toEqual([]);
+    expect(firstOpen).toContain("Call open_sim_panel now");
+    expect(firstOpen).not.toMatch(/browser/);
+    expect((await call("open_workspace")).text).toContain("http://viewer/");
+    expect(browserOpens).toEqual([true]);
+  });
+
+  it("doesn't open the browser by itself where the chat can't show the card either", async () => {
+    const opened: boolean[] = [];
+    const plainCtx: AppContext = { bridge: fakeBridge({ staleHeartbeatMs: 30_000, hungGraceMs: 10_000 }), autosave: true, workspace: tempDir(), startWaitMs: 20_000, viewer: { url: "http://viewer/", open: (force = false) => (opened.push(force), true) } };
+    const server = createServer(plainCtx);
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(a);
+    const plain = new Client({ name: "t", version: "1" });
+    await plain.connect(b);
+    try {
+      const text = ((await plain.callTool(viaCodesys("open_project", { path: fakeProjectFile() }))) as { content: { text: string }[] }).content[0]!.text;
+      expect(text).not.toMatch(/open_sim_panel|browser/);
+      expect(opened).toEqual([]);
+    } finally {
+      await plain.close();
+      await plainCtx.bridge.stop();
+    }
+  }, 30_000);
+
+  describe("batch", () => {
+    const write = (implementation: string) => ({ action: "write_object", args: { path: "PLC_PRG", implementation } });
+    const read = { action: "read_objects", args: { paths: ["PLC_PRG"] } };
+
+    it("runs several actions in one call and returns every result", async () => {
+      const r = await call("batch", { calls: [write("c := 1;"), read, { action: "wait", args: { ms: 1 } }] });
+      expect(r.isError, r.text).toBe(false);
+      expect(r.text).toMatch(/^\[1\/3\] write_object:\n/);
+      expect(r.text).toMatch(/\[2\/3\] read_objects:\n[\s\S]*c := 1;/);
+      expect(r.text).toMatch(/\[3\/3\] wait:\nWaited 1 ms\./);
+      await call("revert_object", { path: "PLC_PRG" });
+    });
+
+    it("stops at the first step that fails and says what was left", async () => {
+      const before = (await call("read_objects", { paths: ["PLC_PRG"] })).text;
+      const r = await call("batch", { calls: [{ action: "delete_object", args: { path: "Nope" } }, write("d := 1;"), read] });
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/^\[1\/3\] delete_object FAILED:\n/);
+      expect(r.text).toMatch(/Stopped: the remaining 2 step\(s\) were not run\.$/);
+      expect((await call("read_objects", { paths: ["PLC_PRG"] })).text).toBe(before);
+    });
+
+    it("carries on after a failure when asked, and still reports the failure", async () => {
+      const r = await call("batch", { calls: [{ action: "delete_object", args: { path: "Nope" } }, read], continueOnError: true });
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/\[1\/2\] delete_object FAILED/);
+      expect(r.text).toMatch(/\[2\/2\] read_objects:\n/);
+    });
+
+    it("checks every step first, so a bad one leaves nothing half done", async () => {
+      const before = (await call("read_objects", { paths: ["PLC_PRG"] })).text;
+      const bad = await call("batch", { calls: [write("e := 1;"), { action: "write_object", args: { pth: "PLC_PRG" } }] });
+      expect(bad.isError).toBe(true);
+      expect(bad.text).toMatch(/^Step 2 \(write_object\) has invalid arguments, so nothing was run:/);
+      expect((await call("read_objects", { paths: ["PLC_PRG"] })).text).toBe(before);
+    });
+
+    it("refuses help, a nested batch and unknown actions", async () => {
+      for (const action of ["help", "batch", "nope"]) {
+        const r = await call("batch", { calls: [write("f := 1;"), { action }] });
+        expect(r.isError, action).toBe(true);
+        expect(r.text, action).toMatch(new RegExp(`^Step 2: '${action}' can't run in a batch, so nothing was run\\.`));
+      }
+    });
+
+    it("respects Pause Claude for each step", async () => {
+      await client.callTool({ name: "ui_hold", arguments: { on: true } });
+      const r = await call("batch", { calls: [read, write("g := 1;")] });
+      await client.callTool({ name: "ui_hold", arguments: { on: false } });
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/\[1\/2\] read_objects:\n/);
+      expect(r.text).toMatch(/\[2\/2\] write_object FAILED:\npaused_by_user:/);
+    });
   });
 
   it("outlines the fake project", async () => {

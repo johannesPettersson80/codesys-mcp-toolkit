@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import { ROOT, tempDir } from "./helpers.js";
+import { ROOT, tempDir, viaCodesys } from "./helpers.js";
 
 const CLI = join(ROOT, "dist", "cli.js");
 const UI = { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } };
@@ -43,12 +43,14 @@ describe.skipIf(!existsSync(CLI))("shared session", () => {
   it("starts one owner for several processes, which share its state", async () => {
     const [a, b] = await Promise.all([start(true), start(false)]);
     expect(readdirSync(state).filter((f) => /^daemon-.*\.json$/.test(f))).toHaveLength(1);
+    // the shared session advertises MCP Apps too: this is the path Claude Desktop uses
+    expect(a.getServerCapabilities()?.extensions).toHaveProperty(["io.modelcontextprotocol/ui"]);
     // capabilities pass through: the UI client gets the panel's tools, the other doesn't
     expect((await a.listTools()).tools.map((t) => t.name)).toContain("ui_hold");
     expect((await b.listTools()).tools.map((t) => t.name)).not.toContain("ui_hold");
     // the user pauses Claude in A's panel; B's tools see it
     expect((await a.callTool({ name: "ui_hold", arguments: { on: true } })).structuredContent).toMatchObject({ ok: true });
-    const write = { name: "write_object", arguments: { path: "PLC_PRG", implementation: "x := 1;" } };
+    const write = viaCodesys("write_object", { path: "PLC_PRG", implementation: "x := 1;" });
     expect(text(await b.callTool(write))).toMatch(/^paused_by_user:/);
     await a.callTool({ name: "ui_hold", arguments: { on: false } });
     expect(text(await b.callTool(write))).not.toMatch(/paused_by_user/);

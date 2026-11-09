@@ -12,7 +12,7 @@ import { CodesysBridge } from "../../src/bridge/bridge.js";
 import { resolveCodesys } from "../../src/codesys/install.js";
 import { createServer } from "../../src/server.js";
 import type { AppContext } from "../../src/tools.js";
-import { tempDir, WATCHER } from "../helpers.js";
+import { tempDir, viaCodesys, WATCHER } from "../helpers.js";
 
 const LONG = 300_000;
 const dir = tempDir("cmcp-codesyssim-");
@@ -22,7 +22,7 @@ let ctx: AppContext;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function call(name: string, args: Record<string, unknown> = {}) {
-  const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+  const r = (await client.callTool(viaCodesys(name, args))) as { content: { text: string }[]; isError?: boolean };
   const text = r.content.map((c) => c.text).join("\n");
   log.push(`> ${name} ${JSON.stringify(args)}\n${text}`);
   return { text, isError: !!r.isError };
@@ -167,6 +167,16 @@ describe("live CODESYS: its own simulation", () => {
     await ok("codesys_sim_write", { values: { [`${P}xInput`]: "FALSE" } });
     await sleep(200);
     await ok("codesys_sim_cycle");
+  }, LONG);
+
+  it("runs a whole simulation step as one batch", async () => {
+    const write = (v: string) => ({ action: "codesys_sim_write", args: { values: { [`${P}xInput`]: v } } });
+    const wait = (ms: number) => ({ action: "wait", args: { ms } });
+    const cycle = { action: "codesys_sim_cycle" };
+    const r = await ok("batch", {
+      calls: [write("TRUE"), wait(200), cycle, wait(2_200), cycle, { action: "codesys_sim_read", args: { names: [`${P}xTimerDone`] } }, write("FALSE"), wait(200), cycle],
+    });
+    expect(r).toMatch(/\[6\/9\] codesys_sim_read:\nPLC_PRG\.xTimerDone = TRUE/);
   }, LONG);
 
   it("reports a bad name and keeps the good ones", async () => {

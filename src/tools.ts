@@ -1,6 +1,6 @@
-/** Model-facing MCP tools for CODESYS (ST only). */
+/** The CODESYS actions (ST only), all behind the one model-facing tool. See actions.ts. */
 import { copyFile } from "node:fs/promises";
-import { annotationsFor, type ToolAnnotations } from "./annotations.js";
+import { registerActionTool, type Action, type RegisterAction } from "./actions.js";
 import { getUiCapability } from "@modelcontextprotocol/ext-apps/server";
 import { existsSync } from "node:fs";
 import { isAbsolute, join, resolve as resolvePath } from "node:path";
@@ -41,6 +41,8 @@ export interface AppContext {
   driver?: Driver;
   /** The browser viewer (the panel in a normal browser window). */
   viewer?: { url: string; open(force?: boolean): boolean };
+  /** The server log. */
+  log?: (message: string) => void;
 }
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
@@ -199,16 +201,17 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   const b = ctx.bridge;
   /** Tools that change the project are held while the user has paused Claude (panel). */
   const HELD = new Set(["write_object", "create_object", "delete_object", "rename_object", "revert_object", "add_library", "remove_library", "configure_task", "create_project", "open_project", "close_project", "codesys_sim_start", "codesys_sim_stop", "codesys_sim_control", "codesys_sim_cycle", "codesys_sim_write", "codesys_sim_force", "codesys_sim_unforce"]);
-  const reg = ((name: string, config: unknown, cb: (...a: unknown[]) => unknown) =>
-    server.registerTool(
-      name,
-      { ...(config as object), annotations: annotationsFor(name, (config as { annotations?: ToolAnnotations }).annotations) } as never,
-      (async (...a: unknown[]) => {
+  const actions = new Map<string, Action>();
+  const reg: RegisterAction = (name, config, cb) => {
+    actions.set(name, {
+      ...config,
+      run: async (args) => {
         if (HELD.has(name) && ctx.driver?.held) return text(heldMessage(ctx.driver, name), true);
         ctx.driver?.note(name); // the panel picks its view from what Claude does
-        return cb(...a);
-      }) as never,
-    )) as unknown as McpServer["registerTool"];
+        return cb(args as never);
+      },
+    });
+  };
   const cache = ctx.cache;
   /** Export all ST (and keep the workspace cache current). */
   const exportNodes = async (): Promise<TreeNode[]> => {
@@ -233,16 +236,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
    */
   const sessionStart = async (project: string): Promise<string> => {
     cache?.reset(project);
-    // Where the chat can show MCP Apps the user watches in the panel (open_sim_panel);
-    // otherwise the same workspace opens in their browser.
-    const inChat = !!getUiCapability(server.server.getClientCapabilities());
-    const shown = inChat
-      ? " Call open_sim_panel now so the user can watch the project tree and the code as you write it."
-      : ctx.viewer
-        ? ctx.viewer.open()
-          ? ` The live CODESYS workspace opened in the user's browser (${ctx.viewer.url}): it shows the project tree and the code as you write it.`
-          : ` Live CODESYS workspace for the user: ${ctx.viewer.url}`
-        : "";
+    // The card is the only live view that opens by itself; its Open workspace button expands it.
+    const shown = getUiCapability(server.server.getClientCapabilities()) ? " Call open_sim_panel now so the user can watch the project tree and the code as you write it." : "";
     if (!cache && !ctx.changes) return shown;
     let nodes: TreeNode[];
     try {
@@ -262,7 +257,6 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     {
       description: "Show the CODESYS connection state, installation and open project. Never waits on CODESYS, so it is safe while CODESYS starts or is busy.",
       inputSchema: z.object({}),
-      annotations: { readOnlyHint: true },
     },
     async () => {
       const h = b.health();
@@ -371,7 +365,6 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         wholeProject: z.boolean().optional().describe("List from the project root (devices, pool) instead of the application"),
         maxDepth: z.number().int().min(0).optional(),
       }),
-      annotations: { readOnlyHint: true },
     },
     async ({ root, wholeProject, maxDepth }) =>
       run(ctx, async () => {
@@ -388,7 +381,6 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       description:
         "Read the declaration and implementation text of ST objects: POUs, methods, property accessors (path 'FB/Prop/Get'), actions, interfaces, DUTs and GVLs. Objects with a graphical body (SFC, CFC, LD, FBD) come with their PLCopenXML, to read (they stay read-only).",
       inputSchema: z.object({ paths: z.array(pathArg).min(1).max(50) }),
-      annotations: { readOnlyHint: true },
     },
     async ({ paths }) =>
       run(ctx, async () => {
@@ -475,7 +467,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
 
   reg(
     "delete_object",
-    { description: "Delete an object (and its children).", inputSchema: z.object({ path: pathArg }), annotations: { destructiveHint: true } },
+    { description: "Delete an object (and its children).", inputSchema: z.object({ path: pathArg }) },
     async ({ path }) =>
       run(ctx, async () => {
         const r = await b.call<{ path: string; saved?: boolean }>("object.delete", { path, ...save() });
@@ -510,7 +502,6 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         caseSensitive: z.boolean().optional(),
         maxResults: z.number().int().min(1).max(500).optional(),
       }),
-      annotations: { readOnlyHint: true },
     },
     async ({ pattern, regex, caseSensitive, maxResults }) =>
       run(ctx, async () => {
@@ -569,7 +560,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
 
   reg(
     "list_libraries",
-    { description: "List the libraries referenced by the application's Library Manager.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
+    { description: "List the libraries referenced by the application's Library Manager.", inputSchema: z.object({}) },
     async () =>
       run(ctx, async () => {
         const r = await b.call<{ libraries: { name: string; is_placeholder?: boolean; namespace?: string; effective_resolution?: string }[] }>("libraries.list");
@@ -608,7 +599,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
 
   reg(
     "list_tasks",
-    { description: "List the application's tasks with interval, priority and the POUs each one calls.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
+    { description: "List the application's tasks with interval, priority and the POUs each one calls.", inputSchema: z.object({}) },
     async () =>
       run(ctx, async () => {
         const r = await b.call<{ tasks: TaskInfo[] }>("tasks.list");
@@ -668,7 +659,6 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       inputSchema: z.object({
         path: pathArg.optional().describe("An object (details) or a folder (its overview). Omit for the whole application."),
       }),
-      annotations: { readOnlyHint: true },
     },
     async ({ path }) =>
       run(ctx, async () => {
@@ -683,7 +673,6 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       description:
         "Variables mapped to I/O (AT %I, %Q, %M addresses, including the %I* / %Q* placeholders that the device tree maps), with type, owner (GVL or POU) and comment. Filter by text in the name, address or comment.",
       inputSchema: z.object({ filter: z.string().optional() }),
-      annotations: { readOnlyHint: true },
     },
     async ({ filter }) =>
       run(ctx, async () => {
@@ -722,7 +711,6 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       description:
         "The device tree: each device with its identification (type, id, version) and whether it is enabled, and its I/O channels with address, description and the variable mapped to each (from CODESYS's I/O mapping export). Read-only; never goes online.",
       inputSchema: z.object({ io: z.boolean().optional().describe("Include I/O channels (default true)") }),
-      annotations: { readOnlyHint: true },
     },
     async ({ io }) =>
       run(ctx, async () => {
@@ -764,7 +752,6 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         symbol: z.string().optional().describe("One object in the library, e.g. 'BLINK', or text to search for"),
         version: z.string().optional().describe("A specific installed version, e.g. '3.5.17.0' (default: the one referenced, else the newest)"),
       }),
-      annotations: { readOnlyHint: true },
     },
     async ({ name, symbol, version }) =>
       run(ctx, async () => {
@@ -819,7 +806,6 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       description:
         "What changed in the project's ST since a checkpoint (default 'session-start'): added, removed and modified objects with line counts. Pass path for the line diff of one object (declaration and implementation, with line numbers).",
       inputSchema: z.object({ since: z.string().optional(), path: pathArg.optional() }),
-      annotations: { readOnlyHint: true },
     },
     async ({ since, path }) =>
       run(ctx, async () => {
@@ -873,6 +859,31 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     async ({ path, to }) => run(ctx, () => revertObject(ctx, path, to ?? "session-start")),
   );
 
+  reg(
+    "wait",
+    {
+      description: "Pause, usually inside a batch: the simulation runs at real speed, so a step like codesys_sim_force, wait, codesys_sim_cycle, codesys_sim_read lets a timer elapse.",
+      inputSchema: z.object({ ms: z.number().int().min(1).max(60_000).describe("How long, in milliseconds (at most 60000)") }),
+    },
+    async ({ ms }) => {
+      await new Promise((r) => setTimeout(r, ms));
+      return text(`Waited ${ms} ms.`);
+    },
+  );
+
+  reg(
+    "open_workspace",
+    {
+      description: "Open the live CODESYS workspace in the user's browser: the project tree, the code as you write it, compile problems and the changes to review. Call this only when the user asks for it there.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      if (!ctx.viewer) return text("The browser workspace is switched off (--no-viewer).", true);
+      ctx.viewer.open(true);
+      return text(`The live CODESYS workspace opened in the user's browser: ${ctx.viewer.url} (if they don't see it, give them this link).`);
+    },
+  );
+
   registerCodesysSim(ctx, {
     reg,
     run: (fn) => run(ctx, fn),
@@ -881,6 +892,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       return f.errors ? f.text : undefined;
     },
   });
+
+  registerActionTool(server, actions);
 }
 
 /**

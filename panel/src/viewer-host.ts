@@ -37,7 +37,7 @@ async function mount() {
   const r = await fetch(`/panel.html?t=${encodeURIComponent(token)}`);
   if (!r.ok) {
     banner.hidden = false;
-    banner.textContent = r.status === 403 ? "This link is out of date: ask Claude to call open_sim_panel again for a new one." : `Could not load the panel (${r.status}).`;
+    banner.textContent = r.status === 403 ? "This link is out of date: ask Claude to open the workspace again." : `Could not load the panel (${r.status}).`;
     return;
   }
   const html = await r.text();

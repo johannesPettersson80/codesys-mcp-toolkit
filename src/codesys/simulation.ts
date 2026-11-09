@@ -5,8 +5,8 @@
  * no breakpoints: CODESYS's scripting offers none, and its breakpoint commands
  * work at an editor cursor, which a session without a window doesn't have.
  */
-import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
+import type { RegisterAction } from "../actions.js";
 import type { AppContext } from "../tools.js";
 
 interface Status {
@@ -28,7 +28,7 @@ export interface CodesysSimState {
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
 export interface SimToolDeps {
-  reg: McpServer["registerTool"];
+  reg: RegisterAction;
   run: (fn: () => Promise<string>) => Promise<ToolResult>;
   /** Compile; the build report when it has errors, otherwise undefined. */
   compileErrors: () => Promise<string | undefined>;
@@ -81,7 +81,7 @@ export function registerCodesysSim(ctx: AppContext, deps: SimToolDeps): void {
 
   reg(
     "codesys_sim_status",
-    { description: "Whether CODESYS's own simulation is running, the application's state and the forced variables.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
+    { description: "Whether CODESYS's own simulation is running, the application's state and the forced variables.", inputSchema: z.object({}) },
     async () => run(() => status("sim.status")),
   );
 
@@ -105,7 +105,7 @@ export function registerCodesysSim(ctx: AppContext, deps: SimToolDeps): void {
 
   reg(
     "codesys_sim_read",
-    { description: "Read current values from CODESYS's own simulation. A read takes about 0.4 s, so read everything you need in one call.", inputSchema: z.object({ names }), annotations: { readOnlyHint: true } },
+    { description: "Read current values from CODESYS's own simulation. A read takes about 0.4 s, so read everything you need in one call.", inputSchema: z.object({ names }) },
     async ({ names: list }: { names: string[] }) =>
       run(async () => {
         const r = await b.call<{ values: Record<string, string>; errors: Record<string, string> }>("sim.read", { names: list });

@@ -92,8 +92,25 @@ compile until you open it in that version.
 
 ## Tools
 
-| Tool | What it does |
+The toolkit gives Claude one tool, `codesys`, and each operation below is an
+action of it:
+
+```json
+{ "action": "read_objects", "args": { "paths": ["PLC_PRG"] } }
+```
+
+Claude Desktop asks for approval per tool. Choose **Always allow** the first
+time it asks about `codesys`, and once more for `open_sim_panel`, the card in
+the chat. After that it doesn't ask again. The press on `codesys` covers every
+action, including the ones that change or delete project code, so use a copy
+of any project you can't afford to lose or keep it in version control.
+`checkpoint` and `revert_object` undo Claude's changes to code.
+
+| Action | What it does |
 | --- | --- |
+| `help` | Lists the actions and their arguments, or one action's. |
+| `batch` | Runs up to 50 actions in one call, in order. Much faster than separate calls: nearly all of a session's time is the round trip between calls. Every step is checked first; it stops at the first failure unless `continueOnError`. |
+| `wait` | Pauses up to 60 s, so a batch can let a simulation timer elapse. |
 | `codesys_status` | Connection state, CODESYS version, last project. Never waits on CODESYS. |
 | `open_project` | Open a `.project`, or a `.projectarchive` (extracted next to it, never over an existing project). Opened without version upgrades. Reports the compiler version and defines. Refuses to drop unsaved changes unless `discardChanges`. |
 | `create_project` | New project from CODESYS's `Standard.project` (default), `empty`, or your own template file. |
@@ -113,6 +130,7 @@ compile until you open it in that version.
 | `get_devices` | The device tree: identification, enabled state, and each device's I/O channels with the variable mapped to each (from CODESYS's I/O mapping export). |
 | `get_library_api` | What a library offers. A referenced source library (`.library`) gives the real interface of its FBs, functions and types. A compiled library, or one the project doesn't reference yet, gives its objects and descriptions from CODESYS's library browser, without parameters. |
 | `checkpoint` / `get_changes` / `revert_object` | Snapshots of the project's ST, and of graphical bodies as PLCopenXML (one is taken automatically when a project is opened: `session-start`), what changed since one (with a line diff per object), and putting an object back, including its methods and properties. A deleted SFC, CFC, LD or FBD object is re-imported from its XML. |
+| `open_workspace` | Open the live workspace in the browser again. |
 
 ### Object paths
 
@@ -154,7 +172,7 @@ Pass `check_all: false` for CODESYS's plain build.
 ### Task calls
 
 `configure_task` can add a program call to a task. CODESYS V3.5 SP21's
-scripting can't remove one: `remove()` leaves the call in place. The tool
+scripting can't remove one: `remove()` leaves the call in place. The action
 says so, and you remove it in CODESYS (Task Configuration > the task > select
 the call > Remove Call).
 
@@ -164,7 +182,7 @@ the call > Remove Call).
 simulation. It uses the real CODESYS compiler and libraries, needs no
 controller and nothing installed beyond CODESYS.
 
-| Tool | What it does |
+| Action | What it does |
 | --- | --- |
 | `codesys_sim_start` | Compile and load the application, stopped (or running with `run: true`) |
 | `codesys_sim_stop` | End the simulation, release forces, unlock the project |
@@ -177,7 +195,7 @@ controller and nothing installed beyond CODESYS.
 | `codesys_sim_unforce` | Release the named forces, or all of them |
 
 - **The project is locked while it runs.** `compile`, `write_object` and the
-  other tools that change the project are refused until `codesys_sim_stop`.
+  other actions that change the project are refused until `codesys_sim_stop`.
   The simulation setting on the device is never saved into your project.
 - **It runs at real speed.** Timers follow the clock, even between single
   cycles: to let a `TON` elapse, wait and then run another cycle.
@@ -191,8 +209,16 @@ controller and nothing installed beyond CODESYS.
 
 **In the chat.** Right after opening or creating a project, Claude opens the
 panel inside the chat (clients with
-[MCP Apps](https://modelcontextprotocol.io/extensions/apps)), so you watch
-the project tree and the code as it is written.
+[MCP Apps](https://modelcontextprotocol.io/extensions/apps)), so you watch the
+project tree and the code as it is written. MCP ties a panel to one tool, so
+this is a separate tool, `open_sim_panel`, with its own approval. It is a
+compact card with the status (including a running CODESYS simulation), the
+object Claude is working on, and how many objects changed this session.
+
+**In your browser, if you ask.** The browser never opens by itself. Ask Claude
+for it (`open_workspace`) and the same workspace opens there. It is served on
+127.0.0.1 only, with a random token in the link, and reaches only the panel's
+own tools. `--no-viewer` turns it off.
 
 **Views.** The panel switches view by what Claude is doing:
 
@@ -204,16 +230,7 @@ the project tree and the code as it is written.
 Click a view to stay on it; **Follow Claude** switches back to following. The
 full-screen workspace has the same view tabs and lays itself out for each.
 
-**In your browser, as a fallback.** In a chat that can't show MCP Apps,
-`open_sim_panel` opens the same workspace in your default browser instead. It
-is served on 127.0.0.1 only, with a random token in the link, and reaches
-only the panel's own tools.
-
-In the chat it is a compact card with the status (including a running CODESYS
-simulation), the object Claude is working on, and how many objects changed
-this session.
-
-**Open workspace** switches to full screen, or expands in place where the
+**Open workspace** on the chat card switches to full screen, or expands in place where the
 client has no full screen. The workspace is laid out like CODESYS:
 
 - **Project tree** with badges: changed since you last reviewed it (A/M),
@@ -232,14 +249,13 @@ refers to what is on your screen.
   and Revert. Accept marks the current text as reviewed, and the badges and
   diff then compare with it. Revert writes the reviewed text back to
   CODESYS. Claude's `get_changes` still compares with the session start.
-- **Pause Claude** (card and workspace): Claude's tools that change the
+- **Pause Claude** (card and workspace): Claude's actions that change the
   project or the simulation answer `paused_by_user` until you resume. Its
-  reading tools still work.
+  reading actions still work.
 
-Claude's own changes always go through its tools. The panel never calls
-CODESYS to read: the tools keep a project cache current as they work. The
-one exception is Revert, which you start. In clients without MCP Apps,
-`open_sim_panel` returns a text snapshot.
+Claude's own changes always go through its actions. The panel never calls
+CODESYS to read: the actions keep a project cache current as they work. The
+one exception is Revert, which you start.
 
 ## How it works
 
@@ -309,7 +325,8 @@ code must stay valid IronPython 2.7: ASCII-only, no f-strings.
 
 ## Migrating from v1
 
-- Tools no longer take `projectFilePath`. Call `open_project` once.
+- Everything is now an action of the one `codesys` tool.
+- Actions don't take `projectFilePath`. Call `open_project` once.
 - `create_pou`, `create_method` and `create_property` are now `create_object`
   with a `kind`.
 - `set_pou_code` is now `write_object`.

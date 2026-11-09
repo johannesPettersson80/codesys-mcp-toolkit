@@ -3,13 +3,13 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createServer } from "../src/server.js";
 import type { AppContext } from "../src/tools.js";
-import { fakeBridge, fakeProjectFile, tempDir } from "./helpers.js";
+import { fakeBridge, fakeProjectFile, tempDir, viaCodesys } from "./helpers.js";
 
 let client: Client;
 let ctx: AppContext;
 
 async function call(name: string, args: Record<string, unknown> = {}) {
-  const r = (await client.callTool({ name, arguments: args })) as { content: { type: string; text: string }[]; isError?: boolean };
+  const r = (await client.callTool(viaCodesys(name, args))) as { content: { type: string; text: string }[]; isError?: boolean };
   return { text: r.content.map((c) => c.text).join("\n"), isError: !!r.isError };
 }
 
@@ -28,11 +28,13 @@ afterAll(async () => {
 });
 
 describe("MCP tools over the real watcher", () => {
-  it("lists the v2 tool set", async () => {
+  it("lists the v2 actions", async () => {
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(
+    const actions = (tools.find((t) => t.name === "codesys")!.inputSchema.properties!.action as { enum: string[] }).enum;
+    expect([...actions].sort()).toEqual(
       [
         "add_library",
+        "batch",
         "checkpoint",
         "get_changes",
         "get_devices",
@@ -57,15 +59,17 @@ describe("MCP tools over the real watcher", () => {
         "create_project",
         "delete_object",
         "get_project_tree",
+        "help",
         "list_libraries",
         "list_tasks",
         "open_project",
-        "open_sim_panel",
+        "open_workspace",
         "read_objects",
         "remove_library",
         "rename_object",
         "save_project",
         "search_code",
+        "wait",
         "write_object",
       ].sort(),
     );

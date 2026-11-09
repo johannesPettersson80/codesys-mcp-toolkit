@@ -14,9 +14,12 @@ Rewrite. See README "Migrating from v1".
   JSON op requests, heartbeat, hang/crash detection and restart) instead of
   a cold `--runscript` per call.
 - ESM TypeScript on MCP SDK v2 (`@modelcontextprotocol/server`), Node 20+.
-- Tools act on the open project; new tool set (`read_objects`,
-  `write_object`, `create_object`, `get_project_tree`, `search_code`,
-  `compile`, `list_libraries`, `add_library`, `list_tasks`, `codesys_status`, ...).
+- One tool, `codesys`, so a client that asks for approval per tool asks once.
+  Each operation is an action of it (`read_objects`, `write_object`,
+  `create_object`, `get_project_tree`, `search_code`, `compile`,
+  `list_libraries`, `add_library`, `list_tasks`, `codesys_status`, ...), and
+  actions work on the open project. `help` lists them with their arguments,
+  and `batch` runs several in one call.
 - Structured Text only; graphical objects are listed as `[non-ST]`.
 - No login or download to a controller. The online functions are used only
   for CODESYS's own simulation.
@@ -35,10 +38,12 @@ Rewrite. See README "Migrating from v1".
 - `get_library_api`: interfaces of referenced source libraries.
 - `checkpoint`, `get_changes`, `revert_object`: change tracking against
   snapshots, with an automatic `session-start` snapshot on open.
-- `open_sim_panel`: a live panel (MCP App).
-  - **Browser workspace:** opening or creating a project opens the same
-    workspace in the default browser, served on 127.0.0.1 with a token, for
-    chats that can't show MCP Apps. Options `--viewer-port`, `--no-viewer`.
+- `open_sim_panel`: a live panel inside the chat (MCP App), which Claude opens
+  after opening or creating a project. It is a separate tool with its own
+  approval. Open workspace on the card expands it.
+- `open_workspace`: the same workspace in the default browser, when the user
+  asks for it, served on 127.0.0.1 with a token. Options `--viewer-port`,
+  `--no-viewer`.
 - Panel views that follow Claude's work: Code (live code with new lines
   marked) and Review (accept or revert each changed object, with its
   added/removed line counts; in the chat card the changes open in place).
@@ -77,8 +82,6 @@ Rewrite. See README "Migrating from v1".
   event, core, watchdog) and add program calls; `list_tasks` shows the event,
   core and watchdog. Removing a call is refused with an explanation: SP21's
   scripting can't do it.
-- Tool annotations (read-only, non-destructive, destructive; all local), so
-  clients can tell harmless tools from ones that overwrite project code.
 - Shared session: server processes started with the same options share one
   background owner (one CODESYS), so the panel shows the project the chat
   works on. `--no-shared` runs in-process as before.
@@ -98,6 +101,9 @@ Rewrite. See README "Migrating from v1".
     are sent to Claude as model context. They use app-only `ui_*` tools.
 
 ### Fixed
+- The server advertises the MCP Apps extension (`io.modelcontextprotocol/ui`)
+  in its capabilities. A host may otherwise treat the card tool as plain text
+  and show no card.
 - `create_project` makes a project that compiles (#4). CODESYS's shipped
   `Standard.project` can be years old: SP22's names device 3.1.3.0 and
   `IoStandard, 3.1.3.1`. The new copy is brought up to the running CODESYS's

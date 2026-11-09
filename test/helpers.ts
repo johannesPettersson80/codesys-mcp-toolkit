@@ -12,6 +12,11 @@ export function tempDir(prefix = "cmcp-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
+/** callTool parameters for one action of the `codesys` tool. */
+export function viaCodesys(action: string, args: Record<string, unknown> = {}) {
+  return { name: "codesys", arguments: { action, args } };
+}
+
 /** A bridge that runs the real watcher under CPython with the fake scriptengine. */
 export function fakeBridge(overrides: Partial<BridgeOptions> = {}): CodesysBridge {
   return new CodesysBridge({

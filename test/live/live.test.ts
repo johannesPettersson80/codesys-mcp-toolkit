@@ -12,7 +12,7 @@ import { resolveCodesys } from "../../src/codesys/install.js";
 import { createServer } from "../../src/server.js";
 import type { AppContext } from "../../src/tools.js";
 import { ChangeStore } from "../../src/codesys/changes.js";
-import { tempDir, WATCHER } from "../helpers.js";
+import { tempDir, viaCodesys, WATCHER } from "../helpers.js";
 
 const LONG = 600_000;
 let client: Client;
@@ -21,7 +21,7 @@ const dir = tempDir("cmcp-live-");
 const log: string[] = [];
 
 async function call(name: string, args: Record<string, unknown> = {}) {
-  const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+  const r = (await client.callTool(viaCodesys(name, args))) as { content: { text: string }[]; isError?: boolean };
   const text = r.content.map((c) => c.text).join("\n");
   log.push(`> ${name} ${JSON.stringify(args)}\n${text}`);
   return { text, isError: !!r.isError };

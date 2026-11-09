@@ -21,6 +21,9 @@ import type { Driver } from "./driver.js";
 
 export const PANEL_URI = "ui://codesys/sim-panel.html";
 
+/** The name the browser viewer's own connection uses; it isn't a card. */
+export const VIEWER_CLIENT = "codesys-viewer";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** The built single-file panel (dist/panel/sim-panel.html). */
@@ -49,24 +52,35 @@ export interface PanelDeps {
   driver?: Driver;
   /** Revert an object in CODESYS to a checkpoint (the revert_object logic). */
   revert?: (path: string, to: string) => Promise<string>;
-  /** The browser viewer, opened by open_sim_panel. */
-  viewer?: () => { url: string; open(force?: boolean): boolean } | undefined;
+  /** The server log: how far a card got, since a client can accept the tool and draw nothing. */
+  log?: (message: string) => void;
 }
 
 export function registerPanel(server: McpServer, ws: PanelDeps = { project: () => undefined }): void {
+  const clientName = () => server.server.getClientVersion()?.name ?? "the client";
+  let pageRunning = false;
+
   registerAppResource(
     server,
     "CODESYS panel",
     PANEL_URI,
     { mimeType: RESOURCE_MIME_TYPE, description: "Live view of the CODESYS project: tree, code, compile problems and changes to review." },
-    async () => ({ contents: [{ uri: PANEL_URI, mimeType: RESOURCE_MIME_TYPE, text: panelHtml(), _meta: { ui: { prefersBorder: true } } }] }),
+    async () => {
+      ws.log?.(`card: ${clientName()} fetched the panel page`);
+      return { contents: [{ uri: PANEL_URI, mimeType: RESOURCE_MIME_TYPE, text: panelHtml(), _meta: { ui: { prefersBorder: true } } }] };
+    },
   );
 
+  const tools: RegisteredTool[] = [];
+
+  // Separate from the `codesys` tool because MCP ties a panel to a tool's definition:
+  // on `codesys` it would mount a new panel on every call. So it costs its own approval.
+  // Listed for every client: Claude Desktop's Code tab draws the card without declaring MCP Apps.
   registerAppTool(
     server,
     "open_sim_panel",
     {
-      description: "Show the live CODESYS panel to the user: the project tree, the code as you write it, compile problems and the changes to review. Read-only. Returns a text snapshot too.",
+      description: "Show the live CODESYS panel to the user in this chat: the project tree, the code as you write it, compile problems and the changes to review. Read-only. Returns a text snapshot too.",
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       _meta: { ui: { resourceUri: PANEL_URI } },
@@ -74,16 +88,11 @@ export function registerPanel(server: McpServer, ws: PanelDeps = { project: () =
     async () => {
       const panelId = randomUUID();
       latestPanel = panelId;
+      ws.log?.(`card: ${clientName()} called open_sim_panel`);
       const project = ws.project();
       const sim = ws.codesysSim?.();
       const lines = [`Panel opened. ${project ? `Project: ${project}.` : "No project is open yet."}`];
       if (sim) lines.push(`CODESYS simulation: application ${sim.state}.`);
-      // A chat that can't show MCP Apps gets the same panel in the browser instead.
-      const v = ws.viewer?.();
-      if (v && !getUiCapability(server.server.getClientCapabilities())) {
-        v.open(true);
-        lines.push(`This chat can't show the panel, so it opened in the user's browser: ${v.url} (if they don't see it, give them this link).`);
-      }
       // Some hosts show the model only structuredContent when it is present,
       // so the snapshot goes there too, not just in content.
       const text = lines.join("\n");
@@ -92,7 +101,6 @@ export function registerPanel(server: McpServer, ws: PanelDeps = { project: () =
   );
 
   const appOnly = { ui: { resourceUri: PANEL_URI, visibility: ["app" as const] } };
-  const tools: RegisteredTool[] = [];
 
   tools.push(
     registerAppTool(
@@ -105,6 +113,10 @@ export function registerPanel(server: McpServer, ws: PanelDeps = { project: () =
         _meta: appOnly,
       },
       async ({ panelId }) => {
+        if (!pageRunning && clientName() !== VIEWER_CLIENT) {
+          pageRunning = true;
+          ws.log?.(`card: the panel page is running in ${clientName()}`);
+        }
         const codesysSim = ws.codesysSim?.();
         const state: PanelState = {
           current: !panelId || !latestPanel || panelId === latestPanel,

@@ -17,7 +17,7 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { createServer } from "./server.js";
-import { panelHtml } from "./panel.js";
+import { panelHtml, VIEWER_CLIENT } from "./panel.js";
 import type { AppContext } from "./tools.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -46,7 +46,7 @@ export async function startViewer(ctx: AppContext, o: { port?: number; log?: (m:
   const server = createServer(ctx);
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
-  const client = new Client({ name: "codesys-viewer", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } } as never });
+  const client = new Client({ name: VIEWER_CLIENT, version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } } as never });
   await client.connect(b);
 
   const body = (req: http.IncomingMessage) =>
@@ -68,7 +68,7 @@ export async function startViewer(ctx: AppContext, o: { port?: number; log?: (m:
         res.end(text);
       };
       if (req.method === "GET" && u.pathname === "/") {
-        if (u.searchParams.get("t") !== token) return send(403, "text/plain; charset=utf-8", "This link is out of date. Ask Claude to call open_sim_panel for a new one.");
+        if (u.searchParams.get("t") !== token) return send(403, "text/plain; charset=utf-8", "This link is out of date. Ask Claude to open the workspace again.");
         const html = viewerHtml();
         return html ? send(200, "text/html; charset=utf-8", html) : send(500, "text/plain", "The viewer is not built. Run npm run build.");
       }

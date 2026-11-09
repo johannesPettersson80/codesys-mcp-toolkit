@@ -12,8 +12,7 @@ import { tankNodes, tankTestNodes } from "./fixtures/tank.js";
 import { ProjectCache } from "../src/codesys/cache.js";
 import { ChangeStore, diffObjects, snapshot } from "../src/codesys/changes.js";
 import { Driver } from "../src/driver.js";
-import { annotatedTools } from "../src/annotations.js";
-import { tempDir } from "./helpers.js";
+import { tempDir, viaCodesys } from "./helpers.js";
 
 const UI = { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } };
 
@@ -32,7 +31,8 @@ async function connect(withUi: boolean, project?: string, driver: Driver | null 
     const r = (await client.callTool({ name, arguments: args })) as { structuredContent?: T; content: { text: string }[]; isError?: boolean };
     return r;
   };
-  return { client, call, cache, changes, driver, project: proj, ctx };
+  const act = async (name: string, args: Record<string, unknown> = {}) => (await client.callTool(viaCodesys(name, args))) as { content: { text: string }[]; isError?: boolean };
+  return { client, call, act, cache, changes, driver, project: proj, ctx };
 }
 
 describe("panel registration", () => {
@@ -48,13 +48,15 @@ describe("panel registration", () => {
     }
   });
 
-  it("drops the app-only tools for clients without MCP Apps support", async () => {
+  it("advertises the MCP Apps extension, or a host runs the card tool as plain text", async () => {
+    const { client } = await connect(true);
+    expect(client.getServerCapabilities()).toMatchObject({ extensions: { "io.modelcontextprotocol/ui": {} }, tools: {}, resources: {} });
+  });
+
+  it("keeps the card tool for clients that don't declare MCP Apps, and hides the panel's own tools", async () => {
     const { client } = await connect(false);
     await new Promise((r) => setTimeout(r, 20));
-    const names = (await client.listTools()).tools.map((t) => t.name);
-    expect(names).toContain("open_sim_panel");
-    expect(names).not.toContain("get_sim_state");
-    expect(names).not.toContain("get_workspace");
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["codesys", "open_sim_panel"]);
   });
 
   it("serves the panel as a single HTML resource", async () => {
@@ -85,6 +87,19 @@ describe("panel data", () => {
     expect(open.content[0]!.text).toBe(`Panel opened. Project: ${project}.`);
     // hosts that show only structuredContent still get the snapshot
     expect(open.structuredContent).toMatchObject({ snapshot: open.content[0]!.text });
+  });
+
+  it("logs how far a card got, so a client that draws nothing can be told apart", async () => {
+    const { client, call, ctx } = await connect(true);
+    const lines: string[] = [];
+    ctx.log = (m) => lines.push(m);
+    await call("open_sim_panel");
+    expect(lines).toEqual(["card: t called open_sim_panel"]);
+    await client.readResource({ uri: PANEL_URI });
+    expect(lines[1]).toBe("card: t fetched the panel page");
+    await call("get_sim_state");
+    await call("get_sim_state");
+    expect(lines.slice(2)).toEqual(["card: the panel page is running in t"]);
   });
 
   it("reports a running CODESYS simulation", async () => {
@@ -153,20 +168,20 @@ describe("user actions", () => {
   });
 
   it("Pause Claude holds the tools that change things, not the reading ones", async () => {
-    const { call, driver } = await connect(true);
+    const { call, act, driver } = await connect(true);
     expect((await call<Act>("ui_hold", { on: true })).structuredContent!).toEqual({ ok: true, message: "paused Claude" });
     expect(driver!.held).toBe(true);
     const s = (await call<PanelState>("get_sim_state")).structuredContent!;
     expect(s.held).toBe(true);
     expect(s.heldSince).toBe(driver!.since);
     for (const [tool, args] of [["codesys_sim_force", { values: { "PLC_PRG.x": "TRUE" } }], ["write_object", { path: "FB_PI", implementation: "x" }], ["create_project", { path: "C:/x.project" }]] as const) {
-      const r = await call(tool, args);
+      const r = await act(tool, args);
       expect(r.isError, tool).toBe(true);
       expect(text(r), tool).toMatch(new RegExp(`^paused_by_user: .*so ${tool} is held`));
     }
-    expect(text(await call("codesys_status"))).not.toMatch(/paused_by_user/);
+    expect(text(await act("codesys_status"))).not.toMatch(/paused_by_user/);
     expect((await call<Act>("ui_hold", { on: false })).structuredContent!.message).toBe("resumed Claude");
-    expect(text(await call("write_object", { path: "FB_PI", implementation: "x" }))).not.toMatch(/paused_by_user/);
+    expect(text(await act("write_object", { path: "FB_PI", implementation: "x" }))).not.toMatch(/paused_by_user/);
   });
 
   it("report failures as ok:false instead of tool errors", async () => {
@@ -193,22 +208,5 @@ describe("user actions", () => {
     expect((await call<Obj>("get_object", { path: "FB_PI/Reset" })).structuredContent!.base!.implementation).toBe("rY := 1.0;");
     // session-start is untouched, so get_changes still shows Claude's whole session
     expect(diffObjects((await changes.load(project, "session-start"))!.objects, snapshot(cache.nodes!)).map((c) => c.path)).toEqual(["FB_PI/Reset"]);
-  });
-});
-
-describe("tool annotations", () => {
-  it("classify every tool, so clients can skip approvals for harmless ones", async () => {
-    const { client } = await connect(false);
-    await new Promise((r) => setTimeout(r, 20));
-    const tools = (await client.listTools()).tools;
-    const known = new Set(annotatedTools());
-    for (const t of tools) {
-      expect(known.has(t.name), `${t.name} needs a kind in src/annotations.ts`).toBe(true);
-      expect(t.annotations?.openWorldHint, t.name).toBe(false);
-    }
-    const ann = (n: string) => tools.find((t) => t.name === n)!.annotations;
-    expect(ann("write_object")).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(ann("codesys_sim_force")).toMatchObject({ readOnlyHint: false, destructiveHint: false });
-    expect(ann("read_objects")).toMatchObject({ readOnlyHint: true });
   });
 });
