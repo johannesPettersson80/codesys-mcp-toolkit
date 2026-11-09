@@ -22,5 +22,6 @@ jobs:
           python-version: "3.12"
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      # Before the tests: the viewer and shared-session tests use the build.
       - run: npm run build
+      - run: npm test
