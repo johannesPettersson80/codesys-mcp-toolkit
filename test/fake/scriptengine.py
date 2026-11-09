@@ -42,6 +42,7 @@ class _Enum(object):
 class VersionUpdateFlags(object):
     NoUpdates = _Enum("NoUpdates", 1)
     SilentMode = _Enum("SilentMode", 2)
+    UpdateAll = _Enum("UpdateAll", 4)
 
 
 class PouType(object):
@@ -81,6 +82,24 @@ class _Text(object):
         self.text = new
 
 
+class _DeviceId(object):
+    def __init__(self, version):
+        self.type, self.id, self.version = 4096, "0000 0001", version
+
+
+class _DeviceDescription(object):
+    def __init__(self, version):
+        self.device_id = _DeviceId(version)
+
+
+class _DeviceRepository(object):
+    def get_all_devices(self):
+        return [_DeviceDescription(v) for v in ("3.5.9.0", "3.5.22.40", "3.5.17.0")]
+
+
+device_repository = _DeviceRepository()
+
+
 class FakeObject(object):
     def __init__(self, name, type_guid, parent=None, decl=None, impl=None, folder=False, graphical=False):
         self._name = name
@@ -89,6 +108,7 @@ class FakeObject(object):
         self.parent = parent
         self.is_folder = folder
         self.is_device = type_guid == G_DEVICE
+        self._device_version = "3.5.21.0"
         self._children = []
         self._decl = _Text(decl) if decl is not None else None
         self._impl = _Text(impl) if impl is not None else None
@@ -212,9 +232,11 @@ class FakeObject(object):
 
     # device
     def get_device_identification(self):
-        class _Id(object):
-            type, id, version = 4096, "0000 0001", "3.5.21.0"
-        return _Id()
+        return _DeviceId(self._device_version)
+
+    def update(self, device_id):
+        self._device_version = device_id.version
+        _mark_dirty()
 
     def is_enabled(self):
         return True
@@ -379,8 +401,9 @@ def _mark_dirty():
         projects.primary.dirty = True
 
 
-def _sample(proj):
+def _sample(proj, device_version="3.5.21.0"):
     dev = FakeObject("Device", G_DEVICE, None)
+    dev._device_version = device_version
     proj._roots.append(dev)
     plc = FakeObject("Plc Logic", G_PLCLOGIC, dev)
     app = FakeObject("Application", G_APP, plc)
@@ -403,7 +426,7 @@ def _dump(proj):
     def rec(o):
         d = {"name": o._name, "type": o.type, "folder": o.is_folder, "graphical": o._graphical,
              "decl": o._decl.text if o._decl else None, "impl": o._impl.text if o._impl else None,
-             "app": o is proj.active_application, "children": [rec(c) for c in o._children]}
+             "app": o is proj.active_application, "device_version": o._device_version, "children": [rec(c) for c in o._children]}
         if isinstance(o, FakeLibMan):
             d["libs"] = o._libs
         if isinstance(o, FakeTask):
@@ -421,6 +444,7 @@ def _load(proj, data):
             o = FakeTask(d["name"], parent, d.get("pous", []))
         else:
             o = FakeObject(d["name"], d["type"], parent, d["decl"], d["impl"], d["folder"], d["graphical"])
+        o._device_version = d.get("device_version", "3.5.21.0")
         if parent is None:
             proj._roots.append(o)
         if d.get("app"):
@@ -442,7 +466,7 @@ class _Projects(object):
         if raw.startswith("{"):
             _load(proj, json.loads(raw))
         else:
-            _sample(proj)
+            _sample(proj, "3.1.3.0" if raw.startswith("OLD-TEMPLATE") else "3.5.21.0")
         self.primary = proj
         return proj
 

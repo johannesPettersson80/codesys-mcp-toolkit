@@ -14,9 +14,8 @@ trip.
 
 ## Requirements
 
-- Windows with **CODESYS V3.5** and its **Scripting** add-on (tested with SP21,
-  Scripting 4.1 and 4.2. On SP22 everything except compiling is tested so far.
-  SP16 and later should work)
+- Windows with **CODESYS V3.5** and its **Scripting** add-on (tested with SP21
+  and SP22 on Scripting 4.2, and SP21 on 4.1; SP16 and later should work)
 - **Node.js 20** or later
 
 ## Install
@@ -85,8 +84,11 @@ install, and its log says which one it picked and why.
 
 `codesys_status` and the panel show the CODESYS install, the Scripting add-on
 and the project's compiler version. The toolkit never updates a project's
-compiler or library versions: a project opened in a newer CODESYS keeps its
-own, and `open_project` says so.
+compiler or library versions, and `open_project` says when they differ from
+the running CODESYS. Each version keeps its own devices and libraries, so a
+project from an older CODESYS may report missing libraries until you update it
+in the CODESYS window. A project that needs a newer compiler opens, but can't
+compile until you open it in that version.
 
 ## Tools
 
@@ -463,9 +465,9 @@ Each session folder keeps `watcher.log` for troubleshooting.
 - **`startup_failed` / `startup_timeout`**: check the profile name and that
   CODESYS starts by hand. The error includes the last lines of `watcher.log`.
 - **Library errors after `create_project`** (e.g. `IoStandard`, [#4](https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues/4)):
-  the Standard template references libraries that must be installed in your
-  CODESYS. Install them with the CODESYS Library Repository, or pass your own
-  `template`.
+  the default template is brought up to the running CODESYS, so its libraries
+  should resolve. A template you pass yourself is used as it is. If libraries
+  are still missing, install them with the CODESYS Library Repository.
 - **`hung` / `timeout`**: CODESYS was restarted. Re-open the project.
 - **`dialog`**: CODESYS opened a dialog, named in the error, that a session
   without a window can't answer. CODESYS was stopped and restarts on the next

@@ -1,7 +1,23 @@
 /** Choosing a CODESYS profile when several service packs are installed side by side. */
 import { describe, expect, it } from "vitest";
 import { compareProfiles, pickedNewest, profileKey } from "../src/codesys/install.js";
-import { versionLine } from "../src/tools.js";
+import { describeBuildSettings, versionLine } from "../src/tools.js";
+
+describe("the compiler version on opening a project", () => {
+  const at = (compiler: string, codesys: string) => describeBuildSettings({ path: "p", compiler_version: compiler }, codesys);
+  it("needs no note when it matches this CODESYS", () => {
+    expect(at("3.5.22.40", "CODESYS 3.5.22.40")).toBe(" Compiler version 3.5.22.40.");
+  });
+  it("says an older project keeps its version", () => {
+    expect(at("3.5.21.0", "CODESYS 3.5.22.40")).toMatch(/keeps its version unless you update it/);
+  });
+  it("says a newer project can't compile here, and what it needs", () => {
+    expect(at("3.5.22.40", "CODESYS 3.5.21.0")).toBe(" Compiler version 3.5.22.40, which this CODESYS (3.5.21.0) doesn't have: the project won't compile here. Open it in CODESYS 3.5.22 or later.");
+  });
+  it("compares versions as numbers", () => {
+    expect(at("3.5.9.0", "CODESYS 3.5.21.0")).toMatch(/keeps its version/);
+  });
+});
 
 describe("the version line in the panel", () => {
   it("shows what is known", () => {

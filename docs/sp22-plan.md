@@ -100,10 +100,8 @@ can't find the Scripting add-on even once installed.
 - **The live suite on SP22: 9 of 14 pass.** Everything except compiling works:
   creating from the template, writing, reading, search, outline, the I/O list,
   libraries and status.
-- **Why the 5 compile tests fail:** the SP22 install lacks the library
-  `IoStandard, 3.1.3.1` and the device the Standard template uses ("Device not
-  installed to the system"). So every build of a new standard project has 17
-  errors. This is an incomplete install, not the toolkit.
+- **The 5 compile tests failed** because of the stale `Standard.project`. This
+  note first blamed an incomplete install, which was wrong; see Status below.
 - **Opening an SP21 project in SP22 works** (`TankTune.project` in the probe).
 
 ### 2. Make the live tests run against a chosen install
@@ -179,33 +177,34 @@ own fix step below.
 
 ## Status (9 November)
 
-Live, with Scripting 4.2 and truST 0.34: **SP21 24 of 24, SP22 16 of 24.** All
-8 SP22 failures are the `Build: 17 error(s)` assertion. Everything else passes
-on SP22, the simulation included.
+Live, with Scripting 4.2 and truST 0.34: **SP21 24 of 24, SP22 24 of 24.**
 
-**Waiting for a complete SP22 install.**
-- SP22's `Standard.project` asks for compiler 3.5.19.40, the library
-  `IoStandard, 3.1.3.1` and a device description for `PLCWinNT`. None of them
-  is installed, and the setup log stops at "CODESYS Compatibility Package
-  3.5.17.20".
-- The errors come from those references, not from SP22's compiler: the same
-  project gives the same 17 errors in SP21.
-- After a full setup (as administrator), run the live suite with `CODESYS_LIVE=1`
-  and `CODESYS_PATH=<SP22 CODESYS.exe>`.
-- If the template still doesn't build, `create_project` needs another way to
-  get a Standard project on SP22. Otherwise, change the README to "tested with
-  SP21 and SP22".
+**The SP22 compile failures were a toolkit bug, not the install.**
+- SP22 keeps its own repositories in `C:\ProgramData\CODESYS_D9B3C5D6`, with
+  Control Win 3.5.22.40, `IoStandard` 3.5.22.0 and the rest. The first checks
+  looked only in `C:\ProgramData\CODESYS` and wrongly called the install
+  incomplete. The Compatibility Package missing from SP22 doesn't matter here.
+- SP22's shipped `Standard.project` names compiler 3.5.19.40, device 3.1.3.0
+  and `IoStandard, 3.1.3.1`. It gives the same errors in SP21. SP21 passed only
+  because its copy on this machine is dated four days after the install and
+  already names 3.5.21.0.
+- `create_project` with the standard template now uses `project.open_new`. It
+  opens the new copy with `UpdateAll`, moves the device to the newest version
+  in the repository, saves and reopens. The reopen matters: CODESYS keeps
+  reporting the old template's load errors until then. A template the user
+  names and a project the user opens are never updated.
 
 **By step.**
 - **1. Done.** All 17 object types in `TankTune` map to the same kind on both
   versions. The same 3 GUIDs, outside the application, are unknown on both.
-- **2. Done, except the compile tests.**
+- **2. Done.**
   - Start-up in `--noUI` takes about 9 s on SP22.
-  - Opening across versions works both ways, with no refusal and no dialog: an
-    SP21 project in SP22, and an SP22 project in SP21.
-  - Not tested: a project that really needs compiler 3.5.22.
-    `set_compilerversion_to_newest()` reports 3.5.22.40 and the project saves,
-    but it reopens as 3.5.19.40, in SP22 too. Retest after the full install.
+  - Opening across versions works both ways, with no refusal and no dialog.
+    Compiling is another matter:
+    - An SP21 project in SP22 has 5 errors until it is updated in CODESYS:
+      its device and libraries aren't in SP22's repositories.
+    - An SP22 project in SP21 can't compile: "The configured compilerversion
+      '3.5.22.40' is not available in your installation".
   - The baseline run found a bug on any version: the watcher read request
     files without retrying, so a file held for a moment failed the call with
     `bad_request`. Fixed, with a test that fails on the old code.
@@ -219,14 +218,14 @@ on SP22, the simulation included.
     about 14 s to the error, a clean restart on the next call, and a shorter
     dialog left alone. It didn't fire in either live suite.
 - **4. Done.** `codesys_status`, `open_project` and the panel show the install,
-  the Scripting version and the compiler version. CODESYS's "refusal" of an
-  SP22 project in SP21 didn't happen, so there is no text for it yet.
+  the Scripting version and the compiler version. `open_project` says when a
+  project needs a newer compiler than the running CODESYS has.
 - **5. Done.** Defines are in the mirror (`src/sim/conditionals.ts`). With
   Scripting 4.1, `project_defined` blocks are left for truST and reported.
   The new POU methods take the same inputs as `create_pou`, so they aren't used.
 - **6. Done, except the optional automatic match.** The server log says which
   install was picked and why.
-- **7. Done, except "tested with SP22"**, which waits for the compile tests.
+- **7. Done.**
 
 ## Out of scope
 - **CODESYS's own Development System MCP Server.** It needs SP22.1, a

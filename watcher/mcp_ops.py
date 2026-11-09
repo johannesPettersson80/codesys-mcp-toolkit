@@ -374,6 +374,55 @@ def op_project_open(args):
     return _project_info(proj)
 
 
+def _version_key(v):
+    return [int(x) if x.isdigit() else 0 for x in to_text(v).split(".")]
+
+
+def _update_device_to_newest(dev):
+    """Move a device to the newest version of it in the repository. Returns that version, or None."""
+    did = dev.get_device_identification()
+    same = [d.device_id for d in se.device_repository.get_all_devices()
+            if d.device_id.type == did.type and to_text(d.device_id.id) == to_text(did.id)]
+    if not same:
+        return None
+    newest = max(same, key=lambda x: _version_key(x.version))
+    if _version_key(newest.version) <= _version_key(did.version):
+        return None
+    dev.update(newest)
+    return to_text(newest.version)
+
+
+def op_project_open_new(args):
+    """Open a project just copied from CODESYS's Standard.project and bring it up to this
+    CODESYS. The shipped file can be years old: SP22's names device 3.1.3.0 and IoStandard
+    3.1.3.1, which a current install doesn't have, so it can't compile. Only for such a
+    fresh copy: a project the user opens is never updated (see op_project_open)."""
+    path = args["path"]
+    cur = se.projects.primary
+    if cur is not None:
+        if _safe(lambda: cur.dirty, False) and not args.get("discard_changes"):
+            raise OpError("unsaved_changes", "Project %s has unsaved changes. Save it, or pass discardChanges." % to_text(cur.path))
+        cur.close()
+    flags = se.VersionUpdateFlags
+    proj = se.projects.open(path, update_flags=flags.UpdateAll | flags.SilentMode)
+    if proj is None:
+        raise OpError("open_failed", "CODESYS returned no project for %s" % path)
+    updated = None
+    for obj in proj.get_children(False):
+        if _safe(lambda: obj.is_device, False):
+            updated = _update_device_to_newest(obj) or updated
+    proj.save()
+    # CODESYS keeps reporting the old template's load errors until the project is loaded again.
+    proj.close()
+    proj = se.projects.open(path, update_flags=flags.NoUpdates | flags.SilentMode)
+    if proj is None:
+        raise OpError("open_failed", "CODESYS returned no project for %s" % path)
+    info = _project_info(proj)
+    if updated:
+        info["updated_device"] = updated
+    return info
+
+
 def op_project_create_empty(args):
     path = args["path"]
     if os.path.exists(path):
@@ -1078,6 +1127,7 @@ OPS = {
     "api.probe": op_api_probe,
     "ping": op_ping,
     "project.open": op_project_open,
+    "project.open_new": op_project_open_new,
     "project.create_empty": op_project_create_empty,
     "project.info": op_project_info,
     "project.save": op_project_save,

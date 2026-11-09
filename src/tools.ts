@@ -108,9 +108,12 @@ export interface ProjectInfo {
 export function describeBuildSettings(r: ProjectInfo, codesysLabel?: string): string {
   const out: string[] = [];
   if (r.compiler_version) {
+    const label = codesysLabel?.replace(/^CODESYS\s*/i, "");
     const installed = /(\d+\.\d+\.\d+)\.\d+/.exec(codesysLabel ?? "")?.[1];
-    const older = installed && !r.compiler_version.startsWith(installed);
-    out.push(`Compiler version ${r.compiler_version}${older ? ` (this CODESYS is ${codesysLabel?.replace(/^CODESYS\s*/i, "")}; the project keeps its version unless you update it in CODESYS)` : ""}.`);
+    const key = (v: string) => v.split(".").slice(0, 3).map((n) => n.padStart(4, "0")).join(".");
+    const compared = installed ? key(r.compiler_version).localeCompare(key(installed)) : 0;
+    if (compared > 0) out.push(`Compiler version ${r.compiler_version}, which this CODESYS (${label}) doesn't have: the project won't compile here. Open it in CODESYS ${r.compiler_version.split(".").slice(0, 3).join(".")} or later.`);
+    else out.push(`Compiler version ${r.compiler_version}${compared < 0 ? ` (this CODESYS is ${label}; the project keeps its version unless you update it in CODESYS)` : ""}.`);
   }
   if (r.defines?.length) out.push(`Compiler defines: ${r.defines.join(", ")}.`);
   if (r.project_defines?.length) out.push(`Project defines: ${r.project_defines.join(", ")}.`);
@@ -302,7 +305,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   reg(
     "create_project",
     {
-      description: "Create a new CODESYS project and open it. template 'standard' copies CODESYS's Standard.project (device + application + PLC_PRG); 'empty' creates an empty project; any other value is a path to a template .project file.",
+      description: "Create a new CODESYS project and open it. template 'standard' copies CODESYS's Standard.project (device + application + PLC_PRG) and brings the new copy up to this CODESYS's device and compiler; 'empty' creates an empty project; any other value is a path to a template .project file, used as it is.",
       inputSchema: z.object({
         path: z.string().describe("New .project file path"),
         template: z.string().optional().describe("'standard' (default), 'empty', or a template file path"),
@@ -322,10 +325,11 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         const src = t === "standard" ? (ctx.templatesDir ? join(ctx.templatesDir, "Standard.project") : "") : absPath(ctx, t);
         if (!src || !existsSync(src)) throw new Error(`Template not found: ${src || "CODESYS Templates folder unknown"}`);
         await copyFile(src, target);
-        const r = await b.call<ProjectInfo>("project.open", { path: target }, { timeoutMs: 300_000 });
+        // CODESYS's own template can be years old; a new project should match this CODESYS.
+        const r = await b.call<ProjectInfo & { updated_device?: string }>(t === "standard" ? "project.open_new" : "project.open", { path: target }, { timeoutMs: 300_000 });
         ctx.project = r;
         await sessionStart(r.path);
-        return `Created ${r.path} from ${t === "standard" ? "Standard.project" : src}. Active application: ${r.application ?? "none"}.${describeBuildSettings(r, ctx.codesys?.label)} Run compile to check that its libraries are installed.`;
+        return `Created ${r.path} from ${t === "standard" ? "Standard.project" : src}. Active application: ${r.application ?? "none"}.${describeBuildSettings(r, ctx.codesys?.label)}${r.updated_device ? ` Device updated to ${r.updated_device}.` : ""} Run compile to check that its libraries are installed.`;
       }),
   );
 

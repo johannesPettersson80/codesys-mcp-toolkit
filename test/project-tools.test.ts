@@ -1,5 +1,6 @@
 /** Phase 5 project tools: declaration parser, outline, I/O list, change tracking, scenarios. */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
@@ -184,6 +185,38 @@ settling_time_s = { max = 200 }
       "FAIL x.y: no such metric or watched variable (add it to watch)",
     ]);
   });
+});
+
+describe("create_project", () => {
+  it("brings CODESYS's own template up to this CODESYS, and nothing else", async () => {
+    const templatesDir = tempDir();
+    writeFileSync(join(templatesDir, "Standard.project"), "OLD-TEMPLATE"); // the fake's device 3.1.3.0
+    const workspace = tempDir();
+    const ctx: AppContext = { bridge: fakeBridge({ staleHeartbeatMs: 30_000, hungGraceMs: 10_000 }), autosave: true, workspace, templatesDir, startWaitMs: 20_000 };
+    const server = createServer(ctx);
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(a);
+    const client = new Client({ name: "t", version: "1" });
+    await client.connect(b);
+    const call = async (name: string, args: Record<string, unknown>) => ((await client.callTool({ name, arguments: args })) as { content: { text: string }[] }).content[0]!.text;
+    try {
+      expect(await call("create_project", { path: "New.project" })).toMatch(/Device updated to 3\.5\.22\.40\./);
+      expect((JSON.parse(readFileSync(join(workspace, "New.project"), "utf8")) as { roots: { device_version: string }[] }).roots[0]!.device_version).toBe("3.5.22.40");
+
+      const mine = join(workspace, "MyTemplate.project");
+      writeFileSync(mine, "OLD-TEMPLATE");
+      expect(await call("create_project", { path: "FromMine.project", template: mine })).not.toMatch(/Device updated/);
+      expect(readFileSync(join(workspace, "FromMine.project"), "utf8")).toBe("OLD-TEMPLATE");
+
+      const existing = join(workspace, "Existing.project");
+      writeFileSync(existing, "OLD-TEMPLATE");
+      await call("open_project", { path: existing });
+      expect(readFileSync(existing, "utf8")).toBe("OLD-TEMPLATE");
+    } finally {
+      await client.close();
+      await ctx.bridge.stop();
+    }
+  }, 30_000);
 });
 
 describe("project tools over MCP (fake CODESYS)", () => {

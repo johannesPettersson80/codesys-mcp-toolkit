@@ -116,6 +116,13 @@ Rewrite. See README "Migrating from v1".
     context. They use app-only `ui_*` tools.
 
 ### Fixed
+- `create_project` makes a project that compiles (#4). CODESYS's shipped
+  `Standard.project` can be years old: SP22's names device 3.1.3.0 and
+  `IoStandard, 3.1.3.1`. The new copy is brought up to the running CODESYS's
+  device, compiler and libraries. Templates you pass and projects you open are
+  never updated.
+- `open_project` says when a project needs a newer compiler than the running
+  CODESYS has, and so can't compile there.
 - A dialog CODESYS waits on during a call ends the call in about 15 seconds
   with an error that names it. Before, the call ran into its timeout (up to 5
   minutes).
