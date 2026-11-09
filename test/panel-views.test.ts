@@ -70,3 +70,29 @@ describe("panel review view", () => {
     expect(reviewView(true)).toContain("Nothing to review");
   });
 });
+
+describe("compile problems in the editor", () => {
+  it("maps messages to lines of one object, errors over warnings", async () => {
+    const { problemLines } = await import("../panel/src/workspace.js");
+    model.ws = {
+      version: 1,
+      project: "Tank.project",
+      tree: [],
+      compile: {
+        at: "2026-11-09T10:00:00Z",
+        errors: 1,
+        warnings: 2,
+        messages: [
+          { severity: "warning", text: "Unused variable 'rE'", object: "FB_PI", position: "Line 14, Column 5 (Decl)", code: "C0373" },
+          { severity: "warning", text: "Implicit conversion", object: "FB_PI", position: "Line 2, Column 3 (Impl)" },
+          { severity: "error", text: "Cannot convert type", object: "FB_PI", position: "Line 2, Column 5 (Impl)", code: "C0032" },
+          { severity: "error", text: "Elsewhere", object: "PRG_Tank", position: "Line 1, Column 1 (Impl)" },
+        ],
+      },
+    };
+    const p = problemLines("fb_pi");
+    expect(p.get("decl:14")).toEqual({ severity: "warning", text: "Warning C0373 (column 5): Unused variable 'rE'" });
+    expect(p.get("impl:2")).toEqual({ severity: "error", text: "Error C0032 (column 5): Cannot convert type" });
+    expect(p.size).toBe(2);
+  });
+});

@@ -166,6 +166,8 @@ interface BuildMessage {
   number?: number | null;
   object?: string | null;
   position?: string | null;
+  /** Length of the token the message points at (from CODESYS's message). */
+  length?: number | null;
 }
 
 export function formatBuild(messages: BuildMessage[]): { text: string; errors: number } {
@@ -547,7 +549,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
             at: new Date().toISOString(),
             errors: f.errors,
             warnings: counted.length - f.errors,
-            messages: counted.map((m) => ({ severity: /error/i.test(m.severity) ? "error" : "warning", text: m.text, object: m.object, position: m.position, ...(m.prefix ? { code: `${m.prefix}${m.number ?? ""}` } : {}) })),
+            messages: counted.map((m) => ({ severity: /error/i.test(m.severity) ? "error" : "warning", text: m.text, object: m.object, position: m.position, ...(m.length ? { length: m.length } : {}), ...(m.prefix ? { code: `${m.prefix}${m.number ?? ""}` } : {}) })),
           });
         }
         const checked = r.steps?.includes("check_all") ? " Checked every POU, including those no task calls." : "";
@@ -879,8 +881,20 @@ export async function revertObject(ctx: AppContext, path: string, name: string):
   }
   // 2. recreate what was removed (parents first) and rewrite what changed
   const ordered = [...old].sort((x, y) => x.path.split("/").length - y.path.split("/").length);
+  const imported: string[] = [];
+  const under = (p: string, q: string) => p.toLowerCase().startsWith(q.toLowerCase() + "/");
   for (const o of ordered) {
+    if (imported.some((q) => under(o.path, q))) continue; // came back with its graphical parent
     const cur = nowBy.get(o.path.toLowerCase());
+    if (!cur && o.st === false) {
+      // A graphical body has no text to write: re-import it from the checkpoint's PLCopenXML.
+      if (!o.xml) throw new Error(`${o.path} has a graphical body, and checkpoint '${name}' holds no copy of it (taken before graphical objects were saved). Restore it in CODESYS.`);
+      const parent = o.path.includes("/") ? o.path.slice(0, o.path.lastIndexOf("/")) : undefined;
+      await b.call("object.import_xml", { parent, xml: o.xml, save: false }, { timeoutMs: 120_000 });
+      imported.push(o.path);
+      done.push(`recreated ${o.path} (graphical, from its PLCopenXML)`);
+      continue;
+    }
     if (!cur) {
       if (o.kind === "accessor") {
         // created with its property; write its text below

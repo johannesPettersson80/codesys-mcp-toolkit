@@ -12,7 +12,7 @@ export interface CompileResult {
   at: string;
   errors: number;
   warnings: number;
-  messages: { severity: string; text: string; object?: string | null; position?: string | null; code?: string }[];
+  messages: { severity: string; text: string; object?: string | null; position?: string | null; length?: number; code?: string }[];
 }
 
 export interface Focus {

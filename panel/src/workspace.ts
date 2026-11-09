@@ -41,6 +41,24 @@ export interface WorkspaceHooks {
   review(kind: string, path: string, btn: HTMLElement): void;
 }
 
+/**
+ * Compile errors and warnings of one object by line: "impl:12" -> the message.
+ * Positions read "Line 12, Column 5 (Impl)" (the column comes from CODESYS's offset).
+ */
+export function problemLines(path: string): Map<string, { severity: string; text: string }> {
+  const out = new Map<string, { severity: string; text: string }>();
+  for (const m of model.ws?.compile?.messages ?? []) {
+    if ((m.object ?? "").toLowerCase() !== path.toLowerCase()) continue;
+    const p = /Line (\d+)(?:, Column (\d+))?\s*\((Impl|Decl)\)/i.exec(m.position ?? "");
+    if (!p) continue;
+    const key = `${p[3]!.toLowerCase() === "decl" ? "decl" : "impl"}:${p[1]}`;
+    const prev = out.get(key);
+    if (prev?.severity === "error" && m.severity !== "error") continue; // an error wins over a warning
+    out.set(key, { severity: m.severity, text: `${m.severity === "error" ? "Error" : "Warning"}${m.code ? ` ${m.code}` : ""}${p[2] ? ` (column ${p[2]})` : ""}: ${m.text}` });
+  }
+  return out;
+}
+
 export class Workspace {
   tabs: string[] = store("ws-tabs", [] as string[]);
   active?: string = store("ws-active", undefined as string | undefined);
@@ -364,6 +382,7 @@ export class Workspace {
       out.push(`<div class="part">${part === "decl" ? "Declaration" : "Implementation"}</div>`);
       const lines = (text ?? "").replace(/\r\n?/g, "\n").replace(/\n+$/, "").split("\n");
       const hs = { inComment: false };
+      const problems = problemLines(path);
       if (this.diff && d.base) {
         const base = (part === "decl" ? d.base.declaration : d.base.implementation) ?? "";
         const ops = lineDiff(base.replace(/\r\n?/g, "\n").replace(/\n+$/, ""), lines.join("\n"));
@@ -391,8 +410,9 @@ export class Workspace {
             vals += `<span class="val">${esc(m[0])} = ${esc(localNames.get(k)!)}</span>`;
           }
         }
+        const problem = problems.get(`${part}:${no}`);
         out.push(
-          `<div class="ln ${part}${cur ? " cur" : ""}${sel ? " sel" : ""}" data-part="${part}" data-line="${no}" data-key="${part}:${no}"><span class="bp"${part === "impl" ? ` title="${bp ? "Clear breakpoint" : "Set breakpoint"}"` : ""}>${bp ? "●" : ""}</span><span class="no">${no}</span><span class="tx">${highlight(t, hs) || " "}${vals}</span></div>`,
+          `<div class="ln ${part}${cur ? " cur" : ""}${sel ? " sel" : ""}${problem ? ` ${problem.severity === "error" ? "has-err" : "has-wrn"}` : ""}" data-part="${part}" data-line="${no}" data-key="${part}:${no}"${problem ? ` title="${esc(problem.text)}"` : ""}><span class="bp"${part === "impl" ? ` title="${bp ? "Clear breakpoint" : "Set breakpoint"}"` : ""}>${bp ? "●" : ""}</span><span class="no">${no}</span><span class="tx">${highlight(t, hs) || " "}${vals}</span></div>`,
         );
       });
     }

@@ -278,7 +278,45 @@ def _node(ctx, obj, names, depth, with_text):
         impl = impl_of(obj)
         if impl is not None:
             node["implementation"] = impl
+        if st is False:
+            # A graphical body has no text: keep its PLCopenXML, so checkpoints can restore it.
+            xml = _export_xml(obj)
+            if xml:
+                node["xml"] = xml
     return node
+
+
+def _export_xml(obj):
+    import io
+    f = os.path.join(os.environ.get("CODESYS_MCP_DIR") or os.environ.get("TEMP") or ".", "node-export.xml")
+    try:
+        obj.export_xml(None, f, True)
+        with io.open(f, "r", encoding="utf-8-sig") as fh:
+            return fh.read()
+    except Exception:
+        return None
+    finally:
+        _safe(lambda: os.remove(f))
+
+
+def op_object_import_xml(args):
+    """Recreate an object from PLCopenXML (export_xml) under parent, e.g. a graphical POU
+    when a checkpoint is restored."""
+    import io
+    c = Ctx()
+    parent = c.resolve(args.get("parent") or ".")
+    before = set(name_of(x).lower() for x in children(parent))
+    f = os.path.join(os.environ.get("CODESYS_MCP_DIR") or os.environ.get("TEMP") or ".", "import.xml")
+    try:
+        with io.open(f, "w", encoding="utf-8") as fh:
+            fh.write(args["xml"] if not PY2 or isinstance(args["xml"], unicode) else args["xml"].decode("utf-8"))  # noqa: F821
+        parent.import_xml(None, f)
+    finally:
+        _safe(lambda: os.remove(f))
+    added = [c.path_of(x) for x in children(parent) if name_of(x).lower() not in before]
+    if not added:
+        raise OpError("codesys_error", "CODESYS imported nothing under %s." % (args.get("parent") or "the application"))
+    return {"added": added, "saved": c.save_if(args)}
 
 
 def _walk(ctx, root, root_names, max_depth, with_text, out):
@@ -561,9 +599,21 @@ def op_build(args):
                 "prefix": to_text(_safe(lambda: m.prefix)),
                 "number": _safe(lambda: int(m.number)),
                 "object": opath,
-                "position": to_text(_safe(lambda: m.position_text)),
+                "position": _exact_position(m),
+                "length": _safe(lambda: int(m.length)),
             })
     return {"messages": msgs, "steps": steps}
+
+
+def _exact_position(m):
+    """position_text, with the column from position_offset: CODESYS's text says
+    'Column 1' while position_offset holds where the token starts in the line
+    (verified on SP21: 'Line 2, Column 1' for an error at offset 4, length 6)."""
+    text = to_text(_safe(lambda: m.position_text))
+    offset = _safe(lambda: int(m.position_offset))
+    if text and offset is not None and offset >= 0:
+        text = re.sub(r"Column \d+", "Column %d" % (offset + 1), text, count=1)
+    return text
 
 
 def _library_manager(c):
@@ -1047,5 +1097,6 @@ OPS = {
     "task.configure": op_task_configure,
     "devices.list": op_devices_list,
     "objects.xml": op_objects_xml,
+    "object.import_xml": op_object_import_xml,
     "library.api": op_library_api,
 }

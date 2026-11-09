@@ -96,7 +96,7 @@ progress without waiting.
 | `get_io_list` | Variables mapped to I/O (`AT %I…`, `%Q…`, `%M…` and the `%I*` / `%Q*` placeholders), with type, owner and comment, and the channels mapped to variables in the device tree. |
 | `get_devices` | The device tree: identification, enabled state, and each device's I/O channels with the variable mapped to each (from CODESYS's I/O mapping export). |
 | `get_library_api` | The real interface of a referenced library's FBs, functions and types, read from the installed source library (`.library`). Compiled libraries carry no readable declarations. |
-| `checkpoint` / `get_changes` / `revert_object` | Snapshots of the project's ST (one is taken automatically when a project is opened: `session-start`), what changed since one (with a line diff per object), and putting an object back, including its methods and properties. |
+| `checkpoint` / `get_changes` / `revert_object` | Snapshots of the project's ST, and of graphical bodies as PLCopenXML (one is taken automatically when a project is opened: `session-start`), what changed since one (with a line diff per object), and putting an object back, including its methods and properties. A deleted SFC, CFC, LD or FBD object is re-imported from its XML. |
 
 ### Object paths
 

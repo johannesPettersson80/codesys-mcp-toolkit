@@ -19,6 +19,8 @@ export interface SnapObject {
   st?: boolean;
   declaration?: string;
   implementation?: string;
+  /** PLCopenXML of a graphical body (SFC, CFC, LD, FBD), to recreate it. */
+  xml?: string;
 }
 
 export interface Checkpoint {
@@ -42,6 +44,7 @@ export function snapshot(nodes: TreeNode[]): SnapObject[] {
       ...(n.st === false ? { st: false } : {}),
       ...(n.declaration !== undefined ? { declaration: n.declaration } : {}),
       ...(n.implementation !== undefined ? { implementation: n.implementation } : {}),
+      ...(n.xml !== undefined ? { xml: n.xml } : {}),
     }));
 }
 

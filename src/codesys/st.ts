@@ -42,6 +42,8 @@ export interface TreeNode {
   implementation?: string;
   /** Build properties that are set (excluded from build also when a folder excludes it). */
   build?: { excluded?: boolean; link_always?: boolean; external?: boolean };
+  /** PLCopenXML of a graphical body (st false), so a checkpoint can restore it. */
+  xml?: string;
 }
 
 const LEAD = /^(?:\s|\{[^}]*\}|\/\/[^\n]*(?:\n|$)|\(\*[\s\S]*?\*\))*/;

@@ -199,6 +199,17 @@ class FakeObject(object):
                     '<types><pous>\n<pou name="%s" pouType="program">\n<interface><addData><data name="a" /></addData></interface>\n'
                     '<body>\n%s\n</body>\n</pou>\n</pous></types>\n</project>\n' % (self._name, body))
 
+    def import_xml(self, reporter, path):
+        import re as _re
+        with open(path, "r", encoding="utf-8-sig") as f:
+            xml = f.read()
+        for m in _re.finditer(r'<pou name="([^"]+)" pouType="(\w+)">', xml):
+            body = xml[m.end():]
+            graphical = "<SFC>" in body.split("</pou>")[0]
+            decl = "%s %s\nVAR\nEND_VAR\n" % ({"program": "PROGRAM", "functionBlock": "FUNCTION_BLOCK"}.get(m.group(2), "PROGRAM"), m.group(1))
+            FakeObject(m.group(1), G_POU, self, decl, "", graphical=graphical)
+        _mark_dirty()
+
     # device
     def get_device_identification(self):
         class _Id(object):

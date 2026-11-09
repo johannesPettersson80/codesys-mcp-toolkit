@@ -155,11 +155,38 @@ with Scripting 4.2: 17 of 17 pass.
   - `create_program`, `create_function_block` and `create_function` take the
     same inputs as `create_pou`, so they aren't used.
 
-**Still open:**
-- batch 5's review and revert of graphical objects;
-- batch 7 (`get_signature_crc` for faster cache refreshes);
-- batch 9 (exact message columns, symbol configuration);
-- device I/O with real channels.
+**Final round (9 November).** Unit tests 166 pass; live on SP21: 17 of 17.
+
+- **5. Graphical objects in review:** done.
+  - The export carries the raw PLCopenXML of every object without ST text,
+    so every checkpoint holds it.
+  - `revert_object` re-imports a deleted graphical object with
+    `parent.import_xml(None, file)`, its children with it. Verified on SP21:
+    an SFC exported, deleted and imported comes back as an SFC.
+  - A checkpoint without the XML refuses, instead of recreating the object as
+    empty ST.
+- **9a. Exact compile positions:** done. CODESYS's `position_text` says
+  "Column 1" where `position_offset` holds the real start of the token, and
+  `length` its length (verified: offset 4, length 6 for `nTrips`). The
+  toolkit reports the real column. The full-screen editor marks lines with
+  errors and warnings, with the message on hover.
+- **9b. Symbol configuration: tried, not shipped.**
+  - `application.create_symbol_config(...)` works.
+  - But `get_only_configured_signatures()` and `get_all_signatures(False/True)`
+    return 0 signatures, even with a variable exported through
+    `{attribute 'symbol' := 'readwrite'}` and after `generate_code()`.
+  - Without a working read there is no tool. Retry with a project whose
+    symbol configuration was filled in the CODESYS editor.
+- **7. Signature CRC: not needed now.** The toolkit is the only thing driving
+  its windowless CODESYS, so the cache learns every change from the tools,
+  and a full export takes about a second here. Revisit for a big project.
+- **Device I/O with real channels: still unverified.**
+  - Scripted `add()` puts an EtherCAT master under the PLC (and
+    `devices.list` shows it nested).
+  - But no terminal in this repository can be added under it ("The device
+    cannot be added or inserted here"; a coupler such as EK1100 isn't
+    installed).
+  - Needs a project with real fieldbus I/O.
 
 ## Order
 Batches 1 and 2 first: they fix gaps a user hits on day one. Then 3 and 4,

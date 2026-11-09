@@ -237,6 +237,15 @@ describe("project tools over MCP (fake CODESYS)", () => {
     expect((await call("get_changes", { since: "nope" })).text).toMatch(/No checkpoint 'nope'\. Checkpoints: session-start/);
   });
 
+  it("restores a deleted graphical object from the checkpoint's PLCopenXML", async () => {
+    expect((await call("delete_object", { path: "SEQ_Fill" })).isError).toBe(false);
+    expect((await call("get_changes")).text).toMatch(/D SEQ_Fill/);
+    const r = await call("revert_object", { path: "SEQ_Fill" });
+    expect(r.text).toContain("recreated SEQ_Fill (graphical, from its PLCopenXML)");
+    expect((await call("get_project_tree")).text).toMatch(/SEQ_Fill .*\[non-ST\]/);
+    expect((await call("read_objects", { paths: ["SEQ_Fill"] })).text).toContain("<SFC>");
+  });
+
   it("keeps the workspace cache current as a side effect of the tools", async () => {
     const cache = ctx.cache!;
     expect(cache.project).toMatch(/Sample\.project$/);
