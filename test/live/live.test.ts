@@ -93,7 +93,7 @@ describe("live CODESYS", () => {
       ["write_object", { path: "FB_PI/Kp/Get", implementation: "Kp := _rKp;" }],
       ["write_object", { path: "FB_PI/Kp/Set", implementation: "_rKp := Kp;" }],
       ["create_object", { kind: "function", name: "F_Clamp", returnType: "REAL", declaration: "FUNCTION F_Clamp : REAL\nVAR_INPUT\n    x : REAL;\nEND_VAR", implementation: "F_Clamp := LIMIT(0.0, x, 100.0);" }],
-      ["create_object", { kind: "gvl", name: "GVL_Par", declaration: "VAR_GLOBAL\n    eMode : E_Mode := E_Mode.AUTO;\n    sTag : STRING := 'Nivå åäö';\nEND_VAR" }],
+      ["create_object", { kind: "gvl", name: "GVL_Par", declaration: "VAR_GLOBAL\n    eMode : E_Mode := E_Mode.AUTO;\n    sTag : STRING := 'Nivå åäö';\n    rLimit : REAL; // 液位上限 測試\nEND_VAR" }],
       ["write_object", { path: "PLC_PRG", declaration: "PROGRAM PLC_PRG\nVAR\n    fbPI : FB_PI;\n    itf : I_Resettable;\n    rOut : REAL;\nEND_VAR", implementation: "fbPI.Kp := 3.0;\nfbPI(rPV := 0.5, rSP := 1.0);\nrOut := F_Clamp(fbPI.rY);\nIF GVL_Par.eMode = E_Mode.MANUAL THEN\n    itf := fbPI;\n    itf.Reset();\nEND_IF" }],
     ];
     for (const [tool, args] of steps) {
@@ -106,6 +106,7 @@ describe("live CODESYS", () => {
     const r = await call("read_objects", { paths: ["I_Resettable", "GVL_Par", "FB_PI/Kp/Get"] });
     expect(r.text).not.toContain("IQueryInterface");
     expect(r.text).toContain("'Nivå åäö'");
+    expect(r.text).toContain("// 液位上限 測試"); // beyond Latin-1: PR #9
     expect(r.text).toContain("Kp := _rKp;");
   }, LONG);
 
@@ -217,15 +218,20 @@ describe("live CODESYS", () => {
     expect((await call("compile")).text).toMatch(/Build: 0 error\(s\)/);
   }, LONG);
 
-  it("reads a referenced library's interface", async () => {
+  it("lists a compiled library, and one the project doesn't reference", async () => {
     const libs = await call("list_libraries");
     log.push(`libraries: ${libs.text}`);
-    for (const name of ["Standard", "Util"]) {
-      const r = await call("get_library_api", { name });
-      log.push(`get_library_api ${name}: ${r.isError} ${r.text.slice(0, 600)}`);
-      if (/No library reference/.test(r.text)) continue;
-      expect(r.isError, r.text).toBe(false);
-    }
+    const compiled = await call("get_library_api", { name: "Standard" });
+    log.push(`get_library_api Standard: ${compiled.text.slice(0, 600)}`);
+    expect(compiled.isError, compiled.text).toBe(false);
+    expect(compiled.text).toMatch(/\d+ objects, from CODESYS's library browser/);
+    expect(compiled.text).toMatch(/^- TON\b/m);
+    expect((await call("list_libraries")).text).not.toMatch(/^Util,/m);
+    const other = await call("get_library_api", { name: "Util", symbol: "blink" });
+    log.push(`get_library_api Util: ${other.text.slice(0, 600)}`);
+    expect(other.isError, other.text).toBe(false);
+    expect(other.text).toMatch(/^- BLINK\b/m);
+    expect((await call("get_library_api", { name: "NoSuchLibrary" })).text).toMatch(/No installed library 'NoSuchLibrary'/);
   }, LONG);
 
   it("saves and reports status", async () => {
@@ -236,9 +242,12 @@ describe("live CODESYS", () => {
   }, LONG);
 
   it("adds and removes a library", async () => {
-    const add = await call("add_library", { name: "Util, * (System)" });
+    const add = await call("add_library", { name: "util" }); // a bare title, in any case
     log.push(`add_library: ${add.text}`);
-    if (add.isError) return; // Util isn't installed in every CODESYS
+    expect(add.isError, add.text).toBe(false);
+    expect(add.text).toMatch(/^Added library Util, \* \(System\)/);
+    expect((await call("list_libraries")).text).toMatch(/Util, \* \(System\)/);
+    expect((await call("add_library", { name: "NoSuchLibrary" })).text).toMatch(/No library titled 'NoSuchLibrary'/);
     const rm = await call("remove_library", { name: "Util" });
     log.push(`remove_library: ${rm.text}`);
     expect(rm.isError, rm.text).toBe(false);

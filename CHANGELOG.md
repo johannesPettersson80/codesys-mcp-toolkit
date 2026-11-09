@@ -18,45 +18,30 @@ Rewrite. See README "Migrating from v1".
   `write_object`, `create_object`, `get_project_tree`, `search_code`,
   `compile`, `list_libraries`, `add_library`, `list_tasks`, `codesys_status`, ...).
 - Structured Text only; graphical objects are listed as `[non-ST]`.
-- Offline only: no online/login/download APIs (enforced by tests).
+- No login or download to a controller. The online functions are used only
+  for CODESYS's own simulation.
+- Earlier development builds simulated in truST. That is gone; the options
+  `--trust-runtime`, `--mirror-dir` and `--no-sim` are accepted and ignored,
+  so existing client setups keep starting.
 
 ### Added
-- Simulation in [truST](https://github.com/johannesPettersson80/trust-platform)
-  (simulated I/O only, never a controller): `sync_mirror`, `sim_start`,
-  `sim_stop`, `sim_status`, `run_scans`, `run_for`, `set_breakpoint` (with ST
-  conditions), `clear_breakpoint`, `continue`, `step_over` / `step_in` /
-  `step_out`, `read_vars`, `write_var`, `force_var`, `unforce_var`,
-  `set_plant_param`, `run_experiment`, `experiment_log`.
-- `plant.toml`: truST plant models wired to ST variables by name, plus simple
-  simulated device feedback (valve limit switches, pump running).
-- Options `--trust-runtime`, `--mirror-dir`, `--no-sim`.
+- CODESYS's own simulation, with nothing extra to install: `codesys_sim_start`,
+  `codesys_sim_stop`, `codesys_sim_status`, `codesys_sim_control`,
+  `codesys_sim_cycle`, `codesys_sim_read`, `codesys_sim_write`,
+  `codesys_sim_force`, `codesys_sim_unforce`. Runs on the real compiler and
+  libraries; the project is locked while it runs.
 - `get_outline`, `get_io_list`: the project's structure and interfaces, and
   its I/O variables, from one export instead of reading every object.
 - `get_library_api`: interfaces of referenced source libraries.
 - `checkpoint`, `get_changes`, `revert_object`: change tracking against
   snapshots, with an automatic `session-start` snapshot on open.
-- `save_scenario`, `run_scenarios`: saved experiments with expectations, as
-  regression checks.
-- `run_tests`: unit tests that live in the CODESYS project as programs marked
-  `{attribute 'test'}`, run in truST, with results by CODESYS object.
-- `open_sim_panel`: a live, read-only panel (MCP App).
+- `open_sim_panel`: a live panel (MCP App).
   - **Browser workspace:** opening or creating a project opens the same
     workspace in the default browser, served on 127.0.0.1 with a token, for
     chats that can't show MCP Apps. Options `--viewer-port`, `--no-viewer`.
 - Panel views that follow Claude's work: Code (live code with new lines
-  marked), Unit tests, Simulation, Tuning (experiment runs overlaid and
-  compared) and Review (accept or revert each changed object, with its
-  added/removed line counts; in the chat card the changes open in place). New app-only
-  tool `get_experiments`.
-- Loop tuning with truST's Control Studio (truST 0.34+): `tune_setup`,
-  `tune_run` (`identify`, `search`, `validate`, `cancel`) and `tune_status`.
-  Identifies the plant on the free-running simulation, searches the program's
-  own controller coefficients against the fitted model and validates the
-  candidate with the actual ST. Works around truST 0.34's gaps (search
-  budget, requirements and Auto-entry tolerance, stuck journals, a refused
-  hand-back after validation) and refuses
-  GVL loop signals with what to change. The Tuning view shows the model fit,
-  the candidates and the validation (app-only tool `get_tuning`).
+  marked) and Review (accept or revert each changed object, with its
+  added/removed line counts; in the chat card the changes open in place).
 - `compile` checks every POU, GVL and DUT, including those no task calls (it
   sets "link always" for the build and restores it); `deep` also generates
   code, `clean` builds from scratch.
@@ -67,16 +52,22 @@ Rewrite. See README "Migrating from v1".
 - `codesys_status` and the panel show the Scripting add-on version next to
   the CODESYS install and compiler version. The server log says why an install
   was picked.
-- Build properties: objects excluded from the build are marked in the tree
-  and left out of the simulation. The application's compiler defines and,
-  with Scripting 4.2, the project defines and compiler version are reported;
-  the simulation mirror resolves `{IF defined (X)}` blocks with them, line
-  for line (truST can't take defines).
+- Build properties: objects excluded from the build are marked in the tree.
+  The application's compiler defines and, with Scripting 4.2, the project
+  defines and compiler version are reported.
 - `get_devices`: the device tree and its I/O channels with their mapped
   variables; `get_io_list` includes the device-tree mappings.
 - `read_objects` returns graphical bodies (SFC, CFC, LD, FBD) as PLCopenXML.
 - `open_project` opens `.projectarchive` files; `save_project` can write one.
-- `remove_library`.
+- `remove_library`. `add_library` also takes a bare title (`Util`), with an
+  optional version.
+- `get_library_api` lists compiled libraries and ones the project doesn't
+  reference, with their descriptions, from CODESYS's library browser cache.
+- A profile that isn't installed is refused at start, with the installed ones
+  listed. The `--workspace` folder is created if missing.
+- Profiles and templates are also found for programs laid out unlike
+  `CODESYS.exe`. See `docs/machine-expert-testing.md` for testing with
+  Schneider Machine Expert, which isn't supported yet.
 - Checkpoints keep graphical bodies as PLCopenXML; `revert_object` re-imports
   a deleted graphical object instead of recreating it as empty ST.
 - Compile messages give the real column (from CODESYS's offset; its own
@@ -89,31 +80,22 @@ Rewrite. See README "Migrating from v1".
 - Tool annotations (read-only, non-destructive, destructive; all local), so
   clients can tell harmless tools from ones that overwrite project code.
 - Shared session: server processes started with the same options share one
-  background owner (one CODESYS, one simulation), so the panel shows the
-  project the chat works on. `--no-shared` runs in-process as before.
-  - **In the chat:** a compact card with status, what Claude is working on,
-    changes, compile, tests and experiments.
+  background owner (one CODESYS), so the panel shows the project the chat
+  works on. `--no-shared` runs in-process as before.
+  - **In the chat:** a compact card with status, what Claude is working on
+    and changes.
   - **Full screen:** a CODESYS-style workspace with the project tree and
-    badges, editor tabs (current line, breakpoints, inline values, diff
-    against the session start), an inspector (watch, locals, breakpoints,
-    I/O), and trend, plant, tests, problems and activity tabs.
-  - **Follow Claude** opens what Claude edits and where the simulation stops.
+    badges, editor tabs (diff against the session start), and problems and
+    review tabs.
+  - **Follow Claude** opens what Claude edits.
   - **Selections** are sent to Claude as model context.
-  - **Panel-only tools** (`get_sim_state`, `get_events`, `get_source`,
-    `get_trend`, `get_workspace`, `get_object`, `get_locals`, `get_values`)
-    are hidden from clients without MCP Apps support. They read a project
-    cache that the tools keep current, so the panel never calls CODESYS.
-  - **Interaction:**
-    - set breakpoints from the gutter;
-    - Continue (in the background), Pause and step from a run bar;
-    - force, set or release variables from the watch list;
-    - edit plant parameters (one restart for a batch);
-    - accept or revert Claude's change per object (a `review` checkpoint
-      the badges and diffs compare with);
-    - **Pause Claude**, which holds Claude's changing tools with a
-      `paused_by_user` answer while the user drives.
-    User actions are journaled as "User: …" and sent to Claude as model
-    context. They use app-only `ui_*` tools.
+  - **Panel-only tools** (`get_sim_state`, `get_workspace`, `get_object`) are
+    hidden from clients without MCP Apps support. They read a project cache
+    that the tools keep current, so the panel never calls CODESYS.
+  - **Interaction:** accept or revert Claude's change per object (a `review`
+    checkpoint the badges and diffs compare with), and **Pause Claude**, which
+    holds Claude's changing tools with a `paused_by_user` answer. User actions
+    are sent to Claude as model context. They use app-only `ui_*` tools.
 
 ### Fixed
 - `create_project` makes a project that compiles (#4). CODESYS's shipped
@@ -123,21 +105,13 @@ Rewrite. See README "Migrating from v1".
   never updated.
 - `open_project` says when a project needs a newer compiler than the running
   CODESYS has, and so can't compile there.
+- A start-up timeout or a crash during a call reports what the program printed.
 - A dialog CODESYS waits on during a call ends the call in about 15 seconds
   with an error that names it. Before, the call ran into its timeout (up to 5
   minutes).
 - A request file held for a moment by another process (antivirus, indexer) no
   longer fails the call with `bad_request`.
-- The simulation doesn't guess `project_defined` on Scripting 4.1, which can't
-  read project defines: those blocks are left for truST and reported.
-  Conditions after the branch CODESYS takes are ignored.
 - `compile` returns errors and warnings with object, line and code (#10).
-- `write_var`, `force_var` and experiment settings refuse a name the program
-  doesn't have. truST 0.34 accepts such a write and drops it, so a typo looked
-  applied.
-- Build errors in the simulation map to CODESYS lines from truST's structured
-  diagnostics (`trust-lsp check --format json`, truST 0.34+), with the
-  error code; the text output is still parsed when trust-lsp is missing.
 - Non-ASCII text round-trips (UTF-8 end to end) (#9).
 - Reads work in Claude Desktop because they are tools, not resources (#6).
 - Declarations that drop or change the object header are rejected (#5).

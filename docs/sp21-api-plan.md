@@ -9,9 +9,9 @@ reviewing PLC code.
 `system.dump_scripting_api` on SP21 (ScriptEngine 4.1.0.0, about 250 scripting
 types). The probe tools are described in sp22-plan.md, step 1.
 
-**Rule that stays.** Nothing online: no login, download, online change,
-writing or forcing values on a controller, gateways or boot applications. The
-safety test (`test/watcher-safety.test.ts`) keeps enforcing this.
+**Rule at the time.** Nothing online. Lifted on 9 November: the toolkit now
+goes online to CODESYS's own simulation (`watcher/mcp_sim.py`), and still not
+to a controller.
 
 ## Batches
 

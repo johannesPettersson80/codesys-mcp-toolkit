@@ -5,17 +5,13 @@
  */
 
 /** The panel view that fits what Claude is doing. "review" is decided by the panel. */
-export type View = "code" | "tests" | "simulation" | "tuning";
+export type View = "code";
 
-const VIEW_OF: Record<string, View> = {};
-for (const t of ["open_project", "create_project", "write_object", "create_object", "delete_object", "rename_object", "revert_object", "compile", "add_library", "remove_library", "configure_task"]) VIEW_OF[t] = "code";
-VIEW_OF.run_tests = "tests";
-for (const t of ["sync_mirror", "sim_start", "sim_stop", "run_scans", "run_for", "set_breakpoint", "clear_breakpoint", "continue", "step_over", "step_in", "step_out", "write_var", "force_var", "unforce_var", "set_plant_param"]) VIEW_OF[t] = "simulation";
-for (const t of ["run_experiment", "run_scenarios", "save_scenario"]) VIEW_OF[t] = "tuning";
+const CODE_TOOLS = new Set(["open_project", "create_project", "write_object", "create_object", "delete_object", "rename_object", "revert_object", "compile", "add_library", "remove_library", "configure_task"]);
 
 /** Which view a tool belongs to (undefined for reads, which don't move the panel). */
 export function viewOf(tool: string): View | undefined {
-  return VIEW_OF[tool] ?? (tool.startsWith("tune_") || tool.startsWith("tuning_") ? "tuning" : undefined);
+  return CODE_TOOLS.has(tool) ? "code" : undefined;
 }
 
 export class Driver {
@@ -41,5 +37,5 @@ export class Driver {
 }
 
 export function heldMessage(d: Driver, tool: string): string {
-  return `paused_by_user: The user paused Claude in the panel (since ${d.since}) and is driving the simulation, so ${tool} is held. Wait for them to resume, or ask in the chat what they found. Reading tools still work.`;
+  return `paused_by_user: The user paused Claude in the panel (since ${d.since}), so ${tool} is held. Wait for them to resume, or ask in the chat what they found. Reading tools still work.`;
 }

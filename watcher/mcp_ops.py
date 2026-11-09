@@ -2,9 +2,6 @@
 # Operation handlers for the codesys-mcp-toolkit watcher.
 # Runs inside CODESYS (IronPython 2.7) and under CPython 3 with a fake
 # scriptengine in tests. Keep this file ASCII-only.
-#
-# SAFETY: this module must never use online/login/download APIs. The test
-# suite greps for them. Simulation work happens in truST, never on a PLC.
 from __future__ import print_function
 
 import os
@@ -535,7 +532,7 @@ def op_object_create(args):
     elif kind == "interface":
         base = args.get("base_interfaces")
         try:
-            # Empty base list: no implicit __System.IQueryInterface (truST cannot parse it).
+            # Empty base list: no implicit __System.IQueryInterface.
             obj = parent.create_interface(name, base if base else "")
         except Exception:
             obj = parent.create_interface(name)
@@ -604,7 +601,7 @@ def op_build(args):
                 if kind_of(o, c.app_guid) not in ("pou", "gvl", "dut"):
                     continue
                 if _TEST_ATTR.search(decl_of(o) or ""):
-                    continue  # unit tests use truST's assertions, which CODESYS doesn't know
+                    continue  # programs marked as tests can use assertions CODESYS doesn't know
                 bp = _safe(lambda: o.build_properties)
                 if bp is None or not _safe(lambda: bp.link_always_is_valid, False):
                     continue
@@ -737,11 +734,39 @@ def op_library_api(args):
     return info
 
 
+def _installed_libraries(name):
+    """The installed libraries with this title; None when scripts can't see the repositories."""
+    glm = getattr(se, "librarymanager", None)
+    if glm is None:
+        return None
+    want = (name or "").strip().lstrip("#").split(",")[0].strip().lower()
+    return [l for l in glm.get_all_libraries() if (to_text(l.title) or "").lower() == want]
+
+
+def op_library_find(args):
+    found = _installed_libraries(args.get("name"))
+    if found is None:
+        raise OpError("unavailable", "The CODESYS library manager is not available to scripts here.")
+    return {
+        "repositories": [to_text(r.root_folder) for r in se.librarymanager.repositories],
+        "matches": [{"title": to_text(l.title), "version": to_text(l.version), "company": to_text(l.company)} for l in found],
+    }
+
+
 def op_libraries_add(args):
     c = Ctx()
     lm = _library_manager(c)
-    lm.add_library(args["name"])
-    return {"added": args["name"], "saved": c.save_if(args)}
+    name = args["name"].strip()
+    if "," not in name:
+        # A bare title, e.g. "Util": the newest installed, or the version asked for.
+        found = _installed_libraries(name)
+        if found is not None:
+            if not found:
+                raise OpError("not_found", "No library titled '%s' is installed in the CODESYS repositories." % name)
+            newest = max(found, key=lambda l: _version_key(l.version))
+            name = "%s, %s (%s)" % (to_text(newest.title), args.get("version") or "*", to_text(newest.company))
+    lm.add_library(name)
+    return {"added": name, "saved": c.save_if(args)}
 
 
 def op_libraries_remove(args):
@@ -1149,4 +1174,5 @@ OPS = {
     "objects.xml": op_objects_xml,
     "object.import_xml": op_object_import_xml,
     "library.api": op_library_api,
+    "library.find": op_library_find,
 }

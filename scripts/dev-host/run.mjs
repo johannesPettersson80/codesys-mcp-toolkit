@@ -15,7 +15,7 @@ await build({
   packages: "external",
   outfile: join(out, "server.mjs"),
   logLevel: "warning",
-  define: { "import.meta.url": JSON.stringify(pathToFileURL(join(here, "..", "..", "src", "sim", "panel.ts")).href) },
+  define: { "import.meta.url": JSON.stringify(pathToFileURL(join(here, "..", "..", "src", "panel.ts")).href) },
 });
 const { startDevHost } = await import(pathToFileURL(join(out, "server.mjs")).href);
 await startDevHost(Number(process.argv[2] ?? 5199), page.outputFiles[0].text, join(here, "page.html"));

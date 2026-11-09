@@ -1,17 +1,14 @@
-/** Simulation panel (MCP App): registration, UI gating, supersession, panel data. No truST needed. */
+/** The panel (MCP App): registration, UI gating, supersession, workspace data and user actions. */
 import { describe, expect, it } from "vitest";
-import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { createServer } from "../src/server.js";
-import { SimController } from "../src/sim/controller.js";
-import { PANEL_URI } from "../src/sim/panel.js";
-import type { PanelState, SourceView } from "../src/sim/panel-types.js";
-import { Recorder } from "../src/sim/recorder.js";
+import { PANEL_URI } from "../src/panel.js";
+import type { PanelState } from "../src/panel-types.js";
 import type { AppContext } from "../src/tools.js";
-import { LINES, TANK_PLANT, tankNodes, tankTasks, tankTestNodes } from "./fixtures/tank.js";
+import { tankNodes, tankTestNodes } from "./fixtures/tank.js";
 import { ProjectCache } from "../src/codesys/cache.js";
 import { ChangeStore, diffObjects, snapshot } from "../src/codesys/changes.js";
 import { Driver } from "../src/driver.js";
@@ -23,11 +20,9 @@ const UI = { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_
 async function connect(withUi: boolean, project?: string, driver: Driver | null = new Driver()) {
   const root = tempDir("cmcp-panel-");
   const proj = project ?? join(root, "Tank.project");
-  writeFileSync(join(root, "Tank.plant.toml"), TANK_PLANT);
-  const sim = new SimController({ exportSt: async () => tankNodes(), tasks: async () => tankTasks(), projectPath: () => (project === "" ? undefined : proj) }, { mirrorRoot: join(root, "m"), git: false });
   const cache = new ProjectCache();
   const changes = new ChangeStore(join(root, "cp"));
-  const ctx = { bridge: { health: () => ({}) } as unknown as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes, driver: driver ?? undefined, ...(project === "" ? {} : { project: { path: proj } }) } as AppContext;
+  const ctx = { bridge: { health: () => ({}) } as unknown as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, cache, changes, driver: driver ?? undefined, ...(project === "" ? {} : { project: { path: proj } }) } as AppContext;
   const server = createServer(ctx);
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
@@ -37,7 +32,7 @@ async function connect(withUi: boolean, project?: string, driver: Driver | null 
     const r = (await client.callTool({ name, arguments: args })) as { structuredContent?: T; content: { text: string }[]; isError?: boolean };
     return r;
   };
-  return { client, sim, call, cache, changes, driver, project: proj };
+  return { client, call, cache, changes, driver, project: proj, ctx };
 }
 
 describe("panel registration", () => {
@@ -46,7 +41,7 @@ describe("panel registration", () => {
     const tools = (await client.listTools()).tools;
     const open = tools.find((t) => t.name === "open_sim_panel")!;
     expect((open._meta as { ui: { resourceUri: string } }).ui.resourceUri).toBe(PANEL_URI);
-    for (const n of ["get_sim_state", "get_events", "get_source", "get_trend", "get_workspace", "get_object", "get_locals", "get_values"]) {
+    for (const n of ["get_sim_state", "get_workspace", "get_object"]) {
       const t = tools.find((x) => x.name === n);
       expect(t, n).toBeDefined();
       expect((t!._meta as { ui: { visibility: string[] } }).ui.visibility).toEqual(["app"]);
@@ -59,7 +54,7 @@ describe("panel registration", () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names).toContain("open_sim_panel");
     expect(names).not.toContain("get_sim_state");
-    expect(names).not.toContain("get_trend");
+    expect(names).not.toContain("get_workspace");
   });
 
   it("serves the panel as a single HTML resource", async () => {
@@ -82,45 +77,22 @@ describe("panel data", () => {
     expect((await call<PanelState>("get_sim_state", { panelId: second })).structuredContent!.current).toBe(true);
   });
 
-  it("reports what is missing before the simulation runs", async () => {
+  it("answers open_sim_panel with a text snapshot too", async () => {
     const none = await connect(true, "");
-    expect((await none.call<PanelState>("get_sim_state")).structuredContent!.status).toBe("no_project");
-    const { call, sim } = await connect(true);
+    expect((await none.call("open_sim_panel")).content[0]!.text).toBe("Panel opened. No project is open yet.");
+    const { call, project } = await connect(true);
     const open = await call("open_sim_panel");
-    expect(open.content[0]!.text).toMatch(/Simulation: no_mirror[\s\S]*sync_mirror/);
+    expect(open.content[0]!.text).toBe(`Panel opened. Project: ${project}.`);
     // hosts that show only structuredContent still get the snapshot
-    expect(open.structuredContent).toMatchObject({ status: "no_mirror", snapshot: open.content[0]!.text });
-    expect((await call<PanelState>("get_sim_state")).structuredContent!.status).toBe("no_mirror");
-    await sim.sync();
-    const s = (await call<PanelState>("get_sim_state")).structuredContent!;
-    expect(s.status).toBe("stopped");
-    expect(s.plants).toEqual([{ id: "T101", model: "gravity_tank", inputs: ["GVL_IO.lrFV101_FlowCmd"], outputs: ["GVL_IO.lrLT101_Level"], parameters: { area_m2: 1, outflow_coefficient_m2_sqrt_m_per_s: 0.03 }, initial_state: [0.2] }]);
-    expect(s.signals.map((x) => `${x.name}:${x.role}:${x.address ?? ""}`)).toEqual([
-      "GVL_IO.lrLT101_Level:plant_out:%IL0",
-      "GVL_IO.lrFV101_FlowCmd:plant_in:%QL0",
-      "GVL_IO.xXV101_Open:command:",
-      "GVL_IO.xXV101_Opened:feedback:",
-      "GVL_IO.xP101_Run:command:",
-      "GVL_IO.xP101_Running:feedback:",
-    ]);
-    expect(s.warnings.join()).toMatch(/SEQ_Fill/);
-    expect(s.journalSeq).toBeGreaterThan(0);
-    const ev = (await call<{ events: { kind: string }[]; last: number }>("get_events", { since: 0 })).structuredContent!;
-    expect(ev.events.map((e) => e.kind)).toContain("mirror_synced");
+    expect(open.structuredContent).toMatchObject({ snapshot: open.content[0]!.text });
   });
 
-  it("serves the code of the task's program with CODESYS line numbers and CODESYS text", async () => {
-    const { call, sim } = await connect(true);
-    await sim.sync();
-    const src = (await call<{ source: SourceView }>("get_source")).structuredContent!.source;
-    expect(src.title).toBe("PRG_Tank");
-    const trip = src.lines.find((l) => l.obj === "PRG_Tank" && l.part === "impl" && l.line === LINES.trip)!;
-    expect(trip.text).toBe("    nTrips := nTrips + 1;");
-    expect(src.lines.some((l) => l.text.includes("E_TankMode.INTERLOCKED"))).toBe(true);
-    expect(src.lines.some((l) => l.text.includes("E_TankMode#"))).toBe(false);
-    const fb = (await call<{ source: SourceView }>("get_source", { obj: "FB_PI/Reset" })).structuredContent!.source;
-    expect(fb.title).toBe("FB_PI");
-    expect(fb.lines.find((l) => l.obj === "FB_PI/Reset" && l.part === "impl" && l.line === 2)!.text).toBe("rY := 0.0;");
+  it("reports a running CODESYS simulation", async () => {
+    const { call, ctx } = await connect(true);
+    expect((await call<PanelState>("get_sim_state")).structuredContent!.codesysSim).toBeUndefined();
+    ctx.codesysSim = { state: "run", forced: ["PLC_PRG.x"], cycles: 2 };
+    expect((await call<PanelState>("get_sim_state")).structuredContent!.codesysSim).toMatchObject({ state: "run", forced: ["PLC_PRG.x"] });
+    expect((await call("open_sim_panel")).content[0]!.text).toMatch(/CODESYS simulation: application run\./);
   });
 });
 
@@ -137,12 +109,11 @@ describe("workspace data", () => {
     cache.remove("I_Resettable");
     cache.touch("FB_PI", "write");
     cache.setCompile({ at: new Date().toISOString(), errors: 1, warnings: 0, messages: [{ severity: "error", text: "boom", object: "FB_PI", position: "Line 1" }] });
-    type Ws = { version: number; unchanged?: boolean; tree: { path: string; change?: string; errors?: number; test?: boolean; kind: string }[]; removed: string[]; changeCount: number; focus: { path: string } };
+    type Ws = { version: number; unchanged?: boolean; tree: { path: string; change?: string; errors?: number; kind: string }[]; removed: string[]; changeCount: number; focus: { path: string } };
     const w = (await call<Ws>("get_workspace")).structuredContent!;
     const node = (p: string) => w.tree.find((n) => n.path === p)!;
     expect(node("FB_PI")).toMatchObject({ change: "M", errors: 1 });
     expect(node("PRG_Tank").change).toBeUndefined();
-    expect(node("Tests/T_PI_Proportional").test).toBe(true);
     expect(w.removed).toEqual(["I_Resettable", "I_Resettable/Reset"]);
     expect(w.changeCount).toBe(3);
     expect(w.focus.path).toBe("FB_PI");
@@ -163,22 +134,16 @@ describe("workspace data", () => {
     expect(o.base!.implementation).toContain("rE := rSP - rPV;");
     expect((await call<Obj>("get_object", { path: "Nope" })).structuredContent).toEqual({ object: null });
   });
-
-  it("answers locals and values quietly when the simulation isn't running", async () => {
-    const { call } = await connect(true);
-    expect((await call("get_locals")).structuredContent).toEqual({ paused: false, stack: [], locals: [] });
-    expect((await call("get_values", { names: ["GVL_IO.lrLT101_Level"] })).structuredContent).toEqual({ values: {} });
-  });
 });
 
-describe("user actions (Phase 7)", () => {
+describe("user actions", () => {
   type Act = { ok: boolean; message: string };
   const text = (r: { content: { text: string }[] }) => r.content.map((c) => c.text).join("\n");
 
   it("are app-only tools", async () => {
     const { client } = await connect(true);
     const tools = (await client.listTools()).tools;
-    for (const n of ["ui_set_breakpoint", "ui_clear_breakpoint", "ui_continue", "ui_pause", "ui_step", "ui_run_for", "ui_force_var", "ui_unforce_var", "ui_write_var", "ui_set_plant_params", "ui_hold", "ui_accept_object", "ui_revert_object"]) {
+    for (const n of ["ui_hold", "ui_accept_object", "ui_revert_object"]) {
       const t = tools.find((x) => x.name === n);
       expect(t, n).toBeDefined();
       expect((t!._meta as { ui: { visibility: string[] } }).ui.visibility).toEqual(["app"]);
@@ -189,32 +154,28 @@ describe("user actions (Phase 7)", () => {
 
   it("Pause Claude holds the tools that change things, not the reading ones", async () => {
     const { call, driver } = await connect(true);
-    const on = (await call<Act>("ui_hold", { on: true })).structuredContent!;
-    expect(on).toEqual({ ok: true, message: "paused Claude and took over the simulation" });
+    expect((await call<Act>("ui_hold", { on: true })).structuredContent!).toEqual({ ok: true, message: "paused Claude" });
     expect(driver!.held).toBe(true);
     const s = (await call<PanelState>("get_sim_state")).structuredContent!;
     expect(s.held).toBe(true);
     expect(s.heldSince).toBe(driver!.since);
-    for (const [tool, args] of [["run_scans", { n: 1 }], ["write_var", { name: "GVL_Par.rLevelSP", value: "1" }], ["write_object", { path: "FB_PI", implementation: "x" }], ["create_project", { path: "C:/x.project" }]] as const) {
+    for (const [tool, args] of [["codesys_sim_force", { values: { "PLC_PRG.x": "TRUE" } }], ["write_object", { path: "FB_PI", implementation: "x" }], ["create_project", { path: "C:/x.project" }]] as const) {
       const r = await call(tool, args);
       expect(r.isError, tool).toBe(true);
       expect(text(r), tool).toMatch(new RegExp(`^paused_by_user: .*so ${tool} is held`));
     }
-    expect(text(await call("sim_status"))).not.toMatch(/paused_by_user/);
-    const ev = (await call<{ events: { kind: string; text: string; data?: { by?: string } }[] }>("get_events", { since: 0 })).structuredContent!.events;
-    expect(ev.at(-1)).toMatchObject({ kind: "user", text: "User: paused Claude and took over the simulation", data: { by: "user" } });
+    expect(text(await call("codesys_status"))).not.toMatch(/paused_by_user/);
     expect((await call<Act>("ui_hold", { on: false })).structuredContent!.message).toBe("resumed Claude");
-    expect(text(await call("run_scans", { n: 1 }))).not.toMatch(/paused_by_user/);
+    expect(text(await call("write_object", { path: "FB_PI", implementation: "x" }))).not.toMatch(/paused_by_user/);
   });
 
   it("report failures as ok:false instead of tool errors", async () => {
     const { call } = await connect(true);
-    const r = await call<Act>("ui_step", { kind: "step_over" });
+    const r = await call<Act>("ui_accept_object", { path: "FB_PI" });
     expect(r.isError).toBeFalsy();
-    expect(r.structuredContent!.ok).toBe(false);
+    expect(r.structuredContent).toEqual({ ok: false, message: "No project is open." });
     const none = await connect(true, undefined, null);
     expect((await none.call<Act>("ui_hold", { on: true })).structuredContent).toEqual({ ok: false, message: "Pause Claude is not available." });
-    expect((await none.call<Act>("ui_accept_object", { path: "FB_PI" })).structuredContent!.ok).toBe(false);
   });
 
   it("Accept moves the review baseline, not session-start", async () => {
@@ -238,6 +199,7 @@ describe("user actions (Phase 7)", () => {
 describe("tool annotations", () => {
   it("classify every tool, so clients can skip approvals for harmless ones", async () => {
     const { client } = await connect(false);
+    await new Promise((r) => setTimeout(r, 20));
     const tools = (await client.listTools()).tools;
     const known = new Set(annotatedTools());
     for (const t of tools) {
@@ -246,33 +208,7 @@ describe("tool annotations", () => {
     }
     const ann = (n: string) => tools.find((t) => t.name === n)!.annotations;
     expect(ann("write_object")).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(ann("run_scans")).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(ann("codesys_sim_force")).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(ann("read_objects")).toMatchObject({ readOnlyHint: true });
-  });
-});
-
-describe("trend recorder", () => {
-  it("keeps samples per epoch and answers deltas", () => {
-    const r = new Recorder(100);
-    r.add(0, { a: 1 });
-    r.add(1, { a: 2 });
-    r.add(1, { b: 5 });
-    r.add(0.5, { a: 9 }); // stale, ignored
-    expect(r.since(0, -1).points).toEqual([{ t: 0, values: { a: 1 } }, { t: 1, values: { a: 2, b: 5 } }]);
-    expect(r.since(0, 0).points.map((p) => p.t)).toEqual([1]);
-    r.reset();
-    r.add(0, { a: 3 });
-    const s = r.since(0, 1);
-    expect(s).toMatchObject({ epoch: 1, reset: true });
-    expect(s.points).toEqual([{ t: 0, values: { a: 3 } }]);
-  });
-
-  it("thins old samples when full", () => {
-    const r = new Recorder(100);
-    for (let i = 0; i < 1000; i++) r.add(i, { a: i });
-    expect(r.size).toBeLessThanOrEqual(100);
-    const pts = r.since(0, -1, 1000).points;
-    expect(pts.at(-1)!.t).toBe(999);
-    expect(pts[0]!.t).toBe(0);
   });
 });

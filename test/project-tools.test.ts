@@ -9,13 +9,11 @@ import { ProjectCache } from "../src/codesys/cache.js";
 import { parseDeclaration, signature } from "../src/codesys/decl.js";
 import { buildOutline, ioList } from "../src/codesys/outline.js";
 import type { TreeNode } from "../src/codesys/st.js";
-import { checkExpectations, parseScenarios, ScenarioError, stringifyScenarios } from "../src/sim/scenarios.js";
 import { createServer } from "../src/server.js";
 import type { AppContext } from "../src/tools.js";
 import { tankNodes, tankTasks, tankTestNodes } from "./fixtures/tank.js";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { Driver } from "../src/driver.js";
-import { SimController } from "../src/sim/controller.js";
 import { fakeBridge, fakeProjectFile, tempDir } from "./helpers.js";
 
 describe("declaration parser", () => {
@@ -147,46 +145,6 @@ describe("change tracking", () => {
   });
 });
 
-describe("scenarios", () => {
-  const toml = `[[scenario]]
-name = "level step"
-duration_s = 300
-pv = "GVL_IO.lrLT101_Level"
-sp = { var = "GVL_Par.rLevelSP", value = 1.2, at_s = 10 }
-watch = ["PRG_Tank.nTrips"]
-[scenario.expect]
-overshoot_pct = { max = 5 }
-settling_time_s = { max = 200 }
-"PRG_Tank.nTrips" = { final = 0 }
-`;
-
-  it("parses, validates and round-trips", () => {
-    const s = parseScenarios(toml);
-    expect(s[0]).toMatchObject({ name: "level step", duration_s: 300, expect: { overshoot_pct: { max: 5 } } });
-    expect(parseScenarios(stringifyScenarios(s))).toEqual(s);
-    expect(() => parseScenarios('[[scenario]]\nname = "a"\n')).toThrow(/duration_s must be a positive number/);
-    expect(() => parseScenarios('[[scenario]]\nname = "a"\nduration_s = 1\nbogus = 1\n')).toThrow(ScenarioError);
-    expect(() => parseScenarios('[[scenario]]\nname = "a"\nduration_s = 1\n[scenario.expect]\niae = { below = 3 }\n')).toThrow(/unknown bound 'below'/);
-    expect(() => parseScenarios('[[scenario]]\nname = "a"\nduration_s = 1\n[[scenario]]\nname = "A"\nduration_s = 1\n')).toThrow(/duplicate scenario/);
-  });
-
-  it("checks metrics and watched variables", () => {
-    const checks = checkExpectations(
-      { overshoot_pct: { max: 5 }, settling_time_s: { max: 200 }, steady_state_error: { abs_max: 0.01 }, "PRG_Tank.nTrips": { final: 0 }, "GVL_Par.eMode": { final: "E_TankMode.AUTO" }, "x.y": { max: 1 } },
-      { overshoot_pct: 2.5, settling_time_s: null, steady_state_error: -0.02 },
-      { "PRG_Tank.nTrips": { final: 1, finalText: "1", min: 0, max: 1 }, "GVL_Par.eMode": { final: 1, finalText: "E_TankMode.AUTO", min: 1, max: 1 } },
-    );
-    expect(checks.map((c) => `${c.ok ? "ok" : "FAIL"} ${c.text}`)).toEqual([
-      "ok overshoot_pct: 2.5 ok",
-      "FAIL settling_time_s: not settled > max 200",
-      "FAIL steady_state_error: |-0.02| > 0.01",
-      "FAIL PRG_Tank.nTrips: final 1 ≠ 0",
-      "ok GVL_Par.eMode: final E_TankMode.AUTO, range 1…1 ok",
-      "FAIL x.y: no such metric or watched variable (add it to watch)",
-    ]);
-  });
-});
-
 describe("create_project", () => {
   it("brings CODESYS's own template up to this CODESYS, and nothing else", async () => {
     const templatesDir = tempDir();
@@ -230,8 +188,6 @@ describe("project tools over MCP (fake CODESYS)", () => {
   beforeAll(async () => {
     // generous heartbeat limits: other test files start processes in parallel
     ctx = { bridge: fakeBridge({ staleHeartbeatMs: 30_000, hungGraceMs: 10_000 }), autosave: true, workspace: tempDir(), startWaitMs: 20_000, changes: new ChangeStore(tempDir("cmcp-cps-")), cache: new ProjectCache(), driver: new Driver() };
-    // a simulation controller, so the panel (and its user actions) is registered
-    ctx.sim = new SimController({ exportSt: async () => [], tasks: async () => [], projectPath: () => ctx.project?.path }, { mirrorRoot: tempDir("cmcp-m-"), git: false });
     const server = createServer(ctx);
     const [a, b] = InMemoryTransport.createLinkedPair();
     await server.connect(a);

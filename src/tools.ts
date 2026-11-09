@@ -1,4 +1,4 @@
-/** Model-facing MCP tools for CODESYS (ST only, offline only). */
+/** Model-facing MCP tools for CODESYS (ST only). */
 import { copyFile } from "node:fs/promises";
 import { annotationsFor, type ToolAnnotations } from "./annotations.js";
 import { getUiCapability } from "@modelcontextprotocol/ext-apps/server";
@@ -7,12 +7,13 @@ import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { BridgeError, type CodesysBridge } from "./bridge/bridge.js";
-import type { SimController } from "./sim/controller.js";
 import { buildOutline, ioList, type OutlineTask } from "./codesys/outline.js";
 import { describeDevices, parseIoMappingCsv, shortVariable, type DeviceInfo } from "./codesys/devices.js";
 import { diffObjects, formatDiff, lineDiff, snapshot, type ChangeStore, type SnapObject } from "./codesys/changes.js";
 import { parseDeclaration } from "./codesys/decl.js";
 import type { ProjectCache } from "./codesys/cache.js";
+import { browseCacheFile, describeBrowse, newestLibrary, readBrowseCache, type BrowseEntry, type InstalledLibrary } from "./codesys/library-browse.js";
+import { registerCodesysSim, type CodesysSimState } from "./codesys/simulation.js";
 import { heldMessage, type Driver } from "./driver.js";
 import { checkDeclaration, kindLabel, normalizeText, type CreateKind, type TreeNode } from "./codesys/st.js";
 
@@ -30,8 +31,8 @@ export interface AppContext {
   startWaitMs: number;
   /** Last project opened through these tools (status never queries CODESYS). */
   project?: ProjectInfo;
-  /** The truST simulation (absent when disabled). */
-  sim?: SimController;
+  /** CODESYS's own simulation, while it runs. */
+  codesysSim?: CodesysSimState;
   /** Checkpoints and change tracking (absent when disabled). */
   changes?: ChangeStore;
   /** What the server knows about the open project, for the workspace panel. */
@@ -197,7 +198,7 @@ export function formatBuild(messages: BuildMessage[]): { text: string; errors: n
 export function registerTools(server: McpServer, ctx: AppContext): void {
   const b = ctx.bridge;
   /** Tools that change the project are held while the user has paused Claude (panel). */
-  const HELD = new Set(["write_object", "create_object", "delete_object", "rename_object", "revert_object", "add_library", "remove_library", "configure_task", "create_project", "open_project", "close_project"]);
+  const HELD = new Set(["write_object", "create_object", "delete_object", "rename_object", "revert_object", "add_library", "remove_library", "configure_task", "create_project", "open_project", "close_project", "codesys_sim_start", "codesys_sim_stop", "codesys_sim_control", "codesys_sim_cycle", "codesys_sim_write", "codesys_sim_force", "codesys_sim_unforce"]);
   const reg = ((name: string, config: unknown, cb: (...a: unknown[]) => unknown) =>
     server.registerTool(
       name,
@@ -323,7 +324,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
           return `Created empty project ${r.path}.`;
         }
         const src = t === "standard" ? (ctx.templatesDir ? join(ctx.templatesDir, "Standard.project") : "") : absPath(ctx, t);
-        if (!src || !existsSync(src)) throw new Error(`Template not found: ${src || "CODESYS Templates folder unknown"}`);
+        if (!src || !existsSync(src)) throw new Error(`Template not found: ${src || "this install has no Templates folder with a Standard.project"}. Pass template as the path of a .project file to copy, or 'empty'.`);
         await copyFile(src, target);
         // CODESYS's own template can be years old; a new project should match this CODESYS.
         const r = await b.call<ProjectInfo & { updated_device?: string }>(t === "standard" ? "project.open_new" : "project.open", { path: target }, { timeoutMs: 300_000 });
@@ -595,12 +596,12 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   reg(
     "add_library",
     {
-      description: "Add a library reference by its full name, e.g. 'Standard, * (System)' or 'Util, 3.5.17.0 (System)'. The library must be installed in the CODESYS library repository.",
-      inputSchema: z.object({ name: z.string().min(1) }),
+      description: "Add a library reference by its title, e.g. 'Util', or its full name, e.g. 'Util, 3.5.17.0 (System)'. A bare title takes the newest installed version unless you pass version. The library must be installed in the CODESYS library repository.",
+      inputSchema: z.object({ name: z.string().min(1), version: z.string().optional().describe("With a bare title: a specific version, e.g. '3.5.17.0'") }),
     },
-    async ({ name }) =>
+    async ({ name, version }) =>
       run(ctx, async () => {
-        const r = await b.call<{ added: string; saved?: boolean }>("libraries.add", { name, ...save() });
+        const r = await b.call<{ added: string; saved?: boolean }>("libraries.add", { name, ...(version ? { version } : {}), ...save() });
         return `Added library ${r.added}.${savedNote(r)}`;
       }),
   );
@@ -732,29 +733,49 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
 
   // ---------------------------------------------------------------- libraries
 
-  type LibApi = { library: string; path: string; title?: string; version?: string; company?: string; compiled?: boolean; nodes: TreeNode[] };
+  type LibApi = { library: string; path: string; title?: string; version?: string; company?: string; compiled?: boolean; nodes: TreeNode[]; browse?: BrowseEntry[] };
   const libCache = new Map<string, LibApi>();
+  /** A source library read from CODESYS, or the browse cache of a compiled or unreferenced one. */
+  const readLibrary = async (name: string, version?: string): Promise<LibApi> => {
+    let lib: LibApi | undefined;
+    if (!version) {
+      try {
+        lib = await b.call<LibApi>("library.api", { name }, { timeoutMs: 180_000 });
+      } catch (e) {
+        if (!(e instanceof BridgeError && e.code === "not_found")) throw e; // not referenced: look in the repositories below
+      }
+    }
+    if (lib && !lib.compiled) return { ...lib, nodes: lib.nodes.map((n) => ({ ...n, path: n.path.replace(/^\/+/, "") })) };
+    const found = await b.call<{ repositories: string[]; matches: InstalledLibrary[] }>("library.find", { name: lib?.title ?? name }, { timeoutMs: 180_000 });
+    const candidates = version ? found.matches.filter((m) => m.version === version) : lib ? found.matches.filter((m) => m.version === lib!.version && m.company === lib!.company) : found.matches;
+    const match = newestLibrary(candidates);
+    const file = match && browseCacheFile(found.repositories, match);
+    if (match && file) return { library: lib?.library ?? `${match.title}, ${match.version} (${match.company})`, path: file, ...match, compiled: true, nodes: [], browse: readBrowseCache(file) };
+    if (lib) return lib;
+    throw new Error(`No installed library '${name}'${version ? ` with version ${version}` : ""}. Installed versions: ${found.matches.map((m) => m.version).join(", ") || "none"}.`);
+  };
   reg(
     "get_library_api",
     {
       description:
-        "The real interface of a referenced library's function blocks, functions, DUTs and GVLs (inputs, outputs, methods, types), read from the installed library, so calls use the right parameters. Pass symbol for one object in detail. Works for source libraries (.library); compiled libraries (.compiled-library) carry no readable declarations.",
+        "What a library offers. For a source library the project references (.library): the real interface of its function blocks, functions, DUTs and GVLs (inputs, outputs, methods, types). For a compiled library, or one the project doesn't reference yet: its objects with their descriptions from CODESYS's library browser, without parameters. Pass symbol for one object, or to search names and descriptions.",
       inputSchema: z.object({
-        name: z.string().describe("Library as listed by list_libraries, e.g. 'Util' or 'Util, * (System)'"),
-        symbol: z.string().optional().describe("One object in the library, e.g. 'BLINK'"),
+        name: z.string().describe("Library, e.g. 'Util' or 'Util, * (System)'"),
+        symbol: z.string().optional().describe("One object in the library, e.g. 'BLINK', or text to search for"),
+        version: z.string().optional().describe("A specific installed version, e.g. '3.5.17.0' (default: the one referenced, else the newest)"),
       }),
       annotations: { readOnlyHint: true },
     },
-    async ({ name, symbol }) =>
+    async ({ name, symbol, version }) =>
       run(ctx, async () => {
-        const key = name.toLowerCase();
+        const key = `${name}|${version ?? ""}`.toLowerCase();
         let lib = libCache.get(key);
         if (!lib) {
-          lib = await b.call<LibApi>("library.api", { name }, { timeoutMs: 180_000 });
-          lib.nodes = lib.nodes.map((n) => ({ ...n, path: n.path.replace(/^\/+/, "") }));
+          lib = await readLibrary(name, version);
           libCache.set(key, lib);
         }
         const head = `${lib.library}${lib.title ? ` (${lib.title}${lib.version ? ` ${lib.version}` : ""}${lib.company ? `, ${lib.company}` : ""})` : ""}`;
+        if (lib.browse) return describeBrowse(head, lib.browse, symbol);
         if (lib.compiled) return `${head} is a compiled library (${lib.path}). Its declarations can't be read by scripting; check the library's documentation in CODESYS, or test calls with compile.`;
         if (symbol) {
           const hit = lib.nodes.find((n) => n.name.toLowerCase() === symbol.toLowerCase() && ["pou", "dut", "gvl", "interface"].includes(n.kind));
@@ -851,6 +872,15 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     },
     async ({ path, to }) => run(ctx, () => revertObject(ctx, path, to ?? "session-start")),
   );
+
+  registerCodesysSim(ctx, {
+    reg,
+    run: (fn) => run(ctx, fn),
+    compileErrors: async () => {
+      const f = formatBuild((await b.call<{ messages: BuildMessage[] }>("build", {}, { timeoutMs: 900_000 })).messages);
+      return f.errors ? f.text : undefined;
+    },
+  });
 }
 
 /**

@@ -82,6 +82,103 @@ class _Text(object):
         self.text = new
 
 
+class OnlineChangeOption(object):
+    Never = "Never"
+
+
+class ResetOption(object):
+    Warm = "Warm"
+    Cold = "Cold"
+
+
+class _OnlineApp(object):
+    """Simulation of the fake's sample project: each cycle counts PLC_PRG.nCount up."""
+
+    def __init__(self, app):
+        self.app = app
+        self.is_logged_in = False
+        self.application_state = "stop"
+        self.operation_state = "program_loaded"
+        self.values = {"PLC_PRG.nCount": "INT#0", "GVL_IO.rLevel": "REAL#0"}
+        self.forced = {}
+        self.prepared = {}
+
+    def login(self, option, delete_foreign):
+        device = self.app
+        while device is not None and not device.is_device:
+            device = device.parent
+        if device is None or not device.get_simulation_mode():
+            raise RuntimeError("FAKE: this login would have reached a controller")
+        self.is_logged_in = True
+
+    def logout(self):
+        self.is_logged_in = False
+
+    def start(self):
+        self.application_state = "run"
+
+    def stop(self):
+        self.application_state = "stop"
+
+    def reset(self, option, force):
+        self.values["PLC_PRG.nCount"] = "INT#0"
+        self.forced = {}
+
+    def read_value(self, name):
+        if name not in self.values:
+            raise ValueError("Unknown expression")
+        return self.forced.get(name, self.values[name])
+
+    def read_values(self, names):
+        return [self.read_value(n) for n in names]
+
+    def set_prepared_value(self, name, value):
+        self.prepared[name] = value
+
+    def write_prepared_values(self):
+        self.values.update(self.prepared)
+        self.prepared = {}
+
+    def force_prepared_values(self):
+        for name, value in self.prepared.items():
+            if value == online.UNFORCE:
+                self.forced.pop(name, None)
+            else:
+                self.forced[name] = value
+        self.prepared = {}
+
+    def unforce_all_values(self):
+        self.forced = {}
+
+    def cycle(self):
+        if "PLC_PRG.nCount" not in self.forced:
+            self.values["PLC_PRG.nCount"] = "INT#%d" % (int(self.values["PLC_PRG.nCount"].split("#")[1]) + 1)
+
+
+class _Online(object):
+    UNFORCE = "<unforce>"
+    active = None
+
+    def create_online_application(self, app):
+        self.active = _OnlineApp(app)
+        return self.active
+
+
+online = _Online()
+
+
+class _Command(object):
+    def __init__(self, fn):
+        self.execute = fn
+
+
+class _Commands(object):
+    def __getitem__(self, tokens):
+        if tuple(tokens) == ("online", "singlecycleactiveapp"):
+            return _Command(lambda: online.active.cycle())
+        raise KeyError(tokens)
+
+
 class _DeviceId(object):
     def __init__(self, version):
         self.type, self.id, self.version = 4096, "0000 0001", version
@@ -109,6 +206,7 @@ class FakeObject(object):
         self.is_folder = folder
         self.is_device = type_guid == G_DEVICE
         self._device_version = "3.5.21.0"
+        self._simulation = False
         self._children = []
         self._decl = _Text(decl) if decl is not None else None
         self._impl = _Text(impl) if impl is not None else None
@@ -236,6 +334,14 @@ class FakeObject(object):
 
     def update(self, device_id):
         self._device_version = device_id.version
+        _mark_dirty()
+
+    def get_simulation_mode(self):
+        return self._simulation
+
+    def set_simulation_mode(self, on):
+        if not projects.primary.ignores_simulation:
+            self._simulation = on
         _mark_dirty()
 
     def is_enabled(self):
@@ -376,6 +482,7 @@ class FakeProject(object):
         self.dirty = False
         self._roots = []
         self.active_application = None
+        self.ignores_simulation = False  # a device that won't enter simulation mode
 
     def get_children(self, recursive=False):
         return list(self._roots)
@@ -426,7 +533,7 @@ def _dump(proj):
     def rec(o):
         d = {"name": o._name, "type": o.type, "folder": o.is_folder, "graphical": o._graphical,
              "decl": o._decl.text if o._decl else None, "impl": o._impl.text if o._impl else None,
-             "app": o is proj.active_application, "device_version": o._device_version, "children": [rec(c) for c in o._children]}
+             "app": o is proj.active_application, "device_version": o._device_version, "simulation": o._simulation, "children": [rec(c) for c in o._children]}
         if isinstance(o, FakeLibMan):
             d["libs"] = o._libs
         if isinstance(o, FakeTask):
@@ -467,6 +574,7 @@ class _Projects(object):
             _load(proj, json.loads(raw))
         else:
             _sample(proj, "3.1.3.0" if raw.startswith("OLD-TEMPLATE") else "3.5.21.0")
+            proj.ignores_simulation = raw.startswith("NO-SIMULATION")
         self.primary = proj
         return proj
 
@@ -486,6 +594,7 @@ class _System(object):
     def __init__(self):
         self._messages = []
         self.prompt_handling = None
+        self.commands = _Commands()
 
     def get_message_categories(self, active=True):
         return ["{97F48D64-A2A3-4856-B640-75C046E37EA9}", "{194B48A9-AB51-43ae-B9A9-51D3EDAADDF3}"]

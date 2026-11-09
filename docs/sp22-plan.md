@@ -18,7 +18,7 @@ packs).
 | Windowless mode (`--noUI`) | A timer now raises `Application.Idle` every 10 ms (CDS-94258); new `--noExit` (CDS-94708) | Release notes |
 | Opening projects | New dialogs while a project opens: a "trust project" dialog (CDS-95557), and project inspection with a fixed dialog order and add-on prompts (CDS-94738, CDS-95328) | Release notes |
 | Compiler | New compiler version 3.5.22 (CDS-92730). Many fixes apply only with "compiler version >= 3.5.22.0" | Release notes |
-| SP21 projects | Fixes for SP21 projects, e.g. CDS-94861 (a wrong checksum makes SP21-loaded projects offer an online change) and CDS-95496 (CAN). Both are online topics; v2 never goes online | Release notes |
+| SP21 projects | Fixes for SP21 projects, e.g. CDS-94861 (a wrong checksum makes SP21-loaded projects offer an online change) and CDS-95496 (CAN). Both concern online work on a controller, which v2 doesn't do | Release notes |
 
 ## What in the toolkit depends on the version
 
@@ -177,6 +177,9 @@ own fix step below.
 
 ## Status (9 November)
 
+truST support was removed later the same day, in favour of CODESYS's own
+simulation (`codesys_sim_*`). What follows mentions it as it stood.
+
 Live, with Scripting 4.2 and truST 0.34: **SP21 24 of 24, SP22 24 of 24.**
 
 **The SP22 compile failures were a toolkit bug, not the install.**
@@ -233,8 +236,8 @@ Live, with Scripting 4.2 and truST 0.34: **SP21 24 of 24, SP22 24 of 24.**
   the subscription is there.
 - **CODESYS 4 ("go!", 1.0.0.0, 24 September 2026).** Web-based, limited, and
   aimed at libraries for now.
-- **Anything online.** v2 never logs in, downloads or goes online, on any
-  version.
+- **Logging in to a controller.** v2 goes online only to CODESYS's own
+  simulation (`codesys_sim_*`), on any version.
 
 ## Order and size
 Step 1 and step 2 come first and tell us how big steps 3–5 are. If SP22 opens

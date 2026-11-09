@@ -1,8 +1,6 @@
 /** What the panel knows, filled by polling the app-only tools. */
 import type { CompileResult, Focus } from "../../src/codesys/cache.js";
-import type { SimEvent } from "../../src/sim/journal.js";
-import type { PanelState } from "../../src/sim/panel-types.js";
-import type { TrendPoint } from "../../src/sim/recorder.js";
+import type { PanelState } from "../../src/panel-types.js";
 
 export interface WsNode {
   path: string;
@@ -14,7 +12,6 @@ export interface WsNode {
   change?: "A" | "M";
   errors?: number;
   warnings?: number;
-  test?: true;
 }
 
 export interface WsData {
@@ -40,21 +37,10 @@ export interface ObjData {
   version: number;
 }
 
-export interface Locals {
-  paused: boolean;
-  stack: { obj?: string; line?: number; name: string }[];
-  locals: { name: string; type: string; value: string; expandable: boolean }[];
-}
-
 export interface Model {
   state?: PanelState;
-  events: SimEvent[];
-  trend: TrendPoint[];
-  trendEpoch: number;
   ws?: WsData;
   objects: Map<string, ObjData>;
-  locals?: Locals;
-  values: Record<string, { value?: string; num?: number | null; error?: string }>;
 }
 
-export const model: Model = { events: [], trend: [], trendEpoch: -1, objects: new Map(), values: {} };
+export const model: Model = { objects: new Map() };

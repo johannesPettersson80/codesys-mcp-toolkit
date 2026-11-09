@@ -125,6 +125,15 @@ describe("CodesysBridge with the real watcher (fake scriptengine)", () => {
     expect(err).toMatchObject({ code: "watcher_died" });
   });
 
+  it("says what the program printed when it dies during a call", async () => {
+    bridge = fakeBridge();
+    await bridge.call("project.open", { path: fakeProjectFile() });
+    (bridge as unknown as { output: string }).output = "licence check failed\n";
+    const err = await bridge.call("object.write", { path: "PLC_PRG", implementation: "__CRASH__" }).catch((e) => e);
+    expect(err).toMatchObject({ code: "watcher_died" });
+    expect((err as BridgeError).message).toMatch(/CODESYS said: licence check failed/);
+  });
+
   it("fails startup clearly when the executable is missing", async () => {
     bridge = fakeBridge({ command: "definitely-not-codesys.exe", startupTimeoutMs: 5_000 });
     await expect(bridge.start()).rejects.toMatchObject({ code: "startup_failed" });

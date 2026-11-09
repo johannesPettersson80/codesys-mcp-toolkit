@@ -1,6 +1,6 @@
 /** Find CODESYS installations, their profiles and project templates. */
-import { existsSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 export interface CodesysInstall {
   /** Full path to CODESYS.exe */
@@ -15,9 +15,35 @@ export interface CodesysInstall {
   additionalFolder?: string;
 }
 
-/** `<root>\CODESYS\Common\CODESYS.exe` -> `<root>\CODESYS` */
-function codesysDir(exe: string): string {
+const isCodesysExe = (exe: string) => basename(exe).toLowerCase() === "codesys.exe";
+
+/**
+ * The folder holding an install's Profiles and Templates. CODESYS keeps them
+ * two levels above the program (`<root>\CODESYS\Common\CODESYS.exe`). Products
+ * built on CODESYS can lay this out differently, so look a few levels up.
+ */
+function installBase(exe: string): string {
+  let dir = dirname(exe);
+  for (let level = 0; level < 3; level++) {
+    for (const base of [dir, join(dir, "CODESYS")]) if (existsSync(join(base, "Profiles"))) return base;
+    dir = dirname(dir);
+  }
   return dirname(dirname(exe));
+}
+
+/** The workspace folder: created when missing, with a clear error when it can't be used. */
+export function ensureWorkspace(dir: string, log: (m: string) => void): string {
+  try {
+    if (existsSync(dir)) {
+      if (!statSync(dir).isDirectory()) throw new Error("it is a file, not a folder");
+      return dir;
+    }
+    mkdirSync(dir, { recursive: true });
+    log(`created the workspace folder ${dir}`);
+    return dir;
+  } catch (e) {
+    throw new Error(`Can't use the workspace ${dir}: ${(e as Error).message}`);
+  }
 }
 
 /**
@@ -42,7 +68,7 @@ function profilesIn(dir: string): string[] {
 }
 
 export function describeInstall(exe: string, additionalFolder?: string): CodesysInstall {
-  const base = codesysDir(exe);
+  const base = installBase(exe);
   const extra = additionalFolder ?? findAdditionalFolder(base);
   const profiles = [...new Set([...profilesIn(base), ...(extra ? profilesIn(extra) : [])])].sort(compareProfiles);
   const templatesDir = join(base, "Templates");
@@ -50,7 +76,7 @@ export function describeInstall(exe: string, additionalFolder?: string): Codesys
     exe,
     profiles,
     templatesDir: existsSync(templatesDir) ? templatesDir : undefined,
-    label: dirname(base).split(/[\\/]/).pop() ?? base,
+    label: isCodesysExe(exe) ? (dirname(base).split(/[\\/]/).pop() ?? base) : dirname(exe).split(/[\\/]/).slice(-2).join(" "),
     ...(extra ? { additionalFolder: extra } : {}),
   };
 }
@@ -96,6 +122,8 @@ export interface ResolvedCodesys {
   install: CodesysInstall;
   /** Why this install was picked, for the log. */
   reason: string;
+  /** Something to log about the profile, when it couldn't be confirmed. */
+  warning?: string;
 }
 
 /** Pick the CODESYS exe + profile from options, falling back to the newest install. */
@@ -117,7 +145,14 @@ export function resolveCodesys(exe?: string, profile?: string, additionalFolder?
   }
   const prof = profile ?? install.profiles[0];
   if (!prof) throw new Error(`No CODESYS profile found next to ${install.exe}. Pass --codesys-profile "<name>".`);
-  return { exe: install.exe, profile: prof, install, reason };
+  let warning: string | undefined;
+  if (profile && !install.profiles.some((p) => p.toLowerCase() === profile.toLowerCase())) {
+    const known = install.profiles.join(", ");
+    // Only CODESYS.exe is known to name its profiles after these files; other products get the benefit of the doubt.
+    if (known && isCodesysExe(install.exe)) throw new Error(`Profile "${profile}" isn't installed next to ${install.exe}. Installed profiles: ${known}.`);
+    warning = known ? `profile "${profile}" isn't among those found next to ${install.exe} (${known}); trying it anyway` : `no Profiles folder found near ${install.exe}, so profile "${profile}" can't be checked`;
+  }
+  return { exe: install.exe, profile: prof, install, reason, ...(warning ? { warning } : {}) };
 }
 
 /** "newest of 2 installs found (CODESYS 3.5.22.40, CODESYS 3.5.21.0); --codesys-path picks another" */

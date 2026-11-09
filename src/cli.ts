@@ -10,15 +10,12 @@
  *   --session-dir <dir>       where session folders go (default: %TEMP%\codesys-mcp-toolkit)
  *   --no-autostart            start CODESYS on the first tool call instead of at launch
  *   --no-autosave             don't save after each change (use save_project)
- *   --trust-runtime <exe>     trust-runtime for the simulation (default: TRUST_RUNTIME or PATH)
- *   --mirror-dir <dir>        where simulation mirrors go (default: %LOCALAPPDATA%\codesys-mcp-toolkit\mirrors)
- *   --no-sim                  don't offer the simulation tools
  *   --viewer-port <port>      port of the browser viewer on 127.0.0.1 (default 5180, next free one if taken)
  *   --no-viewer               don't serve the browser viewer
  *   --no-shared               run CODESYS in this process instead of the shared session
  *
  * By default every process started with the same options shares one session
- * (one CODESYS, one simulation, one viewer): see daemon.ts.
+ * (one CODESYS, one viewer): see daemon.ts.
  */
 import { spawn } from "node:child_process";
 import { openSync, statSync } from "node:fs";
@@ -28,11 +25,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveStdio, StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { CodesysBridge, pruneSessions } from "./bridge/bridge.js";
-import { resolveCodesys } from "./codesys/install.js";
+import { ensureWorkspace, resolveCodesys } from "./codesys/install.js";
 import { createServer, VERSION } from "./server.js";
 import type { AppContext } from "./tools.js";
-import { SimController } from "./sim/controller.js";
-import { codesysSource } from "./sim/tools.js";
 import { ChangeStore } from "./codesys/changes.js";
 import { ProjectCache } from "./codesys/cache.js";
 import { Driver } from "./driver.js";
@@ -40,6 +35,9 @@ import { startViewer } from "./viewer.js";
 import { connectDaemon, serveDaemon, sessionKey } from "./daemon.js";
 
 const log = (m: string) => process.stderr.write(`[codesys-mcp] ${m}\n`);
+
+/** Options from when the toolkit simulated in truST. Still accepted, so existing client setups keep starting. */
+const REMOVED_OPTIONS = ["trust-runtime", "mirror-dir", "no-sim"] as const;
 
 async function main() {
   const { values } = parseArgs({
@@ -52,12 +50,12 @@ async function main() {
       "session-dir": { type: "string" },
       "no-autostart": { type: "boolean" },
       "no-autosave": { type: "boolean" },
-      "trust-runtime": { type: "string" },
-      "mirror-dir": { type: "string" },
-      "no-sim": { type: "boolean" },
       "viewer-port": { type: "string" },
       "no-viewer": { type: "boolean" },
       "no-shared": { type: "boolean" },
+      "trust-runtime": { type: "string" },
+      "mirror-dir": { type: "string" },
+      "no-sim": { type: "boolean" },
       // internal: run as the shared session's owner (see daemon.ts)
       daemon: { type: "string" },
       version: { type: "boolean" },
@@ -71,7 +69,7 @@ async function main() {
   }
   if (values.help) {
     process.stdout.write(
-      "codesys-mcp-tool [--codesys-path <CODESYS.exe>] [--codesys-profile <name>] [--codesys-additional-folder <dir>] [--workspace <dir>] [--project <file>] [--session-dir <dir>] [--no-autostart] [--no-autosave] [--trust-runtime <exe>] [--mirror-dir <dir>] [--no-sim] [--viewer-port <port>] [--no-viewer] [--no-shared]\n",
+      "codesys-mcp-tool [--codesys-path <CODESYS.exe>] [--codesys-profile <name>] [--codesys-additional-folder <dir>] [--workspace <dir>] [--project <file>] [--session-dir <dir>] [--no-autostart] [--no-autosave] [--viewer-port <port>] [--no-viewer] [--no-shared]\n",
     );
     return;
   }
@@ -85,7 +83,7 @@ async function main() {
     cwd: process.cwd(),
     version: VERSION,
     build: statSync(cliFile).mtimeMs,
-    env: ["TRUST_RUNTIME", "TRUST_TOOLCHAIN", "TRUST_DEV"].map((k) => process.env[k] ?? ""),
+    env: [],
   });
 
   if (values.daemon === undefined && !values["no-shared"]) {
@@ -125,7 +123,7 @@ async function main() {
   const ctx: AppContext = {
     bridge,
     autosave: !values["no-autosave"],
-    workspace: resolve(values.workspace ?? process.cwd()),
+    workspace: ensureWorkspace(resolve(values.workspace ?? process.cwd()), log),
     templatesDir: codesys.install.templatesDir,
     codesys: { exe: codesys.exe, profile: codesys.profile, label: codesys.install.label },
     startWaitMs: 90_000,
@@ -133,14 +131,12 @@ async function main() {
   ctx.changes = new ChangeStore(join(process.env.LOCALAPPDATA ?? tmpdir(), "codesys-mcp-toolkit", "checkpoints"));
   ctx.cache = new ProjectCache();
   ctx.driver = new Driver();
-  if (!values["no-sim"]) {
-    const mirrorRoot = values["mirror-dir"] ?? join(process.env.LOCALAPPDATA ?? tmpdir(), "codesys-mcp-toolkit", "mirrors");
-    ctx.sim = new SimController(codesysSource(bridge, () => ctx.project?.path, ctx.startWaitMs, (nodes) => ctx.cache?.setAll(nodes)), { trustRuntime: values["trust-runtime"], mirrorRoot, log });
-  }
+  const ignored = REMOVED_OPTIONS.filter((o) => values[o] !== undefined);
+  if (ignored.length) log(`ignoring ${ignored.map((o) => `--${o}`).join(", ")}: truST support was removed`);
+  if (codesys.warning) log(`warning: ${codesys.warning}`);
   log(`v${VERSION}: ${codesys.install.label} (${codesys.reason}), profile "${codesys.profile}"${codesys.install.additionalFolder ? `, add-ons in ${codesys.install.additionalFolder}` : ""}, sessions in ${sessionRoot}`);
 
-  // The viewer shows the panel, which comes with the simulation tools.
-  if (ctx.sim && !values["no-viewer"]) {
+  if (!values["no-viewer"]) {
     try {
       ctx.viewer = await startViewer(ctx, { port: values["viewer-port"] ? Number(values["viewer-port"]) : undefined, log });
     } catch (e) {
@@ -155,7 +151,6 @@ async function main() {
     if (stopping) return;
     stopping = true;
     closeShared?.();
-    await ctx.sim?.stop().catch(() => undefined);
     await bridge.stop().catch(() => undefined);
     await handle?.close();
     process.exit(0);

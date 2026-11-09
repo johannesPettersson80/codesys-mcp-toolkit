@@ -10,24 +10,12 @@ describe("watcher sources", () => {
     expect(files).toEqual(expect.arrayContaining(["watcher.py", "mcp_ops.py", "mcp_compat.py"]));
   });
 
-  // v2 is offline-only: simulation happens in truST, never on a controller.
-  const FORBIDDEN = [
-    /create_online_application/i,
-    /\.login\s*\(/i,
-    /\.logout\s*\(/i,
-    /\.download\s*\(/i,
-    /online_change/i,
-    /write_prepared_values/i,
-    /\.force_prepared_values/i,
-    /set_prepared_value/i,
-    /\bonline\./i,
-    /\bexec\s*\(/,
-    /\beval\s*\(/,
-  ];
+  // Requests are JSON op names and arguments: no code is ever generated or run from them.
+  const FORBIDDEN = [/\bexec\s*\(/, /\beval\s*\(/];
 
   for (const f of files) {
     const src = readFileSync(join(WATCHER, f), "utf8");
-    it(`${f} uses no online or code-execution APIs`, () => {
+    it(`${f} uses no code-execution APIs`, () => {
       for (const re of FORBIDDEN) expect(src, `${f} matches ${re}`).not.toMatch(re);
     });
     it(`${f} is ASCII-only (IronPython 2.7)`, () => {

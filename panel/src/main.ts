@@ -5,14 +5,11 @@
  * tools, and the model drives everything through its own tools.
  */
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
-import type { PanelState } from "../../src/sim/panel-types.js";
-import type { TrendPoint } from "../../src/sim/recorder.js";
-import type { SimEvent } from "../../src/sim/journal.js";
+import type { PanelState } from "../../src/panel-types.js";
 import { renderCard } from "./card.js";
-import { model, type Locals, type ObjData, type WsData } from "./model.js";
+import { model, type ObjData, type WsData } from "./model.js";
 import { $ } from "./util.js";
 import { Workspace } from "./workspace.js";
-import type { ExperimentRun, TuningLoop } from "../../src/sim/panel-types.js";
 import { codePath, currentView, reviewRows, VIEWS, views, type ViewName } from "./views.js";
 import { persist } from "./util.js";
 
@@ -20,14 +17,11 @@ const app = new App({ name: "codesys-workspace", version: "1.0.0" });
 
 let panelId: string | undefined;
 let stopped = false;
-let lastSeq = 0;
 let mode: "card" | "workspace" = "card";
 let inlineExpanded = false;
 /** The view on screen, and whether the workspace still needs its layout for it. */
 let view: ViewName | undefined;
 let workspaceStale = true;
-let runsKey = "";
-let tuningKey: number | undefined;
 
 app.ontoolresult = (r) => {
   const id = (r.structuredContent as { panelId?: string } | undefined)?.panelId;
@@ -197,7 +191,7 @@ $("c-view").addEventListener("click", (e) => {
   if (rv) review(rv.dataset.rv!, rv.closest<HTMLElement>("[data-path]")!.dataset.path!, rv);
 });
 
-$("c-hold").addEventListener("click", () => void act("ui_hold", { on: !model.state?.held }, model.state?.held ? "resumed Claude" : "paused Claude to drive the simulation themselves"));
+$("c-hold").addEventListener("click", () => void act("ui_hold", { on: !model.state?.held }, model.state?.held ? "resumed Claude" : "paused Claude"));
 
 // ---------------------------------------------------------------- server calls
 
@@ -238,10 +232,8 @@ async function poll() {
   } finally {
     polling = false;
   }
-  const s = model.state;
-  const fast = s && (s.status === "running" || s.activity);
   clearTimeout(pollTimer);
-  pollTimer = setTimeout(poll, fast ? 300 : 1000);
+  pollTimer = setTimeout(poll, 1000);
 }
 
 async function pollOnce() {
@@ -254,24 +246,6 @@ async function pollOnce() {
       return;
     }
     model.state = s;
-    const newEvents = s.journalSeq > lastSeq;
-    if (newEvents) {
-      const e = await call<{ events: SimEvent[]; last: number }>("get_events", { since: lastSeq });
-      if (e) {
-        model.events = [...model.events, ...e.events].slice(-300);
-        lastSeq = e.events.at(-1)?.seq ?? e.last;
-      }
-    }
-    const busy = s.status === "running" || !!s.activity;
-    if (busy || newEvents || s.trendEpoch !== model.trendEpoch || model.trend.length === 0) {
-      const since = s.trendEpoch === model.trendEpoch ? (model.trend.at(-1)?.t ?? -1) : -1;
-      const t = await call<{ epoch: number; points: TrendPoint[]; reset: boolean }>("get_trend", { epoch: model.trendEpoch, since });
-      if (t) {
-        if (t.reset || t.epoch !== model.trendEpoch) model.trend = [];
-        model.trendEpoch = t.epoch;
-        model.trend = [...model.trend, ...t.points].slice(-20000);
-      }
-    }
   }
   const w = await call<WsData & { unchanged?: boolean }>("get_workspace", model.ws?.tree ? { version: model.ws.version } : {});
   if (w && !w.unchanged) {
@@ -300,33 +274,7 @@ async function pollOnce() {
       .slice(0, 20);
     for (const p of need) await fetchObject(p);
   }
-  const key = (s?.experiments ?? []).map((e) => e.n).join(",");
-  if (key !== runsKey && (v === "tuning" || mode === "card")) {
-    const r = await call<{ runs: ExperimentRun[] }>("get_experiments");
-    if (r) {
-      views.runs = r.runs;
-      runsKey = key;
-    }
-  }
-  if (s && s.tuningVersion !== tuningKey && (v === "tuning" || mode === "card")) {
-    const r = await call<{ version: number; loops: TuningLoop[] }>("get_tuning");
-    if (r) {
-      views.loops = r.loops;
-      tuningKey = s.tuningVersion;
-    }
-  }
-  if (mode === "workspace") {
-    workspace.autoFollow();
-    const paused = s?.status === "paused" && s.location && !s.location.harness;
-    if (paused) {
-      const l = await call<Locals>("get_locals");
-      if (l) model.locals = l;
-    } else model.locals = undefined;
-    if ((s?.status === "running" || s?.status === "paused") && workspace.watch.length && workspace.insp === "watch") {
-      const v = await call<{ values: typeof model.values }>("get_values", { names: workspace.watch });
-      if (v) model.values = v.values;
-    }
-  }
+  if (mode === "workspace") workspace.autoFollow();
   render();
 }
 

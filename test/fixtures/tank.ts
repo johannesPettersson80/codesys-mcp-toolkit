@@ -1,13 +1,13 @@
 /**
  * The acceptance-demo tank as a CODESYS export (TreeNode list), in plain
- * CODESYS ST (E.X enum literals, which the mirror rewrites for truST).
+ * CODESYS ST.
  *
  * T101 gravity tank, LT101 level, XV101 inlet valve (open feedback after 2 s),
  * P101 outlet pump (running feedback after 0.5 s), PI level loop, high-high
  * interlock that closes XV101.
  */
 import type { TreeNode } from "../../src/codesys/st.js";
-import type { TaskInfo } from "../../src/sim/mirror.js";
+import type { OutlineTask } from "../../src/codesys/outline.js";
 
 const n = (path: string, kind: TreeNode["kind"], declaration?: string, implementation?: string, sub?: string): TreeNode => ({
   path,
@@ -53,8 +53,6 @@ ELSE
 END_IF`;
 
 /** 1-based implementation lines of PRG_Tank used by tests. */
-export const LINES = { trip: 11, valve: 16, piCall: 18, status: 30 };
-
 export function tankNodes(): TreeNode[] {
   return [
     n("E_TankMode", "dut", "{attribute 'qualified_only'}\nTYPE E_TankMode :\n(\n    MANUAL := 0,\n    AUTO := 1,\n    INTERLOCKED := 2\n);\nEND_TYPE", undefined, "enum"),
@@ -141,31 +139,9 @@ END_VAR`,
   ];
 }
 
-export function tankTasks(): TaskInfo[] {
+export function tankTasks(): OutlineTask[] {
   return [{ name: "MainTask", interval: "t#10ms", interval_unit: "ms", priority: "1", kind: "Cyclic", pous: ["PRG_Tank"] }];
 }
-
-export const TANK_PLANT = `[[plant]]
-id = "T101"
-model = "gravity_tank"
-inputs = ["GVL_IO.lrFV101_FlowCmd"]
-outputs = ["GVL_IO.lrLT101_Level"]
-initial_state = [0.2]
-
-[plant.parameters]
-area_m2 = 1.0
-outflow_coefficient_m2_sqrt_m_per_s = 0.03
-
-[[feedback]]
-signal = "GVL_IO.xXV101_Opened"
-follows = "GVL_IO.xXV101_Open"
-delay_ms = 2000
-
-[[feedback]]
-signal = "GVL_IO.xP101_Running"
-follows = "GVL_IO.xP101_Run"
-delay_ms = 500
-`;
 
 /** Unit tests for the tank, as CODESYS programs marked {attribute 'test'}. */
 export function tankTestNodes(o: { failing?: boolean } = {}): TreeNode[] {
@@ -188,90 +164,3 @@ export function tankTestNodes(o: { failing?: boolean } = {}): TreeNode[] {
   if (o.failing) nodes.push(t("T_Deliberately_Failing", "", "ASSERT_EQUAL(EXPECTED := 1, ACTUAL := 2);"));
   return nodes;
 }
-
-/** The tank with what Control Studio 0.34 needs: loop signals in PRG_Tank, BOOL Manual mode, a bumpless PI, a done-flag. */
-export function tuningTankNodes(): TreeNode[] {
-  const nodes = tankNodes().filter((n) => n.path !== "SEQ_Fill");
-  const pi = nodes.find((n) => n.path === "FB_PI")!;
-  pi.declaration = pi.declaration!.replace(
-    "    rCycleS : REAL := 0.01; // scan time [s]\n",
-    "    rCycleS : REAL := 0.01; // scan time [s]\n    bTrack : BOOL;          // Manual: follow rTrack (bumpless)\n    rTrack : REAL;\n",
-  );
-  pi.implementation = `IF bTrack THEN
-    rE := rSP - rPV;
-    rY := LIMIT(0.0, rTrack, 100.0);
-    rI := LIMIT(0.0, rY - _rKp * rE, 100.0);
-ELSIF bEnable THEN
-    rE := rSP - rPV;
-    IF rY > 0.0 AND rY < 100.0 THEN
-        rI := LIMIT(0.0, rI + _rKp * rE * rCycleS / _rTi, 100.0);
-    END_IF
-    rY := LIMIT(0.0, _rKp * rE + rI, 100.0);
-ELSE
-    rY := 0.0;
-END_IF`;
-  const prg = nodes.find((n) => n.path === "PRG_Tank")!;
-  prg.declaration = `PROGRAM PRG_Tank
-VAR
-    fbPI : FB_PI;
-    tonHiHi : TON;
-    rtInterlock : R_TRIG;
-    itfReset : I_Resettable;
-    nTrips : UDINT;
-    sStatus : STRING(80) := 'OK';
-    bInitDone : BOOL;
-    bManual : BOOL;
-    lrManualFlow : LREAL;
-    rLevelSP : REAL := 1.0;
-    lrLevel : LREAL;
-    lrFlowCmd : LREAL;
-END_VAR`;
-  prg.implementation = `GVL_IO.lrLT101_Level := lrLevel;
-IF NOT bInitDone THEN
-    fbPI.Kp := 50.0;
-    fbPI.Ti := 60.0;
-    bInitDone := TRUE;
-END_IF
-tonHiHi(IN := lrLevel > GVL_Par.rLevelHiHi, PT := T#2S);
-rtInterlock(CLK := tonHiHi.Q);
-IF rtInterlock.Q THEN
-    GVL_Par.eMode := E_TankMode.INTERLOCKED;
-    nTrips := nTrips + 1;
-    itfReset := fbPI;
-    itfReset.Reset();
-END_IF
-GVL_IO.xXV101_Open := GVL_Par.eMode = E_TankMode.AUTO;
-GVL_IO.xP101_Run := lrLevel > 0.1;
-fbPI(bEnable := GVL_Par.eMode = E_TankMode.AUTO AND GVL_IO.xXV101_Opened AND NOT bManual,
-     rPV := LREAL_TO_REAL(lrLevel),
-     rSP := rLevelSP,
-     bTrack := bManual,
-     rTrack := LREAL_TO_REAL(lrManualFlow / GVL_Par.rMaxInflow * 100.0));
-IF bManual THEN
-    lrFlowCmd := lrManualFlow;
-ELSIF GVL_IO.xXV101_Opened THEN
-    lrFlowCmd := REAL_TO_LREAL(fbPI.rY / 100.0 * GVL_Par.rMaxInflow);
-ELSE
-    lrFlowCmd := 0.0;
-END_IF
-GVL_IO.lrFV101_FlowCmd := lrFlowCmd;`;
-  return nodes;
-}
-
-/** The tuning tank plant: wired to PRG_Tank.lrLevel / lrFlowCmd, starting at the setpoint. */
-export const TUNING_PLANT = `[[plant]]
-id = "T101"
-model = "gravity_tank"
-inputs = ["PRG_Tank.lrFlowCmd"]
-outputs = ["PRG_Tank.lrLevel"]
-initial_state = [1.0]
-
-[plant.parameters]
-area_m2 = 1.0
-outflow_coefficient_m2_sqrt_m_per_s = 0.03
-
-[[feedback]]
-signal = "GVL_IO.xXV101_Opened"
-follows = "GVL_IO.xXV101_Open"
-delay_ms = 2000
-`;

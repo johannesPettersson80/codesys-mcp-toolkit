@@ -17,7 +17,7 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { createServer } from "./server.js";
-import { panelHtml } from "./sim/panel.js";
+import { panelHtml } from "./panel.js";
 import type { AppContext } from "./tools.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

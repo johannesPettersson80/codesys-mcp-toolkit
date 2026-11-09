@@ -1,24 +1,6 @@
-import type { PanelSignal } from "../../src/sim/panel-types.js";
-
 export const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 export const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
-
-export const fmt = (n: number) => {
-  const a = Math.abs(n);
-  return a >= 1000 ? n.toFixed(0) : a >= 10 ? n.toFixed(1) : a >= 1 ? n.toFixed(2) : n.toFixed(3);
-};
-
-/** A signal value for display: numbers shortened, other values as ST. */
-export const show = (x?: { value?: string; num?: number | null }) => {
-  if (!x || x.value === undefined) return "–";
-  if (typeof x.num === "number" && /^-?\d/.test(x.value) && !/^(TRUE|FALSE)$/.test(x.value)) return fmt(x.num);
-  return x.value;
-};
-
-export const short = (name: string) => name.split(".").pop()!;
-
-export const truthy = (x?: PanelSignal) => x?.num !== undefined && x.num !== null && x.num !== 0;
 
 export const ago = (iso: string) => {
   const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));

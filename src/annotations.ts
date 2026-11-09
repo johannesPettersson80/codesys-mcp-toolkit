@@ -4,7 +4,7 @@
  * possibly destructive and open-world, which makes clients ask for approval
  * on every simulation step.
  *
- * - read: changes nothing (reads, compile, tests in truST, status).
+ * - read: changes nothing (reads, compile, status).
  * - safe: changes only the simulation or adds something (new objects,
  *   checkpoints, scenarios); never overwrites or removes project content.
  * - destructive: can overwrite or remove project content.
@@ -41,33 +41,18 @@ const KIND: Record<string, Kind> = {
   rename_object: "destructive",
   revert_object: "destructive",
   configure_task: "destructive",
-  // simulation (truST only, never a controller)
-  sim_status: "read",
-  read_vars: "read",
-  experiment_log: "read",
-  run_tests: "read",
+  // CODESYS's own simulation (never a controller)
+  codesys_sim_status: "read",
+  codesys_sim_read: "read",
+  codesys_sim_start: "safe",
+  codesys_sim_stop: "safe",
+  codesys_sim_control: "safe",
+  codesys_sim_cycle: "safe",
+  codesys_sim_write: "safe",
+  codesys_sim_force: "safe",
+  codesys_sim_unforce: "safe",
+  // the panel
   open_sim_panel: "read",
-  sync_mirror: "safe",
-  sim_start: "safe",
-  sim_stop: "safe",
-  run_scans: "safe",
-  run_for: "safe",
-  set_breakpoint: "safe",
-  clear_breakpoint: "safe",
-  continue: "safe",
-  step_over: "safe",
-  step_in: "safe",
-  step_out: "safe",
-  write_var: "safe",
-  force_var: "safe",
-  unforce_var: "safe",
-  set_plant_param: "safe",
-  run_experiment: "safe",
-  run_scenarios: "safe",
-  save_scenario: "safe",
-  tune_status: "read",
-  tune_setup: "safe",
-  tune_run: "safe",
 };
 
 export interface ToolAnnotations {

@@ -218,6 +218,7 @@ def main():
     log("watcher starting pid=%s parent=%s python=%s" % (PID, PARENT_PID, sys.version.split()[0]))
     import scriptengine as se
     import mcp_ops
+    import mcp_sim  # noqa: F401 (adds its operations to mcp_ops.OPS)
     prompts = setup_prompts(se)
     log(prompts)
     if not hasattr(se, "FAKE"):

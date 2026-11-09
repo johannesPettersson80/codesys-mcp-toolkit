@@ -2,6 +2,8 @@
 
 Status (2026-11-07): Phase 0 spike done, Phase 1 core done, Phase 2 simulation (text) done, Phase 3 read-only panel done. Phase 4 (interactive panel) not started.
 
+Later (2026-11-09): truST support was removed in favour of CODESYS's own simulation (`codesys_sim_*`). This plan is kept as written.
+
 ## 1. Summary
 
 v1 is replaced, not patched. v2 is an ESM TypeScript MCP server with a
@@ -112,7 +114,8 @@ CODESYS connection — the core weakness of v1.
   the simulator refuses to run code that calls them unless stubbed explicitly.
 - **No online tools.** v2 never logs in, downloads, writes or forces on a
   controller. Enforced by having no such ops in the watcher at all, so the
-  simulation rule holds by construction.
+  simulation rule holds by construction. (Lifted on 9 November for CODESYS's
+  own simulation, see `watcher/mcp_sim.py`. Still no login to a controller.)
 - **SP22 built-in MCP server:** not used.
 
 ### 3.2 CODESYS bridge (copying zbest + Master)

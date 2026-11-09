@@ -3,6 +3,7 @@
  * Claude Desktop does for different chat surfaces) talk to one owner, so they
  * see the same state. Needs the build (dist/cli.js).
  */
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -47,10 +48,16 @@ describe.skipIf(!existsSync(CLI))("shared session", () => {
     expect((await b.listTools()).tools.map((t) => t.name)).not.toContain("ui_hold");
     // the user pauses Claude in A's panel; B's tools see it
     expect((await a.callTool({ name: "ui_hold", arguments: { on: true } })).structuredContent).toMatchObject({ ok: true });
-    expect(text(await b.callTool({ name: "run_scans", arguments: { n: 1 } }))).toMatch(/^paused_by_user:/);
+    const write = { name: "write_object", arguments: { path: "PLC_PRG", implementation: "x := 1;" } };
+    expect(text(await b.callTool(write))).toMatch(/^paused_by_user:/);
     await a.callTool({ name: "ui_hold", arguments: { on: false } });
-    expect(text(await b.callTool({ name: "run_scans", arguments: { n: 1 } }))).not.toMatch(/paused_by_user/);
+    expect(text(await b.callTool(write))).not.toMatch(/paused_by_user/);
   }, 60_000);
+
+  it("still starts with the options removed along with truST", () => {
+    const r = spawnSync(process.execPath, [CLI, "--trust-runtime", "x.exe", "--mirror-dir", "y", "--no-sim", "--version"], { encoding: "utf8" });
+    expect(r.status, r.stderr).toBe(0);
+  });
 
   it("stops the owner once no process is connected", async () => {
     for (const c of clients.splice(0)) await c.close();

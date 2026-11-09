@@ -1,14 +1,12 @@
 /** Browser viewer: serves the workspace on 127.0.0.1, token-gated, panel tools only. */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectCache } from "../src/codesys/cache.js";
 import { ChangeStore } from "../src/codesys/changes.js";
 import { Driver } from "../src/driver.js";
-import { SimController } from "../src/sim/controller.js";
 import type { AppContext } from "../src/tools.js";
 import { startViewer, viewerMayCall, type Viewer } from "../src/viewer.js";
-import { TANK_PLANT, tankNodes, tankTasks } from "./fixtures/tank.js";
+import { tankNodes } from "./fixtures/tank.js";
 import { tempDir } from "./helpers.js";
 
 describe("browser viewer", () => {
@@ -18,12 +16,10 @@ describe("browser viewer", () => {
   const project = join(root, "Tank.project");
 
   beforeAll(async () => {
-    writeFileSync(join(root, "Tank.plant.toml"), TANK_PLANT);
-    const sim = new SimController({ exportSt: async () => tankNodes(), tasks: async () => tankTasks(), projectPath: () => project }, { mirrorRoot: join(root, "m"), git: false });
     const cache = new ProjectCache();
     cache.reset(project);
     cache.setAll(tankNodes());
-    const ctx = { bridge: { health: () => ({ scripting: "4.2.0.0" }) } as unknown as AppContext["bridge"], codesys: { exe: "x", profile: "p", label: "CODESYS 3.5.22.40" }, autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes: new ChangeStore(join(root, "cp")), driver: new Driver(), project: { path: project, compiler_version: "3.5.19.40" } } as AppContext;
+    const ctx = { bridge: { health: () => ({ scripting: "4.2.0.0" }) } as unknown as AppContext["bridge"], codesys: { exe: "x", profile: "p", label: "CODESYS 3.5.22.40" }, autosave: false, workspace: root, startWaitMs: 0, cache, changes: new ChangeStore(join(root, "cp")), driver: new Driver(), project: { path: project, compiler_version: "3.5.19.40" } } as AppContext;
     viewer = await startViewer(ctx, { port: 0, openBrowser: (u) => opened.push(u) });
   });
   afterAll(async () => viewer?.close());
@@ -56,9 +52,9 @@ describe("browser viewer", () => {
     expect((await call("write_object", { path: "FB_PI", implementation: "x" })).status).toBe(403);
     expect((await call("get_workspace", {}, "wrong")).status).toBe(403);
     expect(viewerMayCall("ui_hold")).toBe(true);
-    expect(viewerMayCall("get_events")).toBe(true);
+    expect(viewerMayCall("get_workspace")).toBe(true);
     expect(viewerMayCall("open_project")).toBe(false);
-    expect(viewerMayCall("run_scans")).toBe(false);
+    expect(viewerMayCall("codesys_sim_force")).toBe(false);
   });
 
   it("opens the browser once unless forced", () => {

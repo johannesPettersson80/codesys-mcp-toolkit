@@ -254,14 +254,14 @@ export class CodesysBridge {
       }
       if ((this.state as BridgeState) === "dead") {
         await sleep(200); // let the last output arrive
-        const msg = `CODESYS exited during startup (${this.exitInfo}). ${startupHint(this.output)}${this.output.trim() ? `CODESYS said: ${this.output.trim().slice(-800)}\n` : ""}${this.logTail()}`;
+        const msg = `CODESYS exited during startup (${this.exitInfo}). ${startupHint(this.output)}${this.consoleTail()}${this.logTail()}`;
         this.lastError = msg;
         throw new BridgeError("startup_failed", msg);
       }
       await sleep(100);
     }
     await this.kill("startup timeout");
-    const msg = `CODESYS did not start the watcher within ${Math.round(this.opts.startupTimeoutMs / 1000)}s. ${this.logTail()}`;
+    const msg = `CODESYS did not start the watcher within ${Math.round(this.opts.startupTimeoutMs / 1000)}s. ${startupHint(this.output)}${this.consoleTail()}${this.logTail()}`;
     this.lastError = msg;
     throw new BridgeError("startup_timeout", msg);
   }
@@ -298,7 +298,7 @@ export class CodesysBridge {
       }
       const now = Date.now();
       if (this.state === "dead") {
-        const msg = `CODESYS stopped while running '${op}' (${this.exitInfo ?? "unknown reason"}). ${this.logTail()}`;
+        const msg = `CODESYS stopped while running '${op}' (${this.exitInfo ?? "unknown reason"}). ${this.consoleTail()}${this.logTail()}`;
         this.lastError = msg;
         throw new BridgeError("watcher_died", msg);
       }
@@ -337,6 +337,12 @@ export class CodesysBridge {
     } catch {
       return undefined;
     }
+  }
+
+  /** The end of what the program printed, for error messages. */
+  private consoleTail(): string {
+    const said = this.output.trim();
+    return said ? `CODESYS said: ${said.slice(-800)}\n` : "";
   }
 
   /** The title of a dialog the watcher found CODESYS waiting on (dialog.json). */

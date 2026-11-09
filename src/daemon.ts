@@ -5,7 +5,7 @@
  * surface). Each process used to launch its own CODESYS, so the panel card
  * could talk to a process that never opened the project. Now the first
  * process starts a background owner (the same CLI with --daemon) that runs
- * CODESYS, truST and the browser viewer; every stdio process just pipes its
+ * CODESYS and the browser viewer; every stdio process just pipes its
  * MCP traffic to the owner over a local socket. The owner stops itself when
  * no client has been connected for a while.
  *
