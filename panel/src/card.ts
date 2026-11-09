@@ -51,7 +51,7 @@ export function renderCard(view: ViewName, follow: boolean): void {
     html = codeView(path, path ? model.objects.get(path.toLowerCase()) : undefined) + problemsList(path);
   } else if (view === "tests") html = testsView();
   else if (view === "tuning") html = tuningView();
-  else html = reviewView();
+  else html = reviewView(true);
   // Don't rebuild (and lose the scroll position) when nothing changed.
   if (shownView !== view || html !== shownHtml) {
     const before = el.querySelector<HTMLElement>(".code.live")?.scrollTop ?? 0;

@@ -13,7 +13,7 @@ import { model, type Locals, type ObjData, type WsData } from "./model.js";
 import { $ } from "./util.js";
 import { Workspace } from "./workspace.js";
 import type { ExperimentRun, TuningLoop } from "../../src/sim/panel-types.js";
-import { codePath, currentView, VIEWS, views, type ViewName } from "./views.js";
+import { codePath, currentView, reviewRows, VIEWS, views, type ViewName } from "./views.js";
 import { persist } from "./util.js";
 
 const app = new App({ name: "codesys-workspace", version: "1.0.0" });
@@ -144,7 +144,14 @@ function followChanged() {
 
 /** Accept / Revert (second click confirms) / show changes, from a review list. */
 function review(kind: string, path: string, btn: HTMLElement) {
-  if (kind === "diff") {
+  if (kind === "diff" && mode === "card") {
+    // in the chat: show the changes in place
+    const k = path.toLowerCase();
+    if (!views.expanded.delete(k)) views.expanded.add(k);
+    render();
+    return;
+  }
+  if (kind === "diff" || kind === "full") {
     void setWorkspace(true).then(() => {
       workspace.diff = true;
       workspace.open(path, true);
@@ -284,6 +291,14 @@ async function pollOnce() {
     const p = codePath();
     const o = p ? model.objects.get(p.toLowerCase()) : undefined;
     if (p && (!o || o.version !== model.ws?.version)) await fetchObject(p);
+  }
+  if (v === "review" && mode === "card") {
+    // the counts and in-place diffs need every changed object and its reviewed version
+    const need = reviewRows()
+      .flatMap((r) => (r.mark === "D" ? [] : r.members))
+      .filter((p) => model.objects.get(p.toLowerCase())?.version !== model.ws?.version)
+      .slice(0, 20);
+    for (const p of need) await fetchObject(p);
   }
   const key = (s?.experiments ?? []).map((e) => e.n).join(",");
   if (key !== runsKey && (v === "tuning" || mode === "card")) {

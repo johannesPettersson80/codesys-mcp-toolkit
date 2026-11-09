@@ -8,7 +8,7 @@
  *   Tuning      Claude runs experiments (or truST tuning)
  *   Review      Claude changed objects and has been quiet for a while
  */
-import { lineDiff } from "../../src/codesys/diff.js";
+import { countDiff, lineDiff, type DiffOp } from "../../src/codesys/diff.js";
 import type { ExperimentRun, TuningLoop, TuningTrace } from "../../src/sim/panel-types.js";
 import { model, type ObjData } from "./model.js";
 import { highlight } from "./st.js";
@@ -33,6 +33,8 @@ export const views = {
   runs: [] as ExperimentRun[],
   /** truST Control Studio loops (get_tuning). */
   loops: [] as TuningLoop[],
+  /** Review rows whose changes the card shows in place (lower-case paths). */
+  expanded: new Set<string>(),
 };
 
 export function unreviewed(): number {
@@ -416,19 +418,108 @@ function drawSeries(canvas: HTMLCanvasElement, series: { tr: TuningTrace; color:
 
 // ------------------------------------------------------------------ review
 
-export function reviewView(): string {
+/** The changed objects to review: a changed object hides its changed children (they show inside its row). */
+export function reviewRows(): { path: string; mark: "A" | "M" | "D"; members: string[] }[] {
   const tree = model.ws?.tree ?? [];
-  const changed = tree.filter((n) => n.change && !tree.some((p) => p.change && n.path.toLowerCase().startsWith(p.path.toLowerCase() + "/")));
+  const under = (p: string, q: string) => p.toLowerCase().startsWith(q.toLowerCase() + "/");
+  const changed = tree.filter((n) => n.change);
+  const top = changed.filter((n) => !changed.some((p) => under(n.path, p.path)));
   const removed = model.ws?.removed ?? [];
-  if (!changed.length && !removed.length) return `<div class="empty">Nothing to review: every change Claude made is accepted.</div>`;
-  const row = (path: string, mark: string, what: string) =>
-    `<li data-path="${esc(path)}"><span class="mk ${mark}">${mark}</span><span class="rp"><b>${esc(path)}</b><span class="muted">${what}</span></span>` +
-    `<button class="btn" data-rv="diff">Changes</button><button class="btn good" data-rv="accept">Accept</button><button class="btn danger" data-rv="revert">Revert</button></li>`;
-  return (
-    `<div class="vhead"><b>${changed.length + removed.length} to review</b><span class="muted">since you last accepted</span></div>` +
-    `<ul class="review-list">${changed.map((n) => row(n.path, n.change!, n.change === "A" ? "added" : "changed")).join("")}${removed
-      .filter((p) => !removed.some((q) => p.toLowerCase().startsWith(q.toLowerCase() + "/")))
-      .map((p) => row(p, "D", "removed"))
-      .join("")}</ul>`
-  );
+  return [
+    ...top.map((n) => ({ path: n.path, mark: n.change!, members: [n.path, ...changed.filter((c) => under(c.path, n.path)).map((c) => c.path)] })),
+    ...removed.filter((p) => !removed.some((q) => under(p, q))).map((p) => ({ path: p, mark: "D" as const, members: [] })),
+  ];
+}
+
+const norm = (t: string | null | undefined) => (t ?? "").replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+
+/** The line diff of one object's declaration and implementation against the reviewed version. */
+function objectDiff(d: ObjData): { part: "Declaration" | "Implementation"; ops: DiffOp[] }[] {
+  if (!d.object) return [];
+  const out: { part: "Declaration" | "Implementation"; ops: DiffOp[] }[] = [];
+  for (const [part, now, was] of [
+    ["Declaration", d.object.declaration, d.base?.declaration],
+    ["Implementation", d.object.implementation, d.base?.implementation],
+  ] as const) {
+    if (now === null && !was) continue;
+    out.push({ part, ops: lineDiff(norm(was), norm(now)) });
+  }
+  return out;
+}
+
+/** +added / -removed lines of a review row; undefined until its objects are loaded. */
+export function rowCounts(members: string[]): { plus: number; minus: number } | undefined {
+  let plus = 0;
+  let minus = 0;
+  for (const p of members) {
+    const d = model.objects.get(p.toLowerCase());
+    if (!d) return undefined;
+    for (const { ops } of objectDiff(d)) {
+      const c = countDiff(ops);
+      plus += c.plus;
+      minus += c.minus;
+    }
+  }
+  return { plus, minus };
+}
+
+/** Only the changed lines, with `context` lines around them, numbered as in the new text. */
+function hunks(ops: DiffOp[], context = 2): string {
+  const keep = new Set<number>();
+  ops.forEach((o, k) => {
+    if (o.op !== " ") for (let d = -context; d <= context; d++) keep.add(k + d);
+  });
+  const hs = { inComment: false };
+  const out: string[] = [];
+  let n = 0;
+  let last = -2;
+  ops.forEach((o, k) => {
+    if (o.op !== "-") n++;
+    if (!keep.has(k)) {
+      highlight(o.text, hs); // keep the comment state right across skipped lines
+      return;
+    }
+    if (k !== last + 1 && out.length) out.push(`<div class="ln gap"><span class="no"></span><span class="tx">⋯</span></div>`);
+    const cls = o.op === "+" ? " add" : o.op === "-" ? " del" : "";
+    out.push(`<div class="ln${cls}"><span class="sg">${o.op === " " ? "" : o.op === "-" ? "−" : "+"}</span><span class="no">${o.op === "-" ? "" : n}</span><span class="tx">${highlight(o.text, hs) || " "}</span></div>`);
+    last = k;
+  });
+  return out.join("");
+}
+
+/** A row's changes in place: each changed part of the object and its changed members. */
+function rowDiff(members: string[]): string {
+  const out: string[] = [];
+  for (const p of members) {
+    const d = model.objects.get(p.toLowerCase());
+    if (!d) {
+      out.push(`<div class="muted rd-load">Loading ${esc(p)}…</div>`);
+      continue;
+    }
+    const parts = objectDiff(d).filter(({ ops }) => ops.some((o) => o.op !== " "));
+    if (!parts.length) continue;
+    if (members.length > 1) out.push(`<div class="rd-obj">${esc(p)}${d.base ? "" : ' <span class="muted">added</span>'}</div>`);
+    for (const { part, ops } of parts) out.push(`<div class="part">${part}</div>${hunks(ops)}`);
+  }
+  return `<div class="code live rdiff">${out.join("") || `<div class="empty">No line changes.</div>`}</div>`;
+}
+
+/** The review list. `inline` (the chat card): Changes opens the diff in place; elsewhere it opens the editor. */
+export function reviewView(inline = false): string {
+  const rows = reviewRows();
+  if (!rows.length) return `<div class="empty">Nothing to review: every change Claude made is accepted.</div>`;
+  const row = (r: (typeof rows)[number]) => {
+    const what = r.mark === "A" ? "added" : r.mark === "D" ? "removed" : "changed";
+    const c = r.mark === "D" ? undefined : rowCounts(r.members);
+    const counts = c ? ` <span class="good">+${c.plus}</span> <span class="bad">−${c.minus}</span>` : "";
+    const open = inline && r.mark !== "D" && views.expanded.has(r.path.toLowerCase());
+    return (
+      `<li data-path="${esc(r.path)}"${open ? ' class="open"' : ""}><span class="mk ${r.mark}">${r.mark}</span><span class="rp"><b>${esc(r.path)}</b><span class="muted">${what}${counts}</span></span>` +
+      (r.mark === "D" ? "" : `<button class="btn" data-rv="diff" aria-pressed="${open}">${open ? "Hide" : "Changes"}</button>`) +
+      `<button class="btn good" data-rv="accept">Accept</button><button class="btn danger" data-rv="revert">Revert</button>` +
+      (open ? `<div class="rd">${rowDiff(r.members)}<button class="lnk" data-rv="full">Open in full screen</button></div>` : "") +
+      `</li>`
+    );
+  };
+  return `<div class="vhead"><b>${rows.length} to review</b><span class="muted">since you last accepted</span></div><ul class="review-list">${rows.map(row).join("")}</ul>`;
 }

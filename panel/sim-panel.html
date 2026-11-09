@@ -234,6 +234,15 @@ canvas.tchart { display: block; width: 100%; height: 150px; margin-top: 4px; }
 .review-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); flex-wrap: wrap; } .review-list li:first-child { border-top: 0; }
 .review-list .rp { display: flex; flex-direction: column; flex: 1 1 140px; min-width: 0; } .review-list .rp b { overflow-wrap: anywhere; }
 .review-list .btn { height: 24px; font-size: 11.5px; }
+.review-list .rp .good, .review-list .rp .bad { font: 600 11px var(--mono); }
+.review-list .rd { flex: 1 0 100%; min-width: 0; margin-top: 4px; }
+.code.live.rdiff { max-height: 300px; }
+.code.live .ln .sg { width: 14px; flex: none; text-align: center; user-select: none; }
+.code.live .ln.add .sg { color: var(--ok); } .code.live .ln.del .sg { color: var(--bad); }
+.code.live .ln.del { background: var(--del); } .code.live .ln.del .tx { text-decoration: line-through; color: var(--fg2); }
+.code.live .ln.gap .tx { color: var(--fg2); padding-left: 14px; }
+.rd-obj { font: 600 11.5px var(--mono); padding: 8px 12px 0; } .rd-load { padding: 6px 12px; }
+.lnk { background: none; border: 0; padding: 4px 0 0; color: var(--accent); font: 11.5px var(--font); cursor: pointer; }
 .mk.D { color: var(--bad); }
 .vpad { padding: 10px 12px; }
 #w-views { margin-left: 4px; }

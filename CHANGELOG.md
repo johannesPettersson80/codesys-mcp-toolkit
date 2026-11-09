@@ -45,7 +45,8 @@ Rewrite. See README "Migrating from v1".
     chats that can't show MCP Apps. Options `--viewer-port`, `--no-viewer`.
 - Panel views that follow Claude's work: Code (live code with new lines
   marked), Unit tests, Simulation, Tuning (experiment runs overlaid and
-  compared) and Review (accept or revert each changed object). New app-only
+  compared) and Review (accept or revert each changed object, with its
+  added/removed line counts; in the chat card the changes open in place). New app-only
   tool `get_experiments`.
 - Loop tuning with truST's Control Studio (truST 0.34+): `tune_setup`,
   `tune_run` (`identify`, `search`, `validate`, `cancel`) and `tune_status`.

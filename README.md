@@ -294,7 +294,7 @@ the project tree and the code as it is written.
 | Unit tests | each test with pass/fail and the failure message | runs the tests |
 | Simulation | the plant and the trend | starts, runs, steps or forces the simulation |
 | Tuning | the step responses of the experiment's runs overlaid, with each run's settings, rise time, overshoot, settling time and IAE | runs experiments or scenarios |
-| Review | the objects Claude changed since you last accepted, with Changes, Accept and Revert | has unreviewed changes and has been quiet for 20 s |
+| Review | the objects Claude changed since you last accepted, each with its added and removed line counts, Changes, Accept and Revert. In the chat, Changes shows the changed lines in place (red and green, two lines of context); in full screen it opens the object with the diff | has unreviewed changes and has been quiet for 20 s |
 
 Click a view to stay on it; **Follow Claude** switches back to following. The
 full-screen workspace has the same view tabs and lays itself out for each.
