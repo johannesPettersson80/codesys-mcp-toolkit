@@ -30,7 +30,7 @@ export function codesysSource(bridge: CodesysBridge, project: () => string | und
     tasks: async () => (await call<{ tasks: TaskInfo[] }>("tasks.list")).tasks,
     defines: async () => {
       const i = await call<{ defines?: string[]; project_defines?: string[] }>("project.info");
-      return { defines: i.defines ?? [], projectDefines: i.project_defines ?? [] };
+      return { defines: i.defines ?? [], ...(i.project_defines ? { projectDefines: i.project_defines } : {}) };
     },
     projectPath: project,
   };

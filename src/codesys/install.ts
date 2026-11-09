@@ -94,22 +94,33 @@ export interface ResolvedCodesys {
   exe: string;
   profile: string;
   install: CodesysInstall;
+  /** Why this install was picked, for the log. */
+  reason: string;
 }
 
 /** Pick the CODESYS exe + profile from options, falling back to the newest install. */
 export function resolveCodesys(exe?: string, profile?: string, additionalFolder?: string): ResolvedCodesys {
   if (additionalFolder && !existsSync(additionalFolder)) throw new Error(`CODESYS additional folder not found: ${additionalFolder}`);
   let install: CodesysInstall | undefined;
+  let reason: string;
   if (exe) {
     if (!existsSync(exe)) throw new Error(`CODESYS executable not found: ${exe}`);
     install = describeInstall(exe, additionalFolder);
+    reason = "set with --codesys-path";
   } else {
     const all = findInstalls();
-    install = profile ? all.find((i) => i.profiles.includes(profile)) ?? all[0] : all[0];
+    const withProfile = profile ? all.find((i) => i.profiles.includes(profile)) : undefined;
+    install = withProfile ?? all[0];
     if (!install) throw new Error("No CODESYS installation found. Pass --codesys-path <...\\CODESYS\\Common\\CODESYS.exe>.");
+    reason = withProfile ? `it has profile "${profile}"` : pickedNewest(all.map((i) => i.label));
     if (additionalFolder) install = { ...install, additionalFolder };
   }
   const prof = profile ?? install.profiles[0];
   if (!prof) throw new Error(`No CODESYS profile found next to ${install.exe}. Pass --codesys-profile "<name>".`);
-  return { exe: install.exe, profile: prof, install };
+  return { exe: install.exe, profile: prof, install, reason };
+}
+
+/** "newest of 2 installs found (CODESYS 3.5.22.40, CODESYS 3.5.21.0); --codesys-path picks another" */
+export function pickedNewest(labels: string[]): string {
+  return labels.length === 1 ? "the only install found" : `newest of ${labels.length} installs found (${labels.join(", ")}); --codesys-path picks another`;
 }

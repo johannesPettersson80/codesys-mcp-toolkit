@@ -283,7 +283,8 @@ export function composeMirror(source: TreeNode[], tasks: TaskInfo[], opts: Compo
     for (const c of [...(d?.unresolved ?? []), ...(i?.unresolved ?? [])]) conditional.push(`${n.path}: {IF ${c}}`);
     return d?.changed || i?.changed ? { ...n, ...(d ? { declaration: d.text } : {}), ...(i ? { implementation: i.text } : {}) } : n;
   });
-  if (conditional.length) warnings.push(`Conditional compilation left for truST to decide (it may differ from CODESYS): ${conditional.join("; ")}`);
+  const noProjectDefines = opts.defines && !opts.defines.projectDefines && conditional.some((c) => /project_defined/i.test(c));
+  if (conditional.length) warnings.push(`Conditional compilation left for truST to decide (it may differ from CODESYS): ${conditional.join("; ")}${noProjectDefines ? ". Project defines need the CODESYS Scripting add-on 4.2" : ""}`);
   const defs = [...(opts.defines?.defines ?? []), ...(opts.defines?.projectDefines ?? []).map((x) => `${x} (project)`)];
   if (defs.length && source.some((n) => /\{\s*IF\b/i.test(`${n.declaration ?? ""}\n${n.implementation ?? ""}`))) notes.push(`Conditional compilation resolved with the defines ${defs.join(", ")}`);
   const byPath = new Map(nodes.map((n) => [n.path, n] as const));

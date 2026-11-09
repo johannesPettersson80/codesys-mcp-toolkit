@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { registerTools, revertObject, type AppContext } from "./tools.js";
+import { registerTools, revertObject, versionLine, type AppContext } from "./tools.js";
 import { registerSimTools } from "./sim/tools.js";
 import { registerPanel } from "./sim/panel.js";
 
@@ -22,6 +22,7 @@ export function createServer(ctx: AppContext): McpServer {
       cache: ctx.cache,
       changes: ctx.changes,
       project: () => ctx.project?.path,
+      versions: () => versionLine(ctx.codesys?.label, ctx.bridge.health().scripting, ctx.project?.compiler_version),
       driver: ctx.driver,
       revert: (path, to) => revertObject(ctx, path, to),
       viewer: () => ctx.viewer,

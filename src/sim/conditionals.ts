@@ -17,7 +17,7 @@
 export interface Defines {
   /** The application's compiler defines. */
   defines?: string[];
-  /** Project defines (`project_defined(X)`). */
+  /** Project defines (`project_defined(X)`). Undefined when they can't be read (Scripting 4.1): such a block is then left for truST and reported. */
   projectDefines?: string[];
 }
 
@@ -34,8 +34,8 @@ const DEFINE = /^\s*\{\s*(define|undefine)\s+([A-Za-z_][A-Za-z0-9_]*)\b[^}]*\}\s
 
 type Node = { kind: "line"; index: number } | { kind: "if"; branches: { cond: string | null; pragma: number; body: Node[] }[]; end: number };
 
-/** Evaluate a condition; undefined when it uses anything beyond defined/project_defined/NOT/AND/OR. */
-export function evaluateCondition(cond: string, isDefined: (x: string) => boolean, isProjectDefined: (x: string) => boolean): boolean | undefined {
+/** Evaluate a condition; undefined when it uses anything beyond defined/project_defined/NOT/AND/OR, or project defines that aren't known. */
+export function evaluateCondition(cond: string, isDefined: (x: string) => boolean, isProjectDefined?: (x: string) => boolean): boolean | undefined {
   const tokens = cond.match(/[A-Za-z_][A-Za-z0-9_]*|\(|\)|\S/g) ?? [];
   let i = 0;
   const peek = () => tokens[i]?.toUpperCase();
@@ -53,7 +53,9 @@ export function evaluateCondition(cond: string, isDefined: (x: string) => boolea
       if (tokens[i++] !== "(") throw fail;
       const name = tokens[i++];
       if (!name || !/^[A-Za-z_]/.test(name) || tokens[i++] !== ")") throw fail;
-      return t === "DEFINED" ? isDefined(name) : isProjectDefined(name);
+      if (t === "DEFINED") return isDefined(name);
+      if (!isProjectDefined) throw fail;
+      return isProjectDefined(name);
     }
     throw fail;
   };
@@ -92,7 +94,7 @@ export function resolveConditionals(text: string, d: Defines = {}): Resolved {
   if (!/\{\s*(IF|define|undefine)\b/i.test(text)) return { text, unresolved: [], changed: false };
   const lines = text.split("\n");
   const local = new Set((d.defines ?? []).map((x) => x.toLowerCase()));
-  const project = new Set((d.projectDefines ?? []).map((x) => x.toLowerCase()));
+  const project = d.projectDefines && new Set(d.projectDefines.map((x) => x.toLowerCase()));
 
   // Parse into blocks; give up (unchanged) on unbalanced pragmas.
   const root: Node[] = [];
@@ -155,13 +157,14 @@ export function resolveConditionals(text: string, d: Defines = {}): Resolved {
         blank(n.end);
         continue;
       }
-      const values = n.branches.map((b) => (b.cond === null ? true : evaluateCondition(b.cond, (x) => local.has(x.toLowerCase()), (x) => project.has(x.toLowerCase()))));
-      if (values.some((v) => v === undefined)) {
+      const values = n.branches.map((b) => (b.cond === null ? true : evaluateCondition(b.cond, (x) => local.has(x.toLowerCase()), project && ((x) => project.has(x.toLowerCase())))));
+      // CODESYS takes the first true branch, so conditions after it don't matter.
+      const taken = values.findIndex((v) => v !== false);
+      if (taken >= 0 && values[taken] === undefined) {
         n.branches.forEach((b, j) => values[j] === undefined && unresolved.push(b.cond!));
         for (const b of n.branches) emit(b.body, true); // left for truST
         continue;
       }
-      const taken = values.indexOf(true);
       n.branches.forEach((b, j) => {
         blank(b.pragma);
         emit(b.body, j === taken);

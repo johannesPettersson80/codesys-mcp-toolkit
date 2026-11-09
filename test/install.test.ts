@@ -1,6 +1,15 @@
 /** Choosing a CODESYS profile when several service packs are installed side by side. */
 import { describe, expect, it } from "vitest";
-import { compareProfiles, profileKey } from "../src/codesys/install.js";
+import { compareProfiles, pickedNewest, profileKey } from "../src/codesys/install.js";
+import { versionLine } from "../src/tools.js";
+
+describe("the version line in the panel", () => {
+  it("shows what is known", () => {
+    expect(versionLine("CODESYS 3.5.22.40", "4.2.0.0", "3.5.19.40")).toBe("CODESYS 3.5.22.40 · Scripting 4.2.0.0 · compiler 3.5.19.40");
+    expect(versionLine("CODESYS 3.5.21.0")).toBe("CODESYS 3.5.21.0"); // Scripting 4.1 has no compiler accessor
+    expect(versionLine()).toBe("");
+  });
+});
 
 describe("CODESYS profiles", () => {
   it("sort newest first, numerically", () => {
@@ -13,6 +22,11 @@ describe("CODESYS profiles", () => {
       "CODESYS V3.5 SP9",
       "Custom",
     ]);
+  });
+
+  it("say why an install was picked when none was named", () => {
+    expect(pickedNewest(["CODESYS 3.5.21.0"])).toBe("the only install found");
+    expect(pickedNewest(["CODESYS 3.5.22.40", "CODESYS 3.5.21.0"])).toBe("newest of 2 installs found (CODESYS 3.5.22.40, CODESYS 3.5.21.0); --codesys-path picks another");
   });
 
   it("read the version from the profile name", () => {

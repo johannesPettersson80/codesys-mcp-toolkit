@@ -19,6 +19,7 @@ export function renderCard(view: ViewName, follow: boolean): void {
   // Before the simulation runs, the project is what matters.
   $("c-statusText").textContent = !s ? "Connecting" : s.status === "no_mirror" || s.status === "no_project" ? (ws?.project ? "Project open" : "No project") : (label[shown] ?? shown);
   $("c-meta").textContent = s && (s.status === "running" || s.status === "paused") ? `scan ${s.scan} · ${s.simTime.toFixed(2)} s · ${s.timeScale}x` : (ws?.project?.split(/[\\/]/).pop() ?? "");
+  $("c-meta").title = ws?.versions ?? "";
   const where = s?.location && !s.location.harness && s.location.obj ? `Stopped${s.location.breakpoint ? ` at breakpoint #${s.location.breakpoint}` : ""}: ${s.location.obj} line ${s.location.line}` : "";
   $("c-activity").textContent = s?.held ? "You're driving: Claude is paused." : (s?.activity ?? where);
   $("c-hold").setAttribute("aria-pressed", String(!!s?.held));

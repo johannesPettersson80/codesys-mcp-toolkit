@@ -117,6 +117,11 @@ export function describeBuildSettings(r: ProjectInfo, codesysLabel?: string): st
   return out.length ? ` ${out.join(" ")}` : "";
 }
 
+/** Which CODESYS a session uses, for the panel: "CODESYS 3.5.22.40 · Scripting 4.2.0.0 · compiler 3.5.19.40". */
+export function versionLine(codesysLabel?: string, scripting?: string, compiler?: string): string {
+  return [codesysLabel, scripting && `Scripting ${scripting}`, compiler && `compiler ${compiler}`].filter(Boolean).join(" · ");
+}
+
 /**
  * The useful part of CODESYS's PLCopenXML export of one object: its <pou> (or <dataType>)
  * element, without the vendor <addData> blocks (GUID-coded attributes, layout data).
@@ -258,7 +263,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     async () => {
       const h = b.health();
       const lines = [
-        `CODESYS: ${ctx.codesys ? `${ctx.codesys.label} (profile "${ctx.codesys.profile}")` : "unknown"}`,
+        `CODESYS: ${ctx.codesys ? `${ctx.codesys.label} (profile "${ctx.codesys.profile}")${h.scripting ? `, Scripting ${h.scripting}` : ""}` : "unknown"}`,
         `Bridge: ${h.state} / ${h.verdict}${h.pid ? `, pid ${h.pid}` : ""}${h.readyAfterMs ? `, started in ${Math.round(h.readyAfterMs / 1000)}s` : ""}, ${h.calls} call(s), ${h.restarts} restart(s)`,
       ];
       if (h.heartbeat) lines.push(`Watcher: ${h.heartbeat.state}${h.heartbeat.op ? ` (${h.heartbeat.op})` : ""}, heartbeat ${Math.round(h.heartbeat.ageMs / 1000)}s ago`);

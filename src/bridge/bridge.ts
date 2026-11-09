@@ -62,6 +62,8 @@ export interface BridgeHealth {
   readyAfterMs?: number;
   heartbeat?: Heartbeat & { ageMs: number };
   verdict: "healthy" | "busy" | "hung" | "dead" | "starting" | "stopped";
+  /** Version of the CODESYS Scripting add-on, once CODESYS has started. */
+  scripting?: string;
   calls: number;
   lastError?: string;
   restarts: number;
@@ -128,6 +130,7 @@ export class CodesysBridge {
   private restarts = 0;
   private startedAt?: number;
   private readyAt?: number;
+  private scripting?: string;
   private lastError?: string;
   private exitInfo?: string;
   /** The end of CODESYS's own console output (for start-up errors). */
@@ -241,7 +244,12 @@ export class CodesysBridge {
       if (existsSync(readyFile)) {
         this.state = "ready";
         this.readyAt = Date.now();
-        this.log(`watcher ready after ${this.readyAt - this.startedAt}ms (pid ${child.pid})`);
+        try {
+          this.scripting = (JSON.parse(readFileSync(readyFile, "utf8").replace(/^﻿/, "")) as { scripting?: string | null }).scripting ?? undefined;
+        } catch {
+          this.scripting = undefined; // only used for display
+        }
+        this.log(`watcher ready after ${this.readyAt - this.startedAt}ms (pid ${child.pid})${this.scripting ? `, Scripting ${this.scripting}` : ""}`);
         return;
       }
       if ((this.state as BridgeState) === "dead") {
@@ -296,6 +304,13 @@ export class CodesysBridge {
       }
       if (now - lastCheck > 1000) {
         lastCheck = now;
+        const dialog = this.pendingDialog();
+        if (dialog) {
+          await this.kill(`dialog "${dialog}" during '${op}'`);
+          const msg = `CODESYS opened a dialog ("${dialog}") during '${op}' and is waiting for an answer, which a session without a window can't give. CODESYS was stopped and will restart on the next call; unsaved changes are lost. Do the same step once in the CODESYS window and answer the dialog there, then try again.`;
+          this.lastError = msg;
+          throw new BridgeError("dialog", msg);
+        }
         const v = this.verdict();
         if (v === "hung") {
           await this.kill(`hung during '${op}'`);
@@ -324,6 +339,18 @@ export class CodesysBridge {
     }
   }
 
+  /** The title of a dialog the watcher found CODESYS waiting on (dialog.json). */
+  private pendingDialog(): string | undefined {
+    if (!this.sessionDir) return undefined;
+    const file = join(this.sessionDir, "dialog.json");
+    if (!existsSync(file)) return undefined;
+    try {
+      return (JSON.parse(readFileSync(file, "utf8").replace(/^﻿/, "")) as { title?: string }).title ?? "untitled";
+    } catch {
+      return undefined; // held for a moment: the next check reads it
+    }
+  }
+
   private verdict(): BridgeHealth["verdict"] {
     if (this.state === "stopped") return "stopped";
     if (this.state === "dead") return "dead";
@@ -346,6 +373,7 @@ export class CodesysBridge {
       sessionDir: this.sessionDir,
       startedAt: this.startedAt ? new Date(this.startedAt).toISOString() : undefined,
       readyAfterMs: this.readyAt && this.startedAt ? this.readyAt - this.startedAt : undefined,
+      scripting: this.scripting,
       heartbeat: this.readHeartbeat(),
       verdict: this.verdict(),
       calls: this.calls,

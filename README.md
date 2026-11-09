@@ -14,7 +14,9 @@ trip.
 
 ## Requirements
 
-- Windows with **CODESYS V3.5** (tested with SP21; SP16 and later should work)
+- Windows with **CODESYS V3.5** and its **Scripting** add-on (tested with SP21,
+  Scripting 4.1 and 4.2. On SP22 everything except compiling is tested so far.
+  SP16 and later should work)
 - **Node.js 20** or later
 
 ## Install
@@ -73,6 +75,18 @@ last client disconnects. Its log is `daemon-<id>.log` in
 CODESYS starts in the background when the server launches. A cold start takes
 1 to 3 minutes; later starts take about 10 seconds. `codesys_status` reports
 progress without waiting.
+
+### Several CODESYS versions
+
+To keep SP21 and SP22 side by side, add one server entry per version, each
+with its own `--codesys-path` and `--codesys-profile`. They get separate shared
+sessions automatically. Without `--codesys-path` the server uses the newest
+install, and its log says which one it picked and why.
+
+`codesys_status` and the panel show the CODESYS install, the Scripting add-on
+and the project's compiler version. The toolkit never updates a project's
+compiler or library versions: a project opened in a newer CODESYS keeps its
+own, and `open_project` says so.
 
 ## Tools
 
@@ -453,6 +467,10 @@ Each session folder keeps `watcher.log` for troubleshooting.
   CODESYS. Install them with the CODESYS Library Repository, or pass your own
   `template`.
 - **`hung` / `timeout`**: CODESYS was restarted. Re-open the project.
+- **`dialog`**: CODESYS opened a dialog, named in the error, that a session
+  without a window can't answer. CODESYS was stopped and restarts on the next
+  call. Do the same step once in the CODESYS window, answer the dialog there,
+  and try again.
 
 ## Development
 

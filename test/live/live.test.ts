@@ -230,7 +230,9 @@ describe("live CODESYS", () => {
 
   it("saves and reports status", async () => {
     expect((await call("save_project")).isError).toBe(false);
-    expect((await call("codesys_status")).text).toMatch(/Bridge: ready \/ healthy/);
+    const status = (await call("codesys_status")).text;
+    expect(status).toMatch(/Bridge: ready \/ healthy/);
+    expect(status).toMatch(/, Scripting \d+\.\d+/);
   }, LONG);
 
   it("adds and removes a library", async () => {

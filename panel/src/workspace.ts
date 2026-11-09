@@ -237,7 +237,8 @@ export class Workspace {
     const shown = s?.activity && (s.status === "paused" || s.status === "running") ? "running" : (s?.status ?? "stopped");
     $("w-status").className = `pill ${shown === "running" ? "running" : shown === "paused" ? "paused" : ""}`;
     $("w-statusText").textContent = s ? (label[shown] ?? shown) : "Connecting";
-    $("w-meta").textContent = s && (s.status === "running" || s.status === "paused") ? `scan ${s.scan} · ${s.simTime.toFixed(2)} s · ${s.timeScale}x` : (model.ws?.project?.split(/[\\/]/).pop() ?? "");
+    $("w-meta").textContent = s && (s.status === "running" || s.status === "paused") ? `scan ${s.scan} · ${s.simTime.toFixed(2)} s · ${s.timeScale}x` : [model.ws?.project?.split(/[\\/]/).pop(), model.ws?.versions].filter(Boolean).join(" · ");
+    $("w-meta").title = model.ws?.versions ?? "";
     const f = model.ws?.focus;
     const where = s?.location && !s.location.harness && s.location.obj ? `Stopped${s.location.breakpoint ? ` at breakpoint #${s.location.breakpoint}` : ""}: ${s.location.obj} line ${s.location.line}` : "";
     const touched = f && Date.now() - Date.parse(f.at) < 60_000 ? `Claude ${f.action === "read" ? "is reading" : f.action === "write" ? "edited" : f.action === "create" ? "created" : f.action === "delete" ? "deleted" : f.action === "revert" ? "reverted" : "renamed"} ${f.path}` : "";

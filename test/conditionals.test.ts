@@ -15,9 +15,23 @@ describe("conditional compilation", () => {
     expect(fast.changed).toBe(true);
     expect(fast.unresolved).toEqual([]);
 
-    expect(resolveConditionals(SRC, { defines: ["SLOW"] }).text.split("\n")[7]).toBe("n := 2;");
+    expect(resolveConditionals(SRC, { defines: ["SLOW"], projectDefines: [] }).text.split("\n")[7]).toBe("n := 2;");
     expect(resolveConditionals(SRC, { defines: ["SLOW"], projectDefines: ["DEMO"] }).text.split("\n")[9]).toBe("n := 3;");
-    expect(resolveConditionals(SRC).text.split("\n")[9]).toBe("n := 3;");
+    expect(resolveConditionals(SRC, { projectDefines: [] }).text.split("\n")[9]).toBe("n := 3;");
+  });
+
+  it("doesn't guess project defines it can't read (Scripting 4.1)", () => {
+    const r = resolveConditionals(SRC, { defines: ["SLOW"] });
+    expect(r.text).toBe(SRC);
+    expect(r.changed).toBe(false);
+    expect(r.unresolved).toEqual(["defined (SLOW) AND NOT project_defined (DEMO)"]);
+  });
+
+  it("ignores conditions after the branch CODESYS takes", () => {
+    const src = ["{IF defined (A)}", "a();", "{ELSIF hastype (variable: x, INT)}", "b();", "{END_IF}"].join("\n");
+    const r = resolveConditionals(src, { defines: ["A"], projectDefines: [] });
+    expect(r.text.split("\n").filter(Boolean)).toEqual(["a();"]);
+    expect(r.unresolved).toEqual([]);
   });
 
   it("honours {define} and {undefine} in the object", () => {

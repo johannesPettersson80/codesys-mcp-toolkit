@@ -27,7 +27,7 @@ async function connect(withUi: boolean, project?: string, driver: Driver | null 
   const sim = new SimController({ exportSt: async () => tankNodes(), tasks: async () => tankTasks(), projectPath: () => (project === "" ? undefined : proj) }, { mirrorRoot: join(root, "m"), git: false });
   const cache = new ProjectCache();
   const changes = new ChangeStore(join(root, "cp"));
-  const ctx = { bridge: {} as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes, driver: driver ?? undefined, ...(project === "" ? {} : { project: { path: proj } }) } as AppContext;
+  const ctx = { bridge: { health: () => ({}) } as unknown as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes, driver: driver ?? undefined, ...(project === "" ? {} : { project: { path: proj } }) } as AppContext;
   const server = createServer(ctx);
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);

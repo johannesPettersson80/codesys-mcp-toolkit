@@ -23,7 +23,7 @@ describe("browser viewer", () => {
     const cache = new ProjectCache();
     cache.reset(project);
     cache.setAll(tankNodes());
-    const ctx = { bridge: {} as AppContext["bridge"], autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes: new ChangeStore(join(root, "cp")), driver: new Driver(), project: { path: project } } as AppContext;
+    const ctx = { bridge: { health: () => ({ scripting: "4.2.0.0" }) } as unknown as AppContext["bridge"], codesys: { exe: "x", profile: "p", label: "CODESYS 3.5.22.40" }, autosave: false, workspace: root, startWaitMs: 0, sim, cache, changes: new ChangeStore(join(root, "cp")), driver: new Driver(), project: { path: project, compiler_version: "3.5.19.40" } } as AppContext;
     viewer = await startViewer(ctx, { port: 0, openBrowser: (u) => opened.push(u) });
   });
   afterAll(async () => viewer?.close());
@@ -45,8 +45,9 @@ describe("browser viewer", () => {
   it("answers the panel's tools from the shared context", async () => {
     const r = await call("get_workspace");
     expect(r.status).toBe(200);
-    const w = ((await r.json()) as { structuredContent: { tree: { path: string }[] } }).structuredContent;
+    const w = ((await r.json()) as { structuredContent: { tree: { path: string }[]; versions?: string } }).structuredContent;
     expect(w.tree.map((n) => n.path)).toContain("PRG_Tank");
+    expect(w.versions).toBe("CODESYS 3.5.22.40 · Scripting 4.2.0.0 · compiler 3.5.19.40");
     const o = ((await (await call("get_object", { path: "FB_PI" })).json()) as { structuredContent: { object: { implementation: string } } }).structuredContent;
     expect(o.object.implementation).toContain("rE := rSP - rPV;");
   });

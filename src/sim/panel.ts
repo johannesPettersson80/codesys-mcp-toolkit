@@ -43,6 +43,8 @@ export interface WorkspaceDeps {
   cache?: ProjectCache;
   changes?: ChangeStore;
   project: () => string | undefined;
+  /** Which CODESYS, Scripting add-on and compiler the session uses. */
+  versions?: () => string;
   /** "Pause Claude". */
   driver?: Driver;
   /** Revert an object in CODESYS to a checkpoint (the revert_object logic). */
@@ -224,6 +226,7 @@ export function registerPanel(server: McpServer, sim: SimController, ws: Workspa
         return json({
           version: cache.version,
           project: ws.project() ?? null,
+          versions: ws.versions?.() || undefined,
           tree,
           removed: changes.filter((c) => c.change === "removed").map((c) => c.path),
           changeCount: changes.length,

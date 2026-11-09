@@ -16,6 +16,7 @@
 from __future__ import print_function
 
 import os
+import re
 import sys
 import time
 import traceback
@@ -24,7 +25,7 @@ SCRIPTS = os.environ.get("CODESYS_MCP_SCRIPTS")
 if SCRIPTS and SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
-from mcp_compat import current_pid, now, pid_alive, read_json, remove_file, to_text, write_json_atomic  # noqa: E402
+from mcp_compat import current_pid, now, pid_alive, read_json, remove_file, retry_fs, to_text, write_json_atomic  # noqa: E402
 
 SESSION = os.environ["CODESYS_MCP_DIR"]
 PARENT_PID = int(os.environ.get("CODESYS_MCP_PARENT_PID") or "0")
@@ -34,8 +35,13 @@ HEARTBEAT = os.path.join(SESSION, "heartbeat.json")
 READY = os.path.join(SESSION, "ready.json")
 LOG = os.path.join(SESSION, "watcher.log")
 
+DIALOG = os.path.join(SESSION, "dialog.json")
+
 PID = current_pid()
-STATE = {"count": 0, "last_beat": 0.0}
+STATE = {"count": 0, "last_beat": 0.0, "busy_since": None, "op": None}
+
+# A dialog must stay up this long before the server is told, so brief windows don't count.
+DIALOG_GRACE_S = 10.0
 
 
 def log(msg):
@@ -80,6 +86,65 @@ def setup_prompts(se):
         return "prompt handling not set: %s" % e
 
 
+def scripting_version():
+    # In CODESYS, sys.version ends in "ScriptEngine.plugin 4.2.0.0".
+    m = re.search(r"ScriptEngine\.plugin\s+([0-9.]+)", sys.version)
+    return m.group(1) if m else None
+
+
+def find_dialog():
+    # A session without a UI has no open forms and no main window (checked on SP21 and
+    # SP22), so a modal form or a main window means CODESYS is waiting for an answer.
+    from System.Windows.Forms import Application
+    from System.Diagnostics import Process
+    for f in Application.OpenForms:
+        if f.Modal:
+            return to_text(f.Text) or "(untitled)"
+    return to_text(Process.GetCurrentProcess().MainWindowTitle) or None
+
+
+def watch_dialogs():
+    # Runs beside the request loop. A dialog blocks that loop for good and nobody can
+    # answer it in a session without a window, so tell the server (dialog.json).
+    import clr
+    clr.AddReference("System.Windows.Forms")
+    title, since, reported, failed = None, 0.0, False, False
+    while True:
+        time.sleep(1.0)
+        busy = STATE["busy_since"]
+        current = None
+        if busy is not None and now() - busy > 2.0:
+            try:
+                current = find_dialog()
+            except Exception as e:  # e.g. the form list changed while it was read
+                if not failed:
+                    log("dialog check failed: %s" % to_text(e))
+                failed = True
+        if current != title:
+            title, since = current, now()
+            if current:
+                log("dialog up during %s: %s" % (STATE["op"], current))
+            elif reported:
+                remove_file(DIALOG)
+                reported = False
+        elif current and not reported and now() - since >= DIALOG_GRACE_S:
+            write_json_atomic(DIALOG, {"title": current, "op": STATE["op"]})
+            reported = True
+
+
+def start_dialog_watch():
+    import threading
+
+    def run():
+        try:
+            watch_dialogs()
+        except BaseException as e:
+            log("dialog watch stopped: %s" % to_text(e))
+    t = threading.Thread(target=run)
+    t.daemon = True
+    t.start()
+
+
 def sleep_ms(se, ms):
     delay = getattr(getattr(se, "system", None), "delay", None)
     if delay is not None and not hasattr(se, "FAKE"):
@@ -103,7 +168,8 @@ def handle(ops_mod, fname):
     path = os.path.join(REQ_DIR, fname)
     rid = fname[:-5]
     try:
-        req = read_json(path)
+        # Another process (an antivirus scan, the indexer) can hold a new file for a moment.
+        req = retry_fs(read_json, path)
     except Exception as e:
         remove_file(path)
         write_json_atomic(os.path.join(RES_DIR, rid + ".json"), {
@@ -116,6 +182,8 @@ def handle(ops_mod, fname):
     STATE["count"] += 1
     beat("busy", op, rid, req.get("deadline_ms"))
     started = now()
+    STATE["op"] = op
+    STATE["busy_since"] = started
     stop = False
     if op == "shutdown":
         res = {"id": rid, "ok": True, "result": {"bye": True}}
@@ -133,6 +201,7 @@ def handle(ops_mod, fname):
                 res = {"id": rid, "ok": False, "error": {
                     "code": "codesys_error", "message": to_text(e) or e.__class__.__name__,
                     "detail": to_text(traceback.format_exc())}}
+    STATE["busy_since"] = None
     res["ms"] = int((now() - started) * 1000)
     # Go idle before publishing the result: once the server sees the result it may
     # read the heartbeat right away, and it must not find this op still "busy".
@@ -151,8 +220,10 @@ def main():
     import mcp_ops
     prompts = setup_prompts(se)
     log(prompts)
+    if not hasattr(se, "FAKE"):
+        start_dialog_watch()
     beat("idle")
-    write_json_atomic(READY, {"pid": PID, "ts": now(), "python": sys.version.split()[0], "prompts": prompts})
+    write_json_atomic(READY, {"pid": PID, "ts": now(), "python": sys.version.split()[0], "prompts": prompts, "scripting": scripting_version()})
     last_parent_check = 0.0
     while True:
         t = now()

@@ -177,6 +177,57 @@ own fix step below.
 - How to tell which version a chat uses: `codesys_status`, the panel.
 - CHANGELOG.
 
+## Status (9 November)
+
+Live, with Scripting 4.2 and truST 0.34: **SP21 24 of 24, SP22 16 of 24.** All
+8 SP22 failures are the `Build: 17 error(s)` assertion. Everything else passes
+on SP22, the simulation included.
+
+**Waiting for a complete SP22 install.**
+- SP22's `Standard.project` asks for compiler 3.5.19.40, the library
+  `IoStandard, 3.1.3.1` and a device description for `PLCWinNT`. None of them
+  is installed, and the setup log stops at "CODESYS Compatibility Package
+  3.5.17.20".
+- The errors come from those references, not from SP22's compiler: the same
+  project gives the same 17 errors in SP21.
+- After a full setup (as administrator), run the live suite with `CODESYS_LIVE=1`
+  and `CODESYS_PATH=<SP22 CODESYS.exe>`.
+- If the template still doesn't build, `create_project` needs another way to
+  get a Standard project on SP22. Otherwise, change the README to "tested with
+  SP21 and SP22".
+
+**By step.**
+- **1. Done.** All 17 object types in `TankTune` map to the same kind on both
+  versions. The same 3 GUIDs, outside the application, are unknown on both.
+- **2. Done, except the compile tests.**
+  - Start-up in `--noUI` takes about 9 s on SP22.
+  - Opening across versions works both ways, with no refusal and no dialog: an
+    SP21 project in SP22, and an SP22 project in SP21.
+  - Not tested: a project that really needs compiler 3.5.22.
+    `set_compilerversion_to_newest()` reports 3.5.22.40 and the project saves,
+    but it reopens as 3.5.19.40, in SP22 too. Retest after the full install.
+  - The baseline run found a bug on any version: the watcher read request
+    files without retrying, so a file held for a moment failed the call with
+    `bad_request`. Fixed, with a test that fails on the old code.
+- **3. Done.** No dialog appeared at project open. For any that does, the
+  watcher now has a background thread:
+  - It looks for modal forms and for a process main window, which a session
+    without a UI otherwise doesn't have.
+  - A dialog up for 10 s goes into `dialog.json`. The bridge then stops CODESYS
+    and answers with error `dialog`, naming it. It never answers the dialog.
+  - Verified on SP21 and SP22 with real WinForms dialogs and message boxes:
+    about 14 s to the error, a clean restart on the next call, and a shorter
+    dialog left alone. It didn't fire in either live suite.
+- **4. Done.** `codesys_status`, `open_project` and the panel show the install,
+  the Scripting version and the compiler version. CODESYS's "refusal" of an
+  SP22 project in SP21 didn't happen, so there is no text for it yet.
+- **5. Done.** Defines are in the mirror (`src/sim/conditionals.ts`). With
+  Scripting 4.1, `project_defined` blocks are left for truST and reported.
+  The new POU methods take the same inputs as `create_pou`, so they aren't used.
+- **6. Done, except the optional automatic match.** The server log says which
+  install was picked and why.
+- **7. Done, except "tested with SP22"**, which waits for the compile tests.
+
 ## Out of scope
 - **CODESYS's own Development System MCP Server.** It needs SP22.1, a
   Professional Developer Edition subscription and the visible IDE. Revisit if

@@ -1,4 +1,4 @@
-import { closeSync, openSync } from "node:fs";
+import { closeSync, constants, existsSync, openSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BridgeError, startupHint, type CodesysBridge } from "../src/bridge/bridge.js";
@@ -51,6 +51,25 @@ describe("CodesysBridge with the real watcher (fake scriptengine)", () => {
     expect(bridge.logTail(50)).not.toMatch(/crashed|heartbeat write failed/);
   });
 
+  it.runIf(process.platform === "win32")("waits for a request file another process holds (Windows sharing violation)", async () => {
+    // An antivirus scan or the indexer can hold a new request file for a moment. The
+    // watcher used to answer "bad_request: Unreadable request" and drop the call.
+    bridge = fakeBridge();
+    await bridge.start();
+    const dir = bridge.health().sessionDir!;
+    const UV_FS_O_EXLOCK = 0x10000000; // libuv: open with no sharing at all
+    const fd = openSync(join(dir, "requests", "zz-held.json"), constants.O_CREAT | constants.O_WRONLY | constants.O_EXCL | UV_FS_O_EXLOCK);
+    try {
+      writeSync(fd, JSON.stringify({ id: "zz-held", op: "ping", args: {}, deadline_ms: 10_000 }));
+      await new Promise((r) => setTimeout(r, 400)); // long enough for the watcher to find it
+    } finally {
+      closeSync(fd);
+    }
+    const result = join(dir, "results", "zz-held.json");
+    for (let i = 0; i < 100 && !existsSync(result); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(JSON.parse(readFileSync(result, "utf8").replace(/^﻿/, ""))).toMatchObject({ ok: true, result: { engine: "fake" } });
+  });
+
   it("returns watcher errors as BridgeError with code", async () => {
     bridge = fakeBridge();
     await expect(bridge.call("objects.read", { paths: ["X"] })).rejects.toMatchObject({ code: "no_project" });
@@ -83,6 +102,20 @@ describe("CodesysBridge with the real watcher (fake scriptengine)", () => {
     const r = await bridge.call<{ engine: string }>("ping");
     expect(r.engine).toBe("fake");
     expect(bridge.health().restarts).toBe(1);
+  }, 30_000);
+
+  it("stops a call that waits on a dialog, and names the dialog", async () => {
+    bridge = fakeBridge();
+    await bridge.call("project.open", { path: fakeProjectFile() });
+    const started = Date.now();
+    const pending = bridge.call("object.write", { path: "PLC_PRG", implementation: "__HANG__" }, { timeoutMs: 60_000 }).catch((e) => e);
+    await new Promise((r) => setTimeout(r, 300));
+    writeFileSync(join(bridge.health().sessionDir!, "dialog.json"), JSON.stringify({ title: "Do you trust this project?", op: "object.write" }));
+    const err = await pending;
+    expect(err).toMatchObject({ code: "dialog" });
+    expect((err as BridgeError).message).toMatch(/"Do you trust this project\?"/);
+    expect(Date.now() - started).toBeLessThan(15_000); // not the op's 60 s deadline
+    expect(bridge.health().state).toBe("dead");
   }, 30_000);
 
   it("reports a crash during an op as watcher_died", async () => {

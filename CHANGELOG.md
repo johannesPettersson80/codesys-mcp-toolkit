@@ -64,6 +64,9 @@ Rewrite. See README "Migrating from v1".
   (`CODESYS\AdditionalFolders\Default`, where SP22 keeps add-ons such as
   Scripting) as `--additionalfolder`, and reads profiles from it.
   `--codesys-additional-folder` overrides it.
+- `codesys_status` and the panel show the Scripting add-on version next to
+  the CODESYS install and compiler version. The server log says why an install
+  was picked.
 - Build properties: objects excluded from the build are marked in the tree
   and left out of the simulation. The application's compiler defines and,
   with Scripting 4.2, the project defines and compiler version are reported;
@@ -113,6 +116,14 @@ Rewrite. See README "Migrating from v1".
     context. They use app-only `ui_*` tools.
 
 ### Fixed
+- A dialog CODESYS waits on during a call ends the call in about 15 seconds
+  with an error that names it. Before, the call ran into its timeout (up to 5
+  minutes).
+- A request file held for a moment by another process (antivirus, indexer) no
+  longer fails the call with `bad_request`.
+- The simulation doesn't guess `project_defined` on Scripting 4.1, which can't
+  read project defines: those blocks are left for truST and reported.
+  Conditions after the branch CODESYS takes are ignored.
 - `compile` returns errors and warnings with object, line and code (#10).
 - `write_var`, `force_var` and experiment settings refuse a name the program
   doesn't have. truST 0.34 accepts such a write and drops it, so a typo looked

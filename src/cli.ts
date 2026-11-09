@@ -137,7 +137,7 @@ async function main() {
     const mirrorRoot = values["mirror-dir"] ?? join(process.env.LOCALAPPDATA ?? tmpdir(), "codesys-mcp-toolkit", "mirrors");
     ctx.sim = new SimController(codesysSource(bridge, () => ctx.project?.path, ctx.startWaitMs, (nodes) => ctx.cache?.setAll(nodes)), { trustRuntime: values["trust-runtime"], mirrorRoot, log });
   }
-  log(`v${VERSION}: ${codesys.install.label}, profile "${codesys.profile}"${codesys.install.additionalFolder ? `, add-ons in ${codesys.install.additionalFolder}` : ""}, sessions in ${sessionRoot}`);
+  log(`v${VERSION}: ${codesys.install.label} (${codesys.reason}), profile "${codesys.profile}"${codesys.install.additionalFolder ? `, add-ons in ${codesys.install.additionalFolder}` : ""}, sessions in ${sessionRoot}`);
 
   // The viewer shows the panel, which comes with the simulation tools.
   if (ctx.sim && !values["no-viewer"]) {

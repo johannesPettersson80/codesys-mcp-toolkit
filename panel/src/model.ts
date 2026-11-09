@@ -20,6 +20,8 @@ export interface WsNode {
 export interface WsData {
   version: number;
   project: string | null;
+  /** "CODESYS 3.5.22.40 · Scripting 4.2.0.0 · compiler 3.5.19.40" */
+  versions?: string;
   tree: WsNode[] | null;
   removed?: string[];
   changeCount?: number;
