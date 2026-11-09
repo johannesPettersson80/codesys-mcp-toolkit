@@ -1,33 +1,64 @@
-# @codesys/mcp-toolkit
+<div align="center">
 
-An MCP server that lets Claude (or any MCP client) read, write and compile
-**Structured Text** in **CODESYS V3.5** projects.
+# CODESYS MCP Toolkit
 
-Version 2 is a rewrite. CODESYS now stays open for the whole session instead
-of cold-starting for every call. Tools work on the open project, compile
-errors come back with object and line, and non-ASCII text survives the round
-trip.
+**Let Claude read, write, compile and simulate Structured Text in your CODESYS V3.5 projects.**
 
-> **No real controller.** The toolkit doesn't log in or download to a
-> controller. It goes online only to CODESYS's own simulation, which runs
-> inside CODESYS, and every online call first checks that simulation mode is on.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+![Status: 2.0 alpha](https://img.shields.io/badge/status-2.0%20alpha-orange)
+![CODESYS V3.5](https://img.shields.io/badge/CODESYS-V3.5-c8102e)
+![Node.js 20 or later](https://img.shields.io/badge/node-%E2%89%A520-339933)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4)
+[![Model Context Protocol](https://img.shields.io/badge/MCP-server-6e56cf)](https://modelcontextprotocol.io)
 
-## Requirements
+</div>
 
-- Windows with **CODESYS V3.5** and its **Scripting** add-on (tested with SP21
-  and SP22 on Scripting 4.2, and SP21 on 4.1; SP16 and later should work)
-- **Node.js 20** or later
+An [MCP](https://modelcontextprotocol.io) server that keeps one CODESYS session
+open in the background and gives Claude, or any MCP client, direct access to
+it. Claude works on your real project with the real CODESYS compiler, and you
+can watch the code change as it happens.
+
+![The live workspace, showing a sample project with a change waiting for review](docs/images/workspace.png)
+
+## Highlights
+
+- **Edits your real project.** POUs, methods, properties, interfaces, DUTs and
+  GVLs, as Structured Text.
+- **Compiles with the real compiler.** Errors come back with object, line and
+  code, including in code that no task calls yet.
+- **Tests in simulation.** Run, step exact cycles, read, write and force values
+  in CODESYS's own simulation, with nothing else to install.
+- **Understands the project.** Outlines, I/O lists, the device tree and library
+  interfaces, without reading every object.
+- **Shows its work.** A live panel with the project tree, the code as it is
+  written, compile results, and Accept or Revert for each change.
+- **Never touches a real controller.** The only online connection is to
+  CODESYS's own simulation, and every online call checks for it first.
+
+## Quick start
+
+### Requirements
+
+- Windows with **CODESYS V3.5** and its **Scripting** add-on. Tested with SP21
+  and SP22 on Scripting 4.2, and SP21 on 4.1. SP16 and later should work.
+- **Node.js 20** or later.
 
 Schneider EcoStruxure Machine Expert isn't supported yet. If you have it, the
 [testing notes](docs/machine-expert-testing.md) help find out what works.
 
-## Install
+### Install
 
 ```bash
 npm install -g @codesys/mcp-toolkit@next
 ```
 
-Add the server to Claude Desktop (`%APPDATA%\Claude\claude_desktop_config.json`):
+Version 2 is in alpha, so it's published under the `next` tag. Without `@next`,
+npm installs version 1.
+
+### Connect it to Claude Desktop
+
+Add the server to `%APPDATA%\Claude\claude_desktop_config.json`, then restart
+Claude Desktop:
 
 ```json
 {
@@ -44,9 +75,81 @@ Add the server to Claude Desktop (`%APPDATA%\Claude\claude_desktop_config.json`)
 }
 ```
 
-Both `--codesys-path` and `--codesys-profile` are optional. Without them the
-server uses the newest CODESYS install under Program Files and its newest
-profile.
+`--codesys-path` and `--codesys-profile` are optional. Without them the server
+uses the newest CODESYS install under Program Files and its newest profile.
+
+### Try it
+
+> Create a project called `BlinkDemo.project`. Add a function block that toggles
+> an output once per second, call it from `PLC_PRG`, compile it, and prove in
+> simulation that the output toggles.
+
+CODESYS starts in the background when the server launches. A cold start takes
+1 to 3 minutes; later starts take about 10 seconds.
+
+Claude Desktop asks for approval per tool. Choose **Always allow** the first
+time it asks about `codesys`, and once more for `open_sim_panel`. After that it
+doesn't ask again.
+
+## What Claude can do
+
+Everything goes through one MCP tool, `codesys`, with an action for each
+operation. [The reference](docs/reference.md) describes each one.
+
+| Area | Actions |
+| --- | --- |
+| **Projects** | `open_project` `create_project` `save_project` `close_project` `codesys_status` |
+| **Read code** | `get_project_tree` `read_objects` `search_code` `get_outline` |
+| **Change code** | `write_object` `create_object` `delete_object` `rename_object` |
+| **Build** | `compile` |
+| **Libraries** | `list_libraries` `add_library` `remove_library` `get_library_api` |
+| **Tasks and I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` |
+| **Change tracking** | `checkpoint` `get_changes` `revert_object` |
+| **Simulation** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` |
+| **Helpers** | `batch` `wait` `help` `open_workspace` |
+
+`batch` runs up to 50 actions in one call, which is much faster than separate
+calls.
+
+Version 2 edits Structured Text only. Objects with graphical bodies (SFC, CFC,
+LD, FBD) appear in the tree and can be read as PLCopenXML, but not edited.
+
+## Live panel
+
+Right after opening or creating a project, Claude opens the panel as a card in
+the chat. It shows the status, the object Claude is working on and how many
+objects changed. **Open workspace** expands it into a CODESYS-style view with
+the project tree, editor tabs, compile problems and a review list.
+
+From the panel you can **Accept** or **Revert** each change, compare it with
+the version you last reviewed, and **Pause Claude** while you look around.
+
+The card needs a client that supports
+[MCP Apps](https://modelcontextprotocol.io/extensions/apps). In our testing
+Claude Desktop draws it in the Code tab but not in a normal chat
+([anthropics/claude-ai-mcp#1243](https://github.com/anthropics/claude-ai-mcp/issues/1243)).
+Ask Claude to open the workspace in your browser if you'd rather have it there;
+the browser never opens by itself.
+
+[More about the panel](docs/reference.md#live-panel)
+
+## Safety
+
+- **No real controller.** The toolkit doesn't log in or download to a
+  controller. It goes online only to CODESYS's own simulation, and every online
+  call first checks that simulation mode is on.
+- **One approval covers every action.** That includes the actions that change
+  or delete project code, so work on a copy of any project you can't afford to
+  lose, or keep it in version control.
+- **Changes can be undone.** A checkpoint is taken when a project is opened, and
+  `revert_object` puts an object back to it, including its methods and
+  properties.
+- **Saved as it goes.** The project is saved after every change by default. Use
+  `--no-autosave` to save only on request.
+- **The simulation can't change your project.** Editing is refused while it
+  runs, and the simulation setting on the device is never saved.
+
+## Configuration
 
 | Option | Meaning |
 | --- | --- |
@@ -62,266 +165,81 @@ profile.
 | `--no-viewer` | Don't serve the browser workspace |
 | `--no-shared` | Run CODESYS in this process instead of the shared session |
 
-Claude Desktop may start the server more than once, for example one process
-for the chat and one for the panel. All processes started with the same
-options share one session: the first one starts a background owner that runs
-CODESYS and the browser workspace, and the others connect to it over
-127.0.0.1 with a token. So the panel always shows the project the chat is
-working on, and only one CODESYS runs. The owner stops two minutes after the
-last client disconnects. Its log is `daemon-<id>.log` in
-`%LOCALAPPDATA%\codesys-mcp-toolkit`.
-
-CODESYS starts in the background when the server launches. A cold start takes
-1 to 3 minutes; later starts take about 10 seconds. `codesys_status` reports
-progress without waiting.
-
 ### Several CODESYS versions
 
-To keep SP21 and SP22 side by side, add one server entry per version, each
-with its own `--codesys-path` and `--codesys-profile`. They get separate shared
-sessions automatically. Without `--codesys-path` the server uses the newest
-install, and its log says which one it picked and why.
+To keep SP21 and SP22 side by side, add one server entry per version, each with
+its own `--codesys-path` and `--codesys-profile`.
 
-`codesys_status` and the panel show the CODESYS install, the Scripting add-on
-and the project's compiler version. The toolkit never updates a project's
-compiler or library versions, and `open_project` says when they differ from
-the running CODESYS. Each version keeps its own devices and libraries, so a
-project from an older CODESYS may report missing libraries until you update it
-in the CODESYS window. A project that needs a newer compiler opens, but can't
-compile until you open it in that version.
+The toolkit never updates a project's compiler or library versions, and
+`open_project` says when they differ from the running CODESYS. A project that
+needs a newer compiler opens, but can't compile until you open it in that
+version. Each version keeps its own devices and libraries, so a project from an
+older CODESYS may report missing libraries until you update it in the CODESYS
+window.
 
-## Tools
+### Shared session
 
-The toolkit gives Claude one tool, `codesys`, and each operation below is an
-action of it:
-
-```json
-{ "action": "read_objects", "args": { "paths": ["PLC_PRG"] } }
-```
-
-Claude Desktop asks for approval per tool. Choose **Always allow** the first
-time it asks about `codesys`, and once more for `open_sim_panel`, the card in
-the chat. After that it doesn't ask again. The press on `codesys` covers every
-action, including the ones that change or delete project code, so use a copy
-of any project you can't afford to lose or keep it in version control.
-`checkpoint` and `revert_object` undo Claude's changes to code.
-
-| Action | What it does |
-| --- | --- |
-| `help` | Lists the actions and their arguments, or one action's. |
-| `batch` | Runs up to 50 actions in one call, in order. Much faster than separate calls: nearly all of a session's time is the round trip between calls. Every step is checked first; it stops at the first failure unless `continueOnError`. |
-| `wait` | Pauses up to 60 s, so a batch can let a simulation timer elapse. |
-| `codesys_status` | Connection state, CODESYS version, last project. Never waits on CODESYS. |
-| `open_project` | Open a `.project`, or a `.projectarchive` (extracted next to it, never over an existing project). Opened without version upgrades. Reports the compiler version and defines. Refuses to drop unsaved changes unless `discardChanges`. |
-| `create_project` | New project from CODESYS's `Standard.project` (default), `empty`, or your own template file. |
-| `save_project` / `close_project` | Save (optionally also as a `.projectarchive` snapshot), or close the project. |
-| `get_project_tree` | Objects with their kinds. Graphical objects (SFC, CFC, LD, FBD) are marked `[non-ST]`, objects excluded from the build `[excluded from build]`. |
-| `read_objects` | Declaration and implementation of up to 50 objects. Graphical bodies come as PLCopenXML (read-only). |
-| `write_object` | Replace a declaration and/or implementation. The header must match the object (see below). |
-| `create_object` | `program`, `function_block`, `function`, `method`, `property`, `action`, `interface`, `dut`, `gvl`, `folder`, optionally with code. |
-| `delete_object` / `rename_object` | Delete or rename an object. |
-| `search_code` | Text or regex search over all ST. |
-| `compile` | Build the application and return errors and warnings with object, line and code. Also checks POUs no task calls (default); `deep` generates code too, `clean` builds from scratch. |
-| `list_libraries` / `add_library` / `remove_library` | Library references. Add by title (`Util`, the newest installed unless you pass `version`) or full name (`Util, 3.5.17.0 (System)`). |
-| `list_tasks` | Tasks with kind, interval, priority, event, watchdog and the programs they call. |
-| `configure_task` | Create or change a task (kind, interval, priority, event, core, watchdog) and add the programs it calls. |
-| `get_outline` | The project at a glance without reading every object: tasks and what they run, each POU's interface (inputs, outputs, methods, properties), interfaces, enums, structs, GVLs, tests. Pass `path` for one object in full or one folder. |
-| `get_io_list` | Variables mapped to I/O (`AT %I…`, `%Q…`, `%M…` and the `%I*` / `%Q*` placeholders), with type, owner and comment, and the channels mapped to variables in the device tree. |
-| `get_devices` | The device tree: identification, enabled state, and each device's I/O channels with the variable mapped to each (from CODESYS's I/O mapping export). |
-| `get_library_api` | What a library offers. A referenced source library (`.library`) gives the real interface of its FBs, functions and types. A compiled library, or one the project doesn't reference yet, gives its objects and descriptions from CODESYS's library browser, without parameters. |
-| `checkpoint` / `get_changes` / `revert_object` | Snapshots of the project's ST, and of graphical bodies as PLCopenXML (one is taken automatically when a project is opened: `session-start`), what changed since one (with a line diff per object), and putting an object back, including its methods and properties. A deleted SFC, CFC, LD or FBD object is re-imported from its XML. |
-| `open_workspace` | Open the live workspace in the browser again. |
-
-### Object paths
-
-Paths are relative to the active application:
-
-- `PLC_PRG` is a POU.
-- `FB_Pump/Start` is a method.
-- `FB_Pump/Speed/Get` is a property accessor.
-- `Folder/FB_X` is an object inside a folder.
-
-A leading `/` starts at the project root, e.g. `/Device/Plc Logic/Application/PLC_PRG`.
-
-### Structured Text only
-
-v2 reads and edits text objects only:
-
-- POUs, methods, properties and accessors, actions
-- interfaces
-- DUTs and GVLs
-
-Objects with graphical bodies appear in the tree, but you can't edit them as ST.
-
-### Declaration checks
-
-`write_object` and `create_object` reject a declaration that would change the
-object's kind or name. For example, replacing a program's declaration without
-its `PROGRAM X` line ([#5](https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues/5)).
-A GVL must start with `VAR_GLOBAL`; a property accessor holds only `VAR` blocks.
-
-### What compile checks
-
-A CODESYS build only compiles POUs that a task reaches. So `compile` marks
-every other POU, GVL and DUT "link always" for that one build, then puts the
-flags back. New code that nothing calls yet is checked too. If the project had
-no unsaved changes before, it is saved again afterwards with the same content,
-so nothing is left behind. Programs marked `{attribute 'test'}` are left out.
-Pass `check_all: false` for CODESYS's plain build.
-
-### Task calls
-
-`configure_task` can add a program call to a task. CODESYS V3.5 SP21's
-scripting can't remove one: `remove()` leaves the call in place. The action
-says so, and you remove it in CODESYS (Task Configuration > the task > select
-the call > Remove Call).
-
-## CODESYS simulation
-
-`codesys_sim_start` compiles the project and loads it into CODESYS's own
-simulation. It uses the real CODESYS compiler and libraries, needs no
-controller and nothing installed beyond CODESYS.
-
-| Action | What it does |
-| --- | --- |
-| `codesys_sim_start` | Compile and load the application, stopped (or running with `run: true`) |
-| `codesys_sim_stop` | End the simulation, release forces, unlock the project |
-| `codesys_sim_status` | The application's state and what is forced |
-| `codesys_sim_control` | `run`, `stop`, `reset_warm` or `reset_cold` |
-| `codesys_sim_cycle` | Run exactly N task cycles (about 0.1 s each) |
-| `codesys_sim_read` | Read variables, e.g. `PLC_PRG.nCount` or `GVL_IO.xValve` |
-| `codesys_sim_write` | Write values once; the program may overwrite them next cycle |
-| `codesys_sim_force` | Hold values until released |
-| `codesys_sim_unforce` | Release the named forces, or all of them |
-
-- **The project is locked while it runs.** `compile`, `write_object` and the
-  other actions that change the project are refused until `codesys_sim_stop`.
-  The simulation setting on the device is never saved into your project.
-- **It runs at real speed.** Timers follow the clock, even between single
-  cycles: to let a `TON` elapse, wait and then run another cycle.
-- **A force is applied between scans.** That suits inputs. If the program
-  assigns a forced variable, code before the assignment sees the forced value;
-  code after it, in the same scan, sees the program's own value.
-- **A reset releases forced values**, as does `codesys_sim_stop`.
-- **No breakpoints or stepping.** CODESYS's scripting offers none.
-
-## Live panel
-
-**In the chat.** Right after opening or creating a project, Claude opens the
-panel inside the chat (clients with
-[MCP Apps](https://modelcontextprotocol.io/extensions/apps)), so you watch the
-project tree and the code as it is written. MCP ties a panel to one tool, so
-this is a separate tool, `open_sim_panel`, with its own approval. It is a
-compact card with the status (including a running CODESYS simulation), the
-object Claude is working on, and how many objects changed this session.
-
-**In your browser, if you ask.** The browser never opens by itself. Ask Claude
-for it (`open_workspace`) and the same workspace opens there. It is served on
-127.0.0.1 only, with a random token in the link, and reaches only the panel's
-own tools. `--no-viewer` turns it off.
-
-**Views.** The panel switches view by what Claude is doing:
-
-| View | Shows | Comes up when Claude… |
-|---|---|---|
-| Code | the object Claude is writing, live, with new lines marked; compile problems | writes, creates, renames, reverts or compiles |
-| Review | the objects Claude changed since you last accepted, each with its added and removed line counts, Changes, Accept and Revert. In the chat, Changes shows the changed lines in place (red and green, two lines of context); in full screen it opens the object with the diff | has unreviewed changes and has been quiet for 20 s |
-
-Click a view to stay on it; **Follow Claude** switches back to following. The
-full-screen workspace has the same view tabs and lays itself out for each.
-
-**Open workspace** on the chat card switches to full screen, or expands in place where the
-client has no full screen. The workspace is laid out like CODESYS:
-
-- **Project tree** with badges: changed since you last reviewed it (A/M),
-  compile errors and what Claude touched last (✦). There's a filter box.
-- **Editor tabs** with the declaration above the implementation. Line numbers
-  and text are as in CODESYS, and lines with compile errors or warnings are
-  marked. **Diff** shows the changes since you last reviewed the object (at
-  first, since the session started).
-- **Bottom tabs:** problems from the last compile, and the review list.
-- **Follow Claude** (on by default) opens whatever Claude edits.
-
-When you open or select something, the panel tells Claude, so "fix this"
-refers to what is on your screen.
-
-- **Review:** an object Claude changed shows a bar with Show changes, Accept
-  and Revert. Accept marks the current text as reviewed, and the badges and
-  diff then compare with it. Revert writes the reviewed text back to
-  CODESYS. Claude's `get_changes` still compares with the session start.
-- **Pause Claude** (card and workspace): Claude's actions that change the
-  project or the simulation answer `paused_by_user` until you resume. Its
-  reading actions still work.
-
-Claude's own changes always go through its actions. The panel never calls
-CODESYS to read: the actions keep a project cache current as they work. The
-one exception is Revert, which you start.
+Claude Desktop may start the server more than once. All processes started with
+the same options share one background session, so only one CODESYS runs and the
+panel shows the project Claude is working on. The session stops two minutes
+after the last client disconnects. Its log is `daemon-<id>.log` in
+`%LOCALAPPDATA%\codesys-mcp-toolkit`.
 
 ## How it works
 
 ```
-MCP client ──stdio── codesys-mcp-tool (Node)
-                          │  requests/<id>.json  →   (JSON: op name + arguments)
-                          │  ← results/<id>.json
-                          │  ← heartbeat.json   (idle / busy + deadline)
-                    CODESYS.exe --noUI --runscript=watcher.py
-                          └─ watcher: preloaded op handlers (IronPython 2.7)
+MCP client ── stdio ──▶ codesys-mcp-tool (Node.js)
+                            │   requests/<id>.json  ▶  operation name + JSON arguments
+                            │   ◀  results/<id>.json
+                            │   ◀  heartbeat.json      idle or busy, with a deadline
+                            ▼
+                        CODESYS.exe --noUI --runscript=watcher.py
+                            └─ fixed operation handlers (IronPython 2.7)
 ```
 
 - **No generated code.** Requests are an operation name plus JSON arguments,
   handled by fixed functions in `watcher/mcp_ops.py`.
 - **Hang detection.** The watcher reports `busy` with a deadline. If CODESYS
   blocks past it, the server kills it and starts a fresh one on the next call.
-  Unsaved changes are lost, which is why changes are saved after every edit by
-  default.
 - **No orphans.** The watcher exits when the server process goes away.
 - **Modal dialogs** are suppressed and logged, so they can't freeze CODESYS.
 - **UTF-8** from end to end.
-- **Localised names.** Object kinds come from CODESYS type GUIDs, not names,
-  so a German task folder called `Taskkonfiguration` works.
-
-Each session folder keeps `watcher.log` for troubleshooting.
+- **Localised names.** Object kinds come from CODESYS type GUIDs, not names, so
+  a German task folder called `Taskkonfiguration` works.
 
 ## Troubleshooting
 
-- **"CODESYS is still starting"**: the first start after boot can take
-  minutes. Check `codesys_status`, then call the tool again.
-- **`startup_failed` / `startup_timeout`**: check the profile name and that
-  CODESYS starts by hand. The error includes the last lines of `watcher.log`.
-- **Library errors after `create_project`** (e.g. `IoStandard`, [#4](https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues/4)):
-  the default template is brought up to the running CODESYS, so its libraries
-  should resolve. A template you pass yourself is used as it is. If libraries
-  are still missing, install them with the CODESYS Library Repository.
-- **`hung` / `timeout`**: CODESYS was restarted. Re-open the project.
-- **`dialog`**: CODESYS opened a dialog, named in the error, that a session
-  without a window can't answer. CODESYS was stopped and restarts on the next
-  call. Do the same step once in the CODESYS window, answer the dialog there,
-  and try again.
+| Message | What to do |
+| --- | --- |
+| **CODESYS is still starting** | The first start after boot can take minutes. Check `codesys_status`, then try again. |
+| **`startup_failed`** or **`startup_timeout`** | Check the profile name and that CODESYS starts by hand. The error includes the last lines of `watcher.log`. |
+| **Library errors after `create_project`** ([#4](https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues/4)) | The default template is brought up to the running CODESYS, so its libraries should resolve. A template you pass yourself is used as it is. If libraries are still missing, install them with the CODESYS Library Repository. |
+| **`hung`** or **`timeout`** | CODESYS was restarted. Re-open the project. |
+| **`dialog`** | CODESYS opened a dialog, named in the error, that a session without a window can't answer. CODESYS was stopped and restarts on the next call. Do the same step once in the CODESYS window, answer the dialog there, and try again. |
+
+Each session folder keeps a `watcher.log`.
 
 ## Development
 
 ```bash
 npm install
-npm test                                    # unit + bridge + tool tests (no CODESYS needed)
+npm test                                    # unit, bridge and tool tests (no CODESYS needed)
 CODESYS_LIVE=1 npx vitest run test/live     # end-to-end against your CODESYS
-npm run build                               # server + the single-file panel (dist/panel)
+npm run build                               # server and the single-file panel
 ```
 
-To work on the panel without Claude Desktop, run the dev host. It serves the
-panel through the MCP Apps bridge, with the tank fixture as the CODESYS side:
+The normal tests run the real watcher under CPython 3 against a fake
+`scriptengine` (`test/fake/`). Watcher code must stay valid IronPython 2.7:
+ASCII-only, no f-strings.
+
+To work on the panel without Claude Desktop, run the dev host, then open
+http://localhost:5199:
 
 ```bash
 npm run build:panel && node scripts/dev-host/run.mjs 5199
 ```
 
-Then open http://localhost:5199. The numbered demo steps show Claude editing
-and a compile with problems, and the Light/Dark switch changes the host theme
-the way Claude Desktop would.
-
-The normal tests run the **real watcher** under CPython 3 against a fake
-`scriptengine` (`test/fake/`). This exercises the file queue, heartbeat,
-hang/crash recovery, every op and every MCP tool without CODESYS. Watcher
-code must stay valid IronPython 2.7: ASCII-only, no f-strings.
+See [CONTRIBUTING.md](CONTRIBUTING.md) to get involved.
 
 ## Migrating from v1
 
@@ -331,7 +249,7 @@ code must stay valid IronPython 2.7: ASCII-only, no f-strings.
   with a `kind`.
 - `set_pou_code` is now `write_object`.
 - `compile_project` is now `compile`, and it returns the errors.
-- Read access is through tools (`read_objects`, `get_project_tree`) instead of
+- Read access is through actions (`read_objects`, `get_project_tree`) instead of
   resources, so it works in Claude Desktop
   ([#6](https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues/6)).
 
@@ -345,4 +263,7 @@ The persistent-watcher design borrows ideas from
 
 ## License
 
-MIT
+[MIT](LICENSE)
+
+CODESYS is a trademark of CODESYS GmbH. This project is independent and isn't
+affiliated with or endorsed by CODESYS GmbH.

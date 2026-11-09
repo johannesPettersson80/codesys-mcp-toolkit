@@ -21,7 +21,12 @@
     "test": "vitest run",
     "test:live": "vitest run test/live",
     "start": "node dist/cli.js",
-    "build:panel": "node scripts/build-panel.mjs"
+    "build:panel": "node scripts/build-panel.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
   },
   "keywords": [
     "codesys",
