@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.johannesPettersson80/codesys-mcp-toolkit",
+  "title": "CODESYS MCP Toolkit",
+  "description": "Read, write, compile and simulate Structured Text in CODESYS V3.5 projects.",
+  "repository": {
+    "url": "https://github.com/johannesPettersson80/codesys-mcp-toolkit",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/johannesPettersson80/codesys-mcp-toolkit",
+  "version": "2.0.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@codesys/mcp-toolkit",
+      "version": "2.0.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
