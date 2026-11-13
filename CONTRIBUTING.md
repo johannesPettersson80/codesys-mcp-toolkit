@@ -69,4 +69,17 @@ We welcome feature suggestions! When suggesting features:
 - Ensure all tests pass before submitting a PR
 - Consider edge cases in your tests
 
+## Releasing (maintainers)
+
+1. Set the new version in `package.json`, `package-lock.json`, `server.json`
+   (both fields) and `src/server.ts`, and move the changelog's entries under it.
+2. Commit, push `main` (and `v2`), and tag `vX.Y.Z`.
+3. Publish a GitHub release for the tag. `publish.yml` checks that the versions
+   match the tag, runs the tests, publishes to npm through trusted publishing,
+   and then publishes `server.json` to the MCP Registry. A pre-release goes to
+   npm's `next` tag and skips the registry.
+
+No tokens are stored: the package's Trusted Publisher on npmjs.com names this
+repository and `publish.yml`.
+
 Thank you for contributing!

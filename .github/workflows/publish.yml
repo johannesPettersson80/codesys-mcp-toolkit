@@ -1,26 +1,114 @@
 name: Publish Package
 
+# Runs when a GitHub release is published: tests, publishes to npm and, for a
+# normal (not pre-) release, publishes server.json to the official MCP Registry.
+#
+# No tokens are stored. npm and the registry both trust this workflow through
+# GitHub's OIDC identity (id-token: write):
+# - npm: the package's Trusted Publisher on npmjs.com names this repository and
+#   publish.yml (https://docs.npmjs.com/trusted-publishers).
+# - MCP Registry: `mcp-publisher login github-oidc` proves the repository owner,
+#   which owns the io.github.johannesPettersson80 namespace.
+
 on:
   release:
-    types: [created]
+    types: [published]
+
+permissions:
+  contents: read
 
 jobs:
-  publish-npm:
+  test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org/
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: npm ci
+      - name: Check that package.json and server.json match the tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for v in "$(node -p "require('./package.json').version")" \
+                   "$(node -p "require('./server.json').version")" \
+                   "$(node -p "require('./server.json').packages[0].version")"; do
+            if [ "$v" != "$tag" ]; then
+              echo "::error::Version $v doesn't match the release tag $GITHUB_REF_NAME"
+              exit 1
+            fi
+          done
       # Before the tests: the viewer and shared-session tests use the build.
       - run: npm run build
       - run: npm test
-      # Pre-releases (e.g. 2.0.0-alpha.0) go to the "next" tag, not "latest".
-      - run: npm publish --access=public ${{ github.event.release.prerelease && '--tag next' || '' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  npm:
+    needs: test
+    # Trusted publishing is documented for GitHub-hosted Linux runners.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          # Trusted publishing needs Node 22.14+ and npm 11.5.1+.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false # never use a cache in a release build
+      - run: npm --version
+      - run: npm ci
+      # prepublishOnly builds. Pre-releases (e.g. 2.2.0-alpha.0) go to "next", not "latest".
+      - run: npm publish ${{ github.event.release.prerelease && '--tag next' || '' }}
+
+  registry:
+    needs: npm
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Pinned on purpose; raise it deliberately (an "invalid audience" error means it's too old).
+      MCP_PUBLISHER_VERSION: v1.8.7
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Wait until npm serves the new version
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          for i in $(seq 1 40); do
+            if npm view "@codesys/mcp-toolkit@$v" version >/dev/null 2>&1; then exit 0; fi
+            echo "npm doesn't serve $v yet ($i/40)"
+            sleep 15
+          done
+          echo "::error::npm still doesn't serve @codesys/mcp-toolkit@$v"
+          exit 1
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          archive="mcp-publisher_linux_amd64.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+
+      - name: Log in to the MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server.json
+        run: ./mcp-publisher publish
