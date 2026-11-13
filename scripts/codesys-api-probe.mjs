@@ -14,7 +14,7 @@ import { CodesysBridge } from "../dist/bridge/bridge.js";
 import { describeInstall } from "../dist/codesys/install.js";
 
 const [exe, profile, project, out] = process.argv.slice(2);
-if (!exe || !profile || !project || !out) {
+if (!exe || profile === undefined || !project || !out) {
   console.error('usage: node scripts/codesys-api-probe.mjs <CODESYS.exe> "<profile>" <project> <out.json>');
   process.exit(2);
 }

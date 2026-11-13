@@ -135,7 +135,7 @@ async function main() {
   const ignored = REMOVED_OPTIONS.filter((o) => values[o] !== undefined);
   if (ignored.length) log(`ignoring ${ignored.map((o) => `--${o}`).join(", ")}: truST support was removed`);
   if (codesys.warning) log(`warning: ${codesys.warning}`);
-  log(`v${VERSION}: ${codesys.install.label} (${codesys.reason}), profile "${codesys.profile}"${codesys.install.additionalFolder ? `, add-ons in ${codesys.install.additionalFolder}` : ""}, sessions in ${sessionRoot}`);
+  log(`v${VERSION}: ${codesys.install.label} (${codesys.reason}), ${codesys.profile ? `profile "${codesys.profile}"` : "no profile"}${codesys.install.additionalFolder ? `, add-ons in ${codesys.install.additionalFolder}` : ""}, sessions in ${sessionRoot}`);
 
   if (!values["no-viewer"]) {
     try {

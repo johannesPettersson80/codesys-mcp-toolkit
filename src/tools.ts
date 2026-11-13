@@ -261,7 +261,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     async () => {
       const h = b.health();
       const lines = [
-        `CODESYS: ${ctx.codesys ? `${ctx.codesys.label} (profile "${ctx.codesys.profile}")${h.scripting ? `, Scripting ${h.scripting}` : ""}` : "unknown"}`,
+        `CODESYS: ${ctx.codesys ? `${ctx.codesys.label} (${ctx.codesys.profile ? `profile "${ctx.codesys.profile}"` : "no profile"})${h.scripting ? `, Scripting ${h.scripting}` : ""}` : "unknown"}`,
         `Bridge: ${h.state} / ${h.verdict}${h.pid ? `, pid ${h.pid}` : ""}${h.readyAfterMs ? `, started in ${Math.round(h.readyAfterMs / 1000)}s` : ""}, ${h.calls} call(s), ${h.restarts} restart(s)`,
       ];
       if (h.heartbeat) lines.push(`Watcher: ${h.heartbeat.state}${h.heartbeat.op ? ` (${h.heartbeat.op})` : ""}, heartbeat ${Math.round(h.heartbeat.ageMs / 1000)}s ago`);

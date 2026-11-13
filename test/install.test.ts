@@ -58,6 +58,16 @@ describe("checking the profile", () => {
     expect(r.warning).toMatch(/isn't among those found.*trying it anyway/);
   });
 
+  it("starts Machine Expert without a profile when it has none", () => {
+    const r = resolveCodesys(install(LOGIC_BUILDER, "unused", []));
+    expect(r.profile).toBe("");
+    expect(r.warning).toBeUndefined();
+  });
+
+  it("still requires a profile for CODESYS.exe when none is installed", () => {
+    expect(() => resolveCodesys(install(CODESYS, "unused", []))).toThrow(/No CODESYS profile found/);
+  });
+
   it("warns when there is no Profiles folder to check against", () => {
     expect(resolveCodesys(install(LOGIC_BUILDER, "unused", []), "Machine Expert 2.3 (x64)").warning).toMatch(/no Profiles folder/);
   });

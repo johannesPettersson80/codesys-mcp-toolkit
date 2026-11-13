@@ -1,8 +1,13 @@
 # Testing with Schneider EcoStruxure Machine Expert
 
-Machine Expert is built on CODESYS V3.5, but **this toolkit has never been run
-against it**, so it isn't supported yet. These steps find out what works. Every
-result helps, including "it failed at step 1" with the error text.
+Machine Expert is built on CODESYS V3.5. **V2.3 has been tested** (LogicBuilder.exe
+V23.0.22.0, Scripting 4.1.0.0, on a PacDrive LMC project): start, `open_project`,
+`get_project_tree`, `read_objects`, `compile`, `write_object`, `revert_object`,
+`list_libraries`, `get_library_api`, `list_tasks`, `get_devices`, `get_io_list` and
+simulation start/read/stop all work. Machine Expert has no profiles, so run it with
+`--codesys-path` only; the toolkit then omits `--profile`. Other versions are untested.
+The steps below find out what works on yours. Every result helps, including "it
+failed at step 1" with the error text.
 
 Use a copy of a project. `write_object` and the other changing actions save to it.
 
@@ -22,9 +27,10 @@ npm run build
 - **Program:** usually `LogicBuilder.exe`, for example
   `C:\Program Files\Schneider Electric\EcoStruxure Machine Expert\V2.3\LogicBuilder.exe`.
   Please tell us the real path.
-- **Profile:** the name shown under Help > About or in the profile selection.
-  Please also tell us whether there is a `Profiles` folder, where it is, and
-  what the files in it are called.
+- **Profile:** V2.3 has none: omit `--codesys-profile` (or pass `""` to the probe).
+  If your version has one, it is the name shown under Help > About or in the
+  profile selection. Please also tell us whether there is a `Profiles` folder,
+  where it is, and what the files in it are called.
 
 ## 3. Run the probe
 
@@ -33,7 +39,7 @@ saving it, and records which scripting functions exist. It doesn't change your
 project and doesn't go online.
 
 ```bash
-node scripts/codesys-api-probe.mjs "<LogicBuilder.exe>" "<profile>" "<a .project file>" me-2.6.json
+node scripts/codesys-api-probe.mjs "<LogicBuilder.exe>" "" "<a .project file>" me-2.6.json
 ```
 
 It writes `me-2.6.json` and related files next to it. **They contain user and
@@ -55,7 +61,6 @@ Add the server to your client (Cursor, Claude Desktop and so on):
       "args": [
         "C:\\path\\to\\codesys-mcp-toolkit\\dist\\cli.js",
         "--codesys-path", "<LogicBuilder.exe>",
-        "--codesys-profile", "<profile>",
         "--workspace", "C:\\Projects\\MachineExpert"
       ]
     }
@@ -81,7 +86,7 @@ copy instead.
 
 ## What to send back
 
-- Machine Expert version, and the program path and profile name you used.
+- Machine Expert version, and the program path (and profile name, if any) you used.
 - Which of the steps above worked.
 - For anything that failed: the exact error text, and these logs:
   - `%LOCALAPPDATA%\codesys-mcp-toolkit\daemon-*.log`
