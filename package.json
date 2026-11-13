@@ -1,6 +1,6 @@
 {
   "name": "@codesys/mcp-toolkit",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "MCP server for CODESYS V3.5: read, write, compile and simulate Structured Text through a persistent CODESYS session",
   "mcpName": "io.github.johannesPettersson80/codesys-mcp-toolkit",
   "type": "module",

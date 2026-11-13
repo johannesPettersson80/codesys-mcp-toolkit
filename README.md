@@ -165,6 +165,7 @@ the browser never opens by itself.
 | `--viewer-port <port>` | Port of the browser workspace on 127.0.0.1 (default 5180, or the next free one) |
 | `--no-viewer` | Don't serve the browser workspace |
 | `--no-shared` | Run CODESYS in this process instead of the shared session |
+| `--attach <dir>` | Experimental: work in a CODESYS / Machine Expert window you already have open, instead of starting one. See [Working in an open window](#work-in-a-window-you-already-have-open-experimental) |
 
 ### Several CODESYS versions
 

@@ -5,16 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.1.0] - 2026-11-13
 
 ### Added
 - `--attach <dir>` (experimental): work in a CODESYS / Machine Expert window you
   already have open. The server writes `start_attach.py`; run it in the window
   with Tools > Scripting > Execute Script File. A UI timer polls for requests, so
-  the window stays usable. Nothing is started or killed.
+  the window stays usable. Nothing is started or killed. (#12, thanks @dFxed)
 - EcoStruxure Machine Expert V2.3 works: `LogicBuilder.exe` has no profiles, so
   `--codesys-profile` is optional for products other than `CODESYS.exe` and
   `--profile` is left out when there is none. CODESYS behaviour is unchanged.
+  (#7, #11, thanks @dFxed)
+
+### Fixed
+- `read_objects` says when the PLCopenXML export of a graphical object fails,
+  instead of leaving its body out without a word. (#13, thanks @Alfabete-spec)
+- `codesys_sim_start` refuses when the application is already logged in, which
+  can happen in a window opened with `--attach`. It could otherwise have taken
+  over a connection to a real controller.
+- A result file that stays unreadable fails the call after a few seconds
+  instead of being retried forever.
 
 ## [2.0.1] - 2026-11-10
 

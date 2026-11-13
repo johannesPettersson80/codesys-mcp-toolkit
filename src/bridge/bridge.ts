@@ -124,6 +124,9 @@ async function retryFs<T>(fn: () => Promise<T>, totalMs = 3_000): Promise<T> {
   }
 }
 
+/** How long a result file may stay unreadable (written in place, see write_json_atomic) before the call fails. */
+const BAD_RESULT_MS = 3_000;
+
 export class CodesysBridge {
   private opts: Required<Omit<BridgeOptions, "args" | "profile" | "env" | "log" | "attachDir">> &
     Pick<BridgeOptions, "args" | "profile" | "env" | "log" | "attachDir">;
@@ -376,6 +379,7 @@ export class CodesysBridge {
     this.calls++;
     const started = Date.now();
     let lastCheck = 0;
+    let badSince: number | undefined;
     for (;;) {
       if (existsSync(resPath)) {
         const raw = await retryFs(() => readFile(resPath, "utf8"));
@@ -383,7 +387,15 @@ export class CodesysBridge {
         try {
           res = JSON.parse(raw.replace(/^﻿/, "")) as WatcherResult;
         } catch {
-          await sleep(20); // written in place by the watcher: read it again
+          // The watcher may still be writing it in place: read it again, for a few seconds at most.
+          badSince ??= Date.now();
+          if (Date.now() - badSince > BAD_RESULT_MS) {
+            await unlink(resPath).catch(() => undefined);
+            const msg = `The result of '${op}' couldn't be read: ${JSON.stringify(raw.slice(0, 200))}`;
+            this.lastError = msg;
+            throw new BridgeError("bad_result", msg);
+          }
+          await sleep(20);
           continue;
         }
         await unlink(resPath).catch(() => undefined);

@@ -12,7 +12,8 @@
 # ({"id","ok","result"} or {"id","ok":false,"error":{"code","message","detail"}}).
 # Requests are JSON op names + arguments; no code is ever generated or exec'd.
 # Attach mode (CODESYS_MCP_ATTACH=1, see start_attach.py written by the server): run from
-# the user's open window; a UI timer polls for requests instead of a blocking loop.
+# the user's open window; a UI timer polls for requests instead of a blocking loop. The
+# launcher runs only this file (the toolkit's own); requests still never become code.
 #
 # Keep this file ASCII-only (IronPython 2.7 inside CODESYS).
 from __future__ import print_function

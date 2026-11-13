@@ -161,6 +161,9 @@ class _Online(object):
 
     def create_online_application(self, app):
         self.active = _OnlineApp(app)
+        if projects.primary is not None and projects.primary.online_to_controller:
+            # The user's window is already logged in to a real controller (attach mode).
+            self.active.is_logged_in = True
         return self.active
 
 
@@ -483,6 +486,7 @@ class FakeProject(object):
         self._roots = []
         self.active_application = None
         self.ignores_simulation = False  # a device that won't enter simulation mode
+        self.online_to_controller = False  # the application is already logged in to a controller
 
     def get_children(self, recursive=False):
         return list(self._roots)
@@ -575,6 +579,7 @@ class _Projects(object):
         else:
             _sample(proj, "3.1.3.0" if raw.startswith("OLD-TEMPLATE") else "3.5.21.0")
             proj.ignores_simulation = raw.startswith("NO-SIMULATION")
+            proj.online_to_controller = raw.startswith("ONLINE-CONTROLLER")
         self.primary = proj
         return proj
 

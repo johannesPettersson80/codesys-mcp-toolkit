@@ -99,6 +99,14 @@ def op_sim_start(args):
         raise OpError("no_application", "The project has no active application to simulate.")
     if SIM["online"] is not None:
         _stop()
+    # In a window the user has open (attach mode) the application may already be logged in,
+    # perhaps to a real controller. Never take over that connection.
+    if _safe(lambda: se.online.create_online_application(c.app).is_logged_in, False):
+        raise OpError(
+            "already_online",
+            "The application is already logged in, possibly to a real controller. The toolkit only goes "
+            "online to a simulation it starts itself: log out in the CODESYS window, then try again.",
+        )
     SIM["was_dirty"] = bool(_safe(lambda: c.proj.dirty, False))
     SIM["project"] = c.proj
     SIM["device"] = _device_of(c.app)

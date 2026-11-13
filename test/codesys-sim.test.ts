@@ -51,6 +51,15 @@ describe("CODESYS's own simulation", () => {
     expect((await call("codesys_sim_status")).text).toMatch(/not running/);
   });
 
+  it("won't take over an application that is already logged in (attach mode)", async () => {
+    await open("ONLINE-CONTROLLER");
+    const r = await call("codesys_sim_start");
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/already_online/);
+    expect((await call("codesys_sim_status")).text).toMatch(/not running/);
+    expect((await call("codesys_sim_write", { values: { [COUNT]: "5" } })).isError).toBe(true);
+  });
+
   it("runs, writes, forces and takes exact cycles", async () => {
     await open();
     expect((await call("codesys_sim_start")).text).toMatch(/application stop\..*locked until codesys_sim_stop/);

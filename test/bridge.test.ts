@@ -158,7 +158,7 @@ describe("start-up hints", () => {
 
 describe("attach mode (a window the user already has open)", () => {
   /** Stands in for the timer watcher the user runs in their window. */
-  function fakeWindow(dir: string, opts: { answer?: boolean } = {}) {
+  function fakeWindow(dir: string, opts: { answer?: boolean; garbage?: boolean } = {}) {
     const beat = (state: string) => writeFileSync(join(dir, "heartbeat.json"), JSON.stringify({ pid: 4242, ts: Date.now() / 1000, state }));
     mkdirSync(join(dir, "requests"), { recursive: true });
     mkdirSync(join(dir, "results"), { recursive: true });
@@ -169,7 +169,7 @@ describe("attach mode (a window the user already has open)", () => {
       for (const f of readdirSync(join(dir, "requests")).filter((n) => n.endsWith(".json"))) {
         const req = JSON.parse(readFileSync(join(dir, "requests", f), "utf8"));
         rmSync(join(dir, "requests", f));
-        writeFileSync(join(dir, "results", f), JSON.stringify({ id: req.id, ok: true, result: { op: req.op } }));
+        writeFileSync(join(dir, "results", f), opts.garbage ? '{"id":"cut off' : JSON.stringify({ id: req.id, ok: true, result: { op: req.op } }));
       }
     }, 50);
     return () => clearInterval(timer);
@@ -213,6 +213,19 @@ describe("attach mode (a window the user already has open)", () => {
     await expect(bridge.start()).rejects.toMatchObject({ code: "attach_timeout", message: expect.stringContaining("start_attach.py") });
     expect(bridge.health().pid).toBeUndefined();
   });
+
+  it("fails a call whose result file stays unreadable, instead of waiting forever", async () => {
+    const dir = tempDir("cmcp-attach-");
+    bridge = fakeBridge({ attachDir: dir, command: "unused" });
+    const stopWindow = fakeWindow(dir, { garbage: true });
+    try {
+      await bridge.start();
+      await expect(bridge.call("ping", {}, { timeoutMs: 60_000 })).rejects.toMatchObject({ code: "bad_result", message: expect.stringContaining("cut off") });
+      expect(readdirSync(join(dir, "results"))).toEqual([]);
+    } finally {
+      stopWindow();
+    }
+  }, 15_000);
 
   it("drops a request a stalled window never took, instead of running it later", async () => {
     const dir = tempDir("cmcp-attach-");
