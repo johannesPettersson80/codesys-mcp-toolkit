@@ -10,7 +10,7 @@ import sys
 
 import scriptengine as se
 
-from mcp_compat import PY2, to_text
+from mcp_compat import PY2, string_types, to_text
 
 
 class OpError(Exception):
@@ -840,9 +840,13 @@ def op_devices_list(args):
                 ident = _safe(lambda: ch.get_device_identification())
                 # A module (a device that exists only inside its owner, such as Machine Expert's
                 # local I/O and embedded functions) reports its owner's type and id; its module
-                # id is what tells it apart.
+                # id is what tells it apart. get_module_identification() returns that id as a
+                # string, empty for a device that isn't a module (CODESYS and Machine Expert 2.3,
+                # Scripting 4.1). Schneider's DeviceIdDto carries it as module_id instead.
                 mod = _safe(lambda: ch.get_module_identification())
-                module = to_text(_safe(lambda: mod.module_id)) if mod is not None else ""
+                if mod is not None and not isinstance(mod, string_types):
+                    mod = _safe(lambda: mod.module_id)
+                module = (to_text(mod) or "").strip() if mod is not None else ""
                 info = {
                     "path": "/".join(names + [nm]),
                     "name": nm,

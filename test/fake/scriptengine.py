@@ -187,14 +187,6 @@ class _DeviceId(object):
         self.type, self.id, self.version = 4096, "0000 0001", version
 
 
-class _ModuleId(_DeviceId):
-    """A module reports its owner's type, id and version, plus its own module id."""
-
-    def __init__(self, version, module_id):
-        _DeviceId.__init__(self, version)
-        self.module_id = module_id
-
-
 class _DeviceDescription(object):
     def __init__(self, version):
         self.device_id = _DeviceId(version)
@@ -349,9 +341,8 @@ class FakeObject(object):
         return _DeviceId(owner._device_version)
 
     def get_module_identification(self):
-        if not self._module_id:
-            return None
-        return _ModuleId(self.get_device_identification().version, self._module_id)
+        # As in CODESYS and Machine Expert (Scripting 4.1): a string, empty when not a module.
+        return self._module_id or ""
 
     def update(self, device_id):
         self._device_version = device_id.version

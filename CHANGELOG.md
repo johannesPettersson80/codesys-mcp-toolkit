@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `get_devices` really shows Machine Expert modules by their module id. 2.1.1
+  expected `get_module_identification()` to return an object, but in CODESYS
+  and Machine Expert 2.3 it returns the module id as a string (empty for a
+  device that isn't a module), so the module id was never read.
+
 ## [2.1.1] - 2026-11-13
 
 ### Fixed
