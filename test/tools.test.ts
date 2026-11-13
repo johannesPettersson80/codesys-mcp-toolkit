@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createServer } from "../src/server.js";
@@ -185,6 +185,29 @@ describe("MCP tools over the real watcher", () => {
     expect(r).toContain('<step localId="0" initialStep="true" name="Init">');
     expect(r).not.toContain("addData");
     expect(r).not.toContain("<?xml");
+  });
+
+  it.each([
+    { source: "object", reason: "The object could not be exported" },
+    { source: "bridge", reason: "The export request timed out" },
+    { source: "missing", reason: "No XML returned" },
+  ])("reports a graphical export failure from $source and keeps the ST result", async ({ source, reason }) => {
+    const originalCall = ctx.bridge.call.bind(ctx.bridge);
+    const bridgeCall = vi.spyOn(ctx.bridge, "call").mockImplementation(async (operation, args, options) => {
+      if (operation !== "objects.xml") return originalCall(operation, args, options);
+      if (source === "bridge") throw new Error(reason);
+      return { objects: source === "object" ? [{ path: "SEQ_Fill", error: reason }] : [] };
+    });
+    try {
+      const r = await call("read_objects", { paths: ["PLC_PRG", "SEQ_Fill"] });
+      const [st, graphical] = r.text.split("\n\n=== SEQ_Fill (program) ===\n");
+      expect(r.isError).toBe(false);
+      expect(st).toContain("nCount := nCount + 1;");
+      expect(st).not.toContain("PLCopenXML export failed");
+      expect(graphical).toContain(`PLCopenXML export failed: ${reason}`);
+    } finally {
+      bridgeCall.mockRestore();
+    }
   });
 
   it("lists devices and their I/O mapping", async () => {

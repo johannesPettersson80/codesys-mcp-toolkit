@@ -391,12 +391,32 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
           if (last) cache.touch(last.path, "read");
         }
         const graphical = r.objects.filter((o) => !o.error && o.st === false).map((o) => o.path);
-        const xml = new Map<string, string>();
+        const graphicalBodies = new Map<string, string>();
         if (graphical.length) {
-          const x = await b.call<{ objects: { path: string; xml?: string; truncated?: boolean; error?: string }[] }>("objects.xml", { paths: graphical }, { timeoutMs: 180_000 }).catch(() => ({ objects: [] }));
-          for (const o of x.objects) if (o.xml) xml.set(o.path, `${compactPlcOpen(o.xml)}${o.truncated ? "\n(truncated)" : ""}`);
+          try {
+            const x = await b.call<{ objects: { path: string; xml?: string; truncated?: boolean; error?: string }[] }>(
+              "objects.xml",
+              { paths: graphical },
+              { timeoutMs: 180_000 },
+            );
+            for (const o of x.objects) {
+              if (o.xml) {
+                const xml = compactPlcOpen(o.xml) + (o.truncated ? "\n(truncated)" : "");
+                graphicalBodies.set(o.path, `\n--- graphical body as PLCopenXML (read-only) ---\n${xml}`);
+              } else if (o.error) {
+                graphicalBodies.set(o.path, `\nPLCopenXML export failed: ${o.error}`);
+              }
+            }
+          } catch (e) {
+            const reason = e instanceof Error ? e.message : String(e);
+            for (const path of graphical) graphicalBodies.set(path, `\nPLCopenXML export failed: ${reason}`);
+          }
         }
-        return r.objects.map((o) => formatObject(o) + (xml.has(o.path) ? `\n--- graphical body as PLCopenXML (read-only) ---\n${xml.get(o.path)}` : "")).join("\n\n");
+        return r.objects.map((o) => {
+          const formatted = formatObject(o);
+          if (o.error || o.st !== false) return formatted;
+          return formatted + (graphicalBodies.get(o.path) ?? "\nPLCopenXML export failed: No XML returned");
+        }).join("\n\n");
       }),
   );
 
