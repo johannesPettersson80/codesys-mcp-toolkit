@@ -1,4 +1,4 @@
-import { closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BridgeError, startupHint, type CodesysBridge } from "../src/bridge/bridge.js";
@@ -191,6 +191,20 @@ describe("attach mode (a window the user already has open)", () => {
     } finally {
       stopWindow();
     }
+  });
+
+  it("keeps a newer request from another server and drops old leftovers", async () => {
+    const dir = tempDir("cmcp-attach-");
+    mkdirSync(join(dir, "requests"), { recursive: true });
+    writeFileSync(join(dir, "requests", "fresh.json"), "{}");
+    writeFileSync(join(dir, "requests", "old.json"), "{}");
+    const old = new Date(Date.now() - 120_000);
+    utimesSync(join(dir, "requests", "old.json"), old, old);
+    bridge = fakeBridge({ attachDir: dir, command: "unused", startupTimeoutMs: 300 });
+    await expect(bridge.start()).rejects.toMatchObject({ code: "attach_timeout" });
+    expect(existsSync(join(dir, "requests", "fresh.json"))).toBe(true);
+    expect(existsSync(join(dir, "requests", "old.json"))).toBe(false);
+    expect(bridge.health().state).toBe("dead");
   });
 
   it("says how to start the watcher when none answers, without starting a process", async () => {

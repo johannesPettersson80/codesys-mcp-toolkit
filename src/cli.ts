@@ -84,7 +84,7 @@ async function main() {
   const forward = process.argv.slice(2).filter((a) => a !== "--no-shared" && !a.startsWith("--daemon"));
   const key = sessionKey({
     args: forward,
-    cwd: process.cwd(),
+    cwd: values.attach ? "" : process.cwd(), // one shared session per attach folder, whichever client starts it
     version: VERSION,
     build: statSync(cliFile).mtimeMs,
     env: [],
