@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `--attach <dir>` (experimental): work in a CODESYS / Machine Expert window you
+  already have open. The server writes `start_attach.py`; run it in the window
+  with Tools > Scripting > Execute Script File. A UI timer polls for requests, so
+  the window stays usable. Nothing is started or killed.
 - EcoStruxure Machine Expert V2.3 works: `LogicBuilder.exe` has no profiles, so
   `--codesys-profile` is optional for products other than `CODESYS.exe` and
   `--profile` is left out when there is none. CODESYS behaviour is unchanged.

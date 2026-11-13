@@ -186,6 +186,28 @@ panel shows the project Claude is working on. The session stops two minutes
 after the last client disconnects. Its log is `daemon-<id>.log` in
 `%LOCALAPPDATA%\codesys-mcp-toolkit`.
 
+### Work in a window you already have open (experimental)
+
+`--attach <dir>` makes the server use a CODESYS / Machine Expert window you
+already work in, instead of starting a hidden one. It starts nothing and kills
+nothing.
+
+1. Add `--attach "C:\\PLC\\attach"` to the server arguments and start the
+   server. It writes `C:\PLC\attach\scripts\start_attach.py`.
+2. In your window, open the project, then run that file with **Tools >
+   Scripting > Execute Script File**. It returns at once; a UI timer polls for
+   requests, so the window stays usable.
+3. Use the `codesys` tool as usual. `open_project` on the project that is
+   already open just reuses it.
+4. To stop, create an empty file `stop.flag` in the attach folder (or close the
+   window).
+
+The window is busy only while a request runs, for example during `compile`.
+Your own unsaved edits are saved with the next change Claude makes
+(autosave), so use `--no-autosave` if that is not what you want. If the window
+stops answering (a dialog is open), the call fails with an error and nothing is
+closed; run `start_attach.py` again if the watcher was stopped.
+
 ## How it works
 
 ```

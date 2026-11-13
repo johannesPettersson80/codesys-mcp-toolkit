@@ -11,6 +11,8 @@
 # The watcher handles one request at a time and writes results/<id>.json
 # ({"id","ok","result"} or {"id","ok":false,"error":{"code","message","detail"}}).
 # Requests are JSON op names + arguments; no code is ever generated or exec'd.
+# Attach mode (CODESYS_MCP_ATTACH=1, see start_attach.py written by the server): run from
+# the user's open window; a UI timer polls for requests instead of a blocking loop.
 #
 # Keep this file ASCII-only (IronPython 2.7 inside CODESYS).
 from __future__ import print_function
@@ -67,7 +69,7 @@ def beat(state, op=None, rid=None, deadline_ms=None):
             "count": STATE["count"],
         })
     except Exception as e:
-        log("heartbeat write failed (%s): %s" % (state, to_text(e)))
+        log("heartbeat write failed (%s): %s\n%s" % (state, to_text(e), to_text(traceback.format_exc())))
     STATE["last_beat"] = t
 
 
@@ -245,8 +247,71 @@ def main():
     beat("stopped")
 
 
+def main_attach():
+    # Attach mode: the user's own window runs this script (Tools > Scripting > Execute
+    # Script File). A blocking loop would freeze their window, so a WinForms timer polls
+    # for requests on the UI thread and the script returns at once. The window is only
+    # busy while a request runs. No dialog watch: a window and dialogs are expected here.
+    for d in (REQ_DIR, RES_DIR):
+        if not os.path.isdir(d):
+            os.makedirs(d)
+    log("attach watcher starting pid=%s python=%s" % (PID, sys.version.split()[0]))
+    import clr
+    clr.AddReference("System.Windows.Forms")
+    from System.Windows.Forms import Timer
+    import __builtin__
+    import scriptengine as se
+    import mcp_ops
+    import mcp_sim  # noqa: F401 (adds its operations to mcp_ops.OPS)
+    prompts = setup_prompts(se)
+    log(prompts)
+    old = getattr(__builtin__, "_mcp_attach_timer", None)
+    if old is not None:
+        old.Stop()  # started twice: the new script takes over
+    stop_flag = os.path.join(SESSION, "stop.flag")
+    busy = {"in_tick": False}
+
+    def on_tick(sender, args):
+        # Handling a request can pump messages (waits inside operations), which fires
+        # another tick: ignore it until the request is done.
+        if busy["in_tick"]:
+            return
+        busy["in_tick"] = True
+        try:
+            if os.path.exists(stop_flag):
+                remove_file(stop_flag)
+                sender.Stop()
+                beat("stopped")
+                log("stop.flag found; attach watcher stopped")
+                return
+            fname = next_request()
+            if fname:
+                if not handle(mcp_ops, fname):
+                    sender.Stop()
+                    beat("stopped")
+                    log("shutdown requested")
+            elif now() - STATE["last_beat"] > 1.0:
+                beat("idle")
+        except BaseException as e:
+            log("tick failed: %s" % to_text(traceback.format_exc()))
+        finally:
+            busy["in_tick"] = False
+
+    timer = Timer()
+    timer.Interval = 100
+    timer.Tick += on_tick
+    timer.Start()
+    __builtin__._mcp_attach_timer = timer  # keep it alive after this script returns
+    beat("idle")
+    write_json_atomic(READY, {"pid": PID, "ts": now(), "python": sys.version.split()[0], "prompts": prompts, "scripting": scripting_version(), "attach": True})
+    log("attach watcher running")
+
+
 try:
-    main()
+    if os.environ.get("CODESYS_MCP_ATTACH") == "1":
+        main_attach()
+    else:
+        main()
 except BaseException:
     log("watcher crashed: " + traceback.format_exc())
     try:
