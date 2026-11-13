@@ -297,7 +297,11 @@ export class CodesysBridge {
       `os.environ["CODESYS_MCP_DIR"] = r"${dir}"`,
       `os.environ["CODESYS_MCP_SCRIPTS"] = r"${scripts}"`,
       'os.environ["CODESYS_MCP_ATTACH"] = "1"',
-      `execfile(r"${join(scripts, "watcher.py")}", {"__name__": "mcp_watcher"})`,
+      `_p = r"${join(scripts, "watcher.py")}"`,
+      "_f = open(_p)",
+      "_src = _f.read()",
+      "_f.close()",
+      'exec(compile(_src, _p, "exec"), {"__name__": "mcp_watcher"})',
       "",
     ].join("\n");
     await writeFile(this.attachScript!, launcher, "utf8");
@@ -350,8 +354,14 @@ export class CodesysBridge {
     for (;;) {
       if (existsSync(resPath)) {
         const raw = await retryFs(() => readFile(resPath, "utf8"));
+        let res: WatcherResult;
+        try {
+          res = JSON.parse(raw.replace(/^﻿/, "")) as WatcherResult;
+        } catch {
+          await sleep(20); // written in place by the watcher: read it again
+          continue;
+        }
         await unlink(resPath).catch(() => undefined);
-        const res = JSON.parse(raw.replace(/^﻿/, "")) as WatcherResult;
         if (res.ok) return res.result as T;
         const e = res.error ?? { code: "unknown", message: "watcher returned no error details" };
         throw new BridgeError(e.code, e.message, e.detail);

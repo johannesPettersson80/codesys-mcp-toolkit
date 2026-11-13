@@ -69,7 +69,9 @@ def beat(state, op=None, rid=None, deadline_ms=None):
             "count": STATE["count"],
         })
     except Exception as e:
-        log("heartbeat write failed (%s): %s\n%s" % (state, to_text(e), to_text(traceback.format_exc())))
+        if t - STATE.get("last_beat_err", 0.0) > 30.0:
+            STATE["last_beat_err"] = t
+            log("heartbeat write failed (%s): %s\n%s" % (state, to_text(e), to_text(traceback.format_exc())))
     STATE["last_beat"] = t
 
 
@@ -256,6 +258,9 @@ def main_attach():
         if not os.path.isdir(d):
             os.makedirs(d)
     log("attach watcher starting pid=%s python=%s" % (PID, sys.version.split()[0]))
+    # This runs on the user's UI thread: never block it for seconds on a busy file.
+    import mcp_compat
+    mcp_compat.FS_RETRY_S = 0.3
     import clr
     clr.AddReference("System.Windows.Forms")
     from System.Windows.Forms import Timer

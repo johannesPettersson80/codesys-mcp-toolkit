@@ -181,7 +181,8 @@ describe("attach mode (a window the user already has open)", () => {
     const stopWindow = fakeWindow(dir);
     try {
       await bridge.start();
-      expect(readFileSync(bridge.attachScript!, "utf8")).toMatch(/CODESYS_MCP_ATTACH.*\n.*execfile/s);
+      expect(readFileSync(bridge.attachScript!, "utf8")).toMatch(/CODESYS_MCP_ATTACH.*\n.*\n.*\n.*\n.*\n?.*exec\(compile\(/s);
+      expect(readFileSync(bridge.attachScript!, "utf8")).not.toMatch(/execfile/);
       expect(await bridge.call("ping")).toEqual({ op: "ping" });
       expect(bridge.health()).toMatchObject({ state: "ready", scripting: "4.1.0.0" });
       await bridge.stop();
