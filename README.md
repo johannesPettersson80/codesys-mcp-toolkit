@@ -43,8 +43,9 @@ can watch the code change as it happens.
   and SP22 on Scripting 4.2, and SP21 on 4.1. SP16 and later should work.
 - **Node.js 20** or later.
 
-Schneider EcoStruxure Machine Expert isn't supported yet. If you have it, the
-[testing notes](docs/machine-expert-testing.md) help find out what works.
+Schneider EcoStruxure Machine Expert V2.3 (`LogicBuilder.exe`, Scripting 4.1)
+works too: pass `--codesys-path` and leave out `--codesys-profile`, since Machine
+Expert has no profiles. See the [Machine Expert notes](docs/machine-expert-testing.md).
 
 ### Install
 

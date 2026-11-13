@@ -143,8 +143,9 @@ export function resolveCodesys(exe?: string, profile?: string, additionalFolder?
     reason = withProfile ? `it has profile "${profile}"` : pickedNewest(all.map((i) => i.label));
     if (additionalFolder) install = { ...install, additionalFolder };
   }
-  const prof = profile ?? install.profiles[0];
-  if (!prof) throw new Error(`No CODESYS profile found next to ${install.exe}. Pass --codesys-profile "<name>".`);
+  // Machine Expert's LogicBuilder.exe has no profiles and runs without --profile; an empty profile omits it.
+  const prof = profile ?? install.profiles[0] ?? (isCodesysExe(install.exe) ? undefined : "");
+  if (prof === undefined) throw new Error(`No CODESYS profile found next to ${install.exe}. Pass --codesys-profile "<name>".`);
   let warning: string | undefined;
   if (profile && !install.profiles.some((p) => p.toLowerCase() === profile.toLowerCase())) {
     const known = install.profiles.join(", ");
