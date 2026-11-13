@@ -13,6 +13,9 @@
  *   --viewer-port <port>      port of the browser viewer on 127.0.0.1 (default 5180, next free one if taken)
  *   --no-viewer               don't serve the browser viewer
  *   --no-shared               run CODESYS in this process instead of the shared session
+ *   --attach <dir>            work in a window you already have open instead of starting CODESYS: the
+ *                             server writes <dir>\scripts\start_attach.py, which you run there with
+ *                             Tools > Scripting > Execute Script File (a UI timer, so the window stays usable)
  *
  * By default every process started with the same options shares one session
  * (one CODESYS, one viewer): see daemon.ts.
@@ -53,6 +56,7 @@ async function main() {
       "viewer-port": { type: "string" },
       "no-viewer": { type: "boolean" },
       "no-shared": { type: "boolean" },
+      attach: { type: "string" },
       "trust-runtime": { type: "string" },
       "mirror-dir": { type: "string" },
       "no-sim": { type: "boolean" },
@@ -69,7 +73,7 @@ async function main() {
   }
   if (values.help) {
     process.stdout.write(
-      "codesys-mcp-tool [--codesys-path <CODESYS.exe>] [--codesys-profile <name>] [--codesys-additional-folder <dir>] [--workspace <dir>] [--project <file>] [--session-dir <dir>] [--no-autostart] [--no-autosave] [--viewer-port <port>] [--no-viewer] [--no-shared]\n",
+      "codesys-mcp-tool [--codesys-path <CODESYS.exe>] [--codesys-profile <name>] [--codesys-additional-folder <dir>] [--workspace <dir>] [--project <file>] [--session-dir <dir>] [--no-autostart] [--no-autosave] [--viewer-port <port>] [--no-viewer] [--no-shared] [--attach <dir>]\n",
     );
     return;
   }
@@ -80,7 +84,7 @@ async function main() {
   const forward = process.argv.slice(2).filter((a) => a !== "--no-shared" && !a.startsWith("--daemon"));
   const key = sessionKey({
     args: forward,
-    cwd: process.cwd(),
+    cwd: values.attach ? "" : process.cwd(), // one shared session per attach folder, whichever client starts it
     version: VERSION,
     build: statSync(cliFile).mtimeMs,
     env: [],
@@ -107,7 +111,16 @@ async function main() {
     }
   }
 
-  const codesys = resolveCodesys(values["codesys-path"], values["codesys-profile"], values["codesys-additional-folder"]);
+  const attachDir = values.attach ? resolve(values.attach) : undefined;
+  let codesys: ReturnType<typeof resolveCodesys>;
+  try {
+    codesys = resolveCodesys(values["codesys-path"], values["codesys-profile"], values["codesys-additional-folder"]);
+  } catch (e) {
+    if (!attachDir) throw e;
+    // Attaching starts nothing, so the install is only used for its name and templates.
+    codesys = { exe: "", profile: "", reason: "attach mode", install: { exe: "", profiles: [], label: "the open window" } };
+    log(`no install found (${(e as Error).message}); continuing in attach mode`);
+  }
   const watcherSource = join(dirname(fileURLToPath(import.meta.url)), "..", "watcher");
   const sessionRoot = values["session-dir"] ?? join(tmpdir(), "codesys-mcp-toolkit");
   await pruneSessions(sessionRoot);
@@ -118,6 +131,7 @@ async function main() {
     additionalFolder: codesys.install.additionalFolder,
     watcherSource,
     sessionRoot,
+    ...(attachDir ? { attachDir, startupTimeoutMs: 120_000 } : {}),
     log,
   });
   const ctx: AppContext = {

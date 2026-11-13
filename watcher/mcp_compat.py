@@ -86,15 +86,43 @@ def retry_fs(fn, *args):
             delay = min(delay * 2, 0.1)
 
 
+_TMP_SEQ = [0]
+
+
+def _write_text_net(path, data):
+    """Write with .NET (IronPython only): the handle is closed when this returns."""
+    import System.IO
+    import System.Text
+    System.IO.File.WriteAllText(path, data, System.Text.UTF8Encoding(False))
+
+
 def write_json_atomic(path, obj):
-    tmp = path + ".tmp"
-    data = json.dumps(obj, ensure_ascii=False, indent=None, separators=(",", ":"))
-    f = retry_fs(codecs.open, tmp, "w", "utf-8")
+    data = to_text(json.dumps(obj, ensure_ascii=False, indent=None, separators=(",", ":")))
+    # A fresh temp name each time: inside a Machine Expert window the process has been seen
+    # holding on to a temp file (no delete sharing), so renaming that one name failed for good.
+    _TMP_SEQ[0] += 1
+    tmp = "%s.%d.tmp" % (path, _TMP_SEQ[0])
     try:
-        f.write(to_text(data))
-    finally:
-        f.close()
-    retry_fs(_replace, tmp, path)
+        try:
+            _write_text_net(tmp, data)
+        except ImportError:
+            f = retry_fs(codecs.open, tmp, "w", "utf-8")
+            try:
+                f.write(data)
+            finally:
+                f.close()
+        retry_fs(_replace, tmp, path)
+    except Exception as first:
+        # Last resort: write the target itself (not atomic; readers retry on a bad read).
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        try:
+            import System.IO  # noqa: F401 (IronPython only)
+        except ImportError:
+            raise first
+        _write_text_net(path, data)
 
 
 def remove_file(path):

@@ -41,6 +41,8 @@ export interface AppContext {
   driver?: Driver;
   /** The browser viewer (the panel in a normal browser window). */
   viewer?: { url: string; open(force?: boolean): boolean };
+  /** Attach mode: adopts the project already open in the user's window (set by registerTools). */
+  adoptProject?: () => Promise<void>;
   /** The server log. */
   log?: (message: string) => void;
 }
@@ -59,6 +61,7 @@ async function run(ctx: AppContext, fn: () => Promise<string>): Promise<ToolResu
         true,
       );
     }
+    await ctx.adoptProject?.();
     return text(await fn());
   } catch (e) {
     if (e instanceof BridgeError) return text(`${e.code}: ${e.message}`, true);
@@ -250,6 +253,14 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     return (taken ? " Checkpoint 'session-start' saved (get_changes shows what changes from here)." : "") + shown;
   };
   const save = () => ({ save: ctx.autosave });
+  // In attach mode the project is already open in the user's window: take it over.
+  ctx.adoptProject = async () => {
+    if (ctx.project || !b.attachScript) return;
+    const info = await b.call<ProjectInfo & { open?: boolean }>("project.info", {}, { timeoutMs: 30_000 });
+    if (!info.open) return;
+    ctx.project = info;
+    await sessionStart(info.path);
+  };
   const savedNote = (r: { saved?: boolean }) => (r.saved ? " Project saved." : ctx.autosave ? "" : " (not saved; call save_project)");
 
   reg(
@@ -259,6 +270,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       inputSchema: z.object({}),
     },
     async () => {
+      if (!ctx.project && b.attachScript && b.health().verdict === "healthy") await ctx.adoptProject?.().catch(() => undefined);
       const h = b.health();
       const lines = [
         `CODESYS: ${ctx.codesys ? `${ctx.codesys.label} (${ctx.codesys.profile ? `profile "${ctx.codesys.profile}"` : "no profile"})${h.scripting ? `, Scripting ${h.scripting}` : ""}` : "unknown"}`,

@@ -1,8 +1,8 @@
-import { closeSync, constants, existsSync, openSync, readFileSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BridgeError, startupHint, type CodesysBridge } from "../src/bridge/bridge.js";
-import { fakeBridge, fakeProjectFile } from "./helpers.js";
+import { fakeBridge, fakeProjectFile, tempDir } from "./helpers.js";
 
 let bridge: CodesysBridge | undefined;
 afterEach(async () => {
@@ -153,5 +153,79 @@ describe("start-up hints", () => {
     expect(startupHint("The command line option 'runscript' has been set. However, there is no script engine implementation available.")).toMatch(/add the "CODESYS Scripting" add-on/);
     expect(startupHint("When running in --noUI mode, you must specify a profile using --profile=\"profile name\".")).toMatch(/--codesys-profile/);
     expect(startupHint("")).toBe("");
+  });
+});
+
+describe("attach mode (a window the user already has open)", () => {
+  /** Stands in for the timer watcher the user runs in their window. */
+  function fakeWindow(dir: string, opts: { answer?: boolean } = {}) {
+    const beat = (state: string) => writeFileSync(join(dir, "heartbeat.json"), JSON.stringify({ pid: 4242, ts: Date.now() / 1000, state }));
+    mkdirSync(join(dir, "requests"), { recursive: true });
+    mkdirSync(join(dir, "results"), { recursive: true });
+    const timer = setInterval(() => {
+      beat("idle");
+      if (!existsSync(join(dir, "ready.json"))) writeFileSync(join(dir, "ready.json"), JSON.stringify({ pid: 4242, scripting: "4.1.0.0" }));
+      if (opts.answer === false) return;
+      for (const f of readdirSync(join(dir, "requests")).filter((n) => n.endsWith(".json"))) {
+        const req = JSON.parse(readFileSync(join(dir, "requests", f), "utf8"));
+        rmSync(join(dir, "requests", f));
+        writeFileSync(join(dir, "results", f), JSON.stringify({ id: req.id, ok: true, result: { op: req.op } }));
+      }
+    }, 50);
+    return () => clearInterval(timer);
+  }
+
+  it("writes the launcher, attaches to the running watcher and leaves it running on stop", async () => {
+    const dir = tempDir("cmcp-attach-");
+    bridge = fakeBridge({ attachDir: dir, command: "unused" });
+    const stopWindow = fakeWindow(dir);
+    try {
+      await bridge.start();
+      expect(readFileSync(bridge.attachScript!, "utf8")).toMatch(/CODESYS_MCP_ATTACH.*\n.*\n.*\n.*\n.*\n?.*exec\(compile\(/s);
+      expect(readFileSync(bridge.attachScript!, "utf8")).not.toMatch(/execfile/);
+      expect(await bridge.call("ping")).toEqual({ op: "ping" });
+      expect(bridge.health()).toMatchObject({ state: "ready", scripting: "4.1.0.0" });
+      await bridge.stop();
+      expect(bridge.health().state).toBe("stopped");
+      expect(existsSync(join(dir, "requests"))).toBe(true);
+    } finally {
+      stopWindow();
+    }
+  });
+
+  it("keeps a newer request from another server and drops old leftovers", async () => {
+    const dir = tempDir("cmcp-attach-");
+    mkdirSync(join(dir, "requests"), { recursive: true });
+    writeFileSync(join(dir, "requests", "fresh.json"), "{}");
+    writeFileSync(join(dir, "requests", "old.json"), "{}");
+    const old = new Date(Date.now() - 120_000);
+    utimesSync(join(dir, "requests", "old.json"), old, old);
+    bridge = fakeBridge({ attachDir: dir, command: "unused", startupTimeoutMs: 300 });
+    await expect(bridge.start()).rejects.toMatchObject({ code: "attach_timeout" });
+    expect(existsSync(join(dir, "requests", "fresh.json"))).toBe(true);
+    expect(existsSync(join(dir, "requests", "old.json"))).toBe(false);
+    expect(bridge.health().state).toBe("dead");
+  });
+
+  it("says how to start the watcher when none answers, without starting a process", async () => {
+    const dir = tempDir("cmcp-attach-");
+    bridge = fakeBridge({ attachDir: dir, command: "unused", startupTimeoutMs: 600 });
+    await expect(bridge.start()).rejects.toMatchObject({ code: "attach_timeout", message: expect.stringContaining("start_attach.py") });
+    expect(bridge.health().pid).toBeUndefined();
+  });
+
+  it("drops a request a stalled window never took, instead of running it later", async () => {
+    const dir = tempDir("cmcp-attach-");
+    bridge = fakeBridge({ attachDir: dir, command: "unused" });
+    const stopWindow = fakeWindow(dir);
+    await bridge.start();
+    stopWindow();
+    const stalled = fakeWindow(dir, { answer: false });
+    try {
+      await expect(bridge.call("ping", {}, { timeoutMs: 300 })).rejects.toMatchObject({ code: "timeout" });
+      expect(readdirSync(join(dir, "requests")).filter((n) => n.endsWith(".json"))).toEqual([]);
+    } finally {
+      stalled();
+    }
   });
 });
