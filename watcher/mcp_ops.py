@@ -838,6 +838,11 @@ def op_devices_list(args):
             nm = name_of(ch)
             if _safe(lambda: ch.is_device, False):
                 ident = _safe(lambda: ch.get_device_identification())
+                # A module (a device that exists only inside its owner, such as Machine Expert's
+                # local I/O and embedded functions) reports its owner's type and id; its module
+                # id is what tells it apart.
+                mod = _safe(lambda: ch.get_module_identification())
+                module = to_text(_safe(lambda: mod.module_id)) if mod is not None else ""
                 info = {
                     "path": "/".join(names + [nm]),
                     "name": nm,
@@ -845,6 +850,7 @@ def op_devices_list(args):
                     "type": _safe(lambda: int(ident.type)),
                     "id": to_text(_safe(lambda: ident.id)),
                     "version": to_text(_safe(lambda: ident.version)),
+                    "module": module or None,
                     "enabled": _safe(lambda: bool(ch.is_enabled())),
                 }
                 if args.get("io", True):

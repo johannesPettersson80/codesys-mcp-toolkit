@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-11-13
+
+### Fixed
+- `get_devices` tells modules apart. A module is a device that exists only
+  inside its owner, such as Machine Expert's local I/O and embedded functions.
+  CODESYS reports the owner's type and id for it, so every device looked the
+  same (#7). Modules now show their module id.
+
+### Changed
+- Releases are published from GitHub Actions through npm trusted publishing,
+  so the npm package carries a provenance statement, and `server.json` goes to
+  the MCP Registry in the same run.
+
 ## [2.1.0] - 2026-11-13
 
 ### Added

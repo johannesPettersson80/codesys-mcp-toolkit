@@ -8,6 +8,8 @@ export interface DeviceInfo {
   type?: number | null;
   id?: string;
   version?: string;
+  /** Module id of a module (a device inside its owner, e.g. local I/O); its type and id are the owner's. */
+  module?: string | null;
   enabled?: boolean | null;
   /** The device's I/O mapping in CODESYS's CSV export format (only when it has channels). */
   io_csv?: string;
@@ -92,7 +94,11 @@ export function describeDevices(devices: DeviceInfo[]): string {
   if (!devices.length) return "No devices in the project.";
   const lines: string[] = [];
   for (const d of devices) {
-    const ident = d.id ? ` (type ${d.type ?? "?"}, id ${d.id}, version ${d.version ?? "?"})` : "";
+    const ident = d.module
+      ? ` (module ${d.module}${d.version ? `, version ${d.version}` : ""})`
+      : d.id
+        ? ` (type ${d.type ?? "?"}, id ${d.id}, version ${d.version ?? "?"})`
+        : "";
     const channels = d.io_csv ? parseIoMappingCsv(d.io_csv) : [];
     const mapped = channels.filter((c) => c.variable).length;
     lines.push(

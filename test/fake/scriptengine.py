@@ -187,6 +187,14 @@ class _DeviceId(object):
         self.type, self.id, self.version = 4096, "0000 0001", version
 
 
+class _ModuleId(_DeviceId):
+    """A module reports its owner's type, id and version, plus its own module id."""
+
+    def __init__(self, version, module_id):
+        _DeviceId.__init__(self, version)
+        self.module_id = module_id
+
+
 class _DeviceDescription(object):
     def __init__(self, version):
         self.device_id = _DeviceId(version)
@@ -209,6 +217,7 @@ class FakeObject(object):
         self.is_folder = folder
         self.is_device = type_guid == G_DEVICE
         self._device_version = "3.5.21.0"
+        self._module_id = None  # set for a module (a device inside its owner device)
         self._simulation = False
         self._children = []
         self._decl = _Text(decl) if decl is not None else None
@@ -333,7 +342,16 @@ class FakeObject(object):
 
     # device
     def get_device_identification(self):
-        return _DeviceId(self._device_version)
+        # A module answers with its owner's identification, as in CODESYS.
+        owner = self
+        while owner._module_id and owner.parent is not None:
+            owner = owner.parent
+        return _DeviceId(owner._device_version)
+
+    def get_module_identification(self):
+        if not self._module_id:
+            return None
+        return _ModuleId(self.get_device_identification().version, self._module_id)
 
     def update(self, device_id):
         self._device_version = device_id.version
@@ -580,6 +598,12 @@ class _Projects(object):
             _sample(proj, "3.1.3.0" if raw.startswith("OLD-TEMPLATE") else "3.5.21.0")
             proj.ignores_simulation = raw.startswith("NO-SIMULATION")
             proj.online_to_controller = raw.startswith("ONLINE-CONTROLLER")
+            if raw.startswith("MODULES"):
+                # A Machine Expert style controller: local I/O and an embedded function as modules.
+                dev = proj._roots[0]
+                for name, module_id in (("DM72F0", "DM72F0_slot1"), ("Embedded_Encoder", "ENC_0")):
+                    m = FakeObject(name, G_DEVICE, dev)
+                    m._module_id = module_id
         self.primary = proj
         return proj
 

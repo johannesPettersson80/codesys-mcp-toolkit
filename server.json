@@ -8,12 +8,12 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/johannesPettersson80/codesys-mcp-toolkit",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@codesys/mcp-toolkit",
-      "version": "2.1.0",
+      "version": "2.1.1",
       "transport": {
         "type": "stdio"
       }
