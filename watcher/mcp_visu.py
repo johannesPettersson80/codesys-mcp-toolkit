@@ -198,6 +198,51 @@ def _script_element(visu, eid):
     return None
 
 
+def _editor_context(c, visu, cache):
+    """The open visual editor's element context for this visualization (needs CODESYS's window)."""
+    if "ctx" in cache:
+        return cache["ctx"]
+    import os
+    if os.environ.get("CODESYS_MCP_UI") != "1":
+        raise OpError("unavailable", "needs CODESYS's window (start with --show-window)")
+    from System.Reflection import BindingFlags
+    from System import Guid
+    allf = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static
+    eng = _static("_3S.CoDeSys.VisualEditor.APEnvironment", "Engine")
+    frame = getattr(eng, "Frame", None) if eng is not None else None
+    if frame is None:
+        raise OpError("unavailable", "needs CODESYS's window (start with --show-window)")
+    view = frame.OpenEditorView(_object_mgr().GetMetaObjectStub(c.proj.handle, visu.guid), Guid.Empty, None)
+    se.system.delay(800)
+    ctl = view.Control
+    ve = ctl.GetType().GetField("_visualEditor", allf).GetValue(ctl)
+    ctx = ve.GetType().GetField("_editorCtx", allf).GetValue(ve)
+    vom = _find_type("_3S.CoDeSys.VisualEditor.VisualObjectManager").GetProperty("Singleton", allf).GetValue(None, None)
+    cache["ctx"] = (ctx, vom)
+    return cache["ctx"]
+
+
+def _complex_element(c, visu, el, label, cache):
+    ctx, vom = _editor_context(c, visu, cache)
+    mgr = _object_mgr()
+    mo = mgr.GetObjectToModify(c.proj.handle, visu.guid)
+    ok = False
+    try:
+        vo = mo.Object
+        nid = vo.UniqueId
+        elem = vom.CreateElementByTypeName(el["type_name"], None, label, nid, ctx, True, ctx.AvailableHotkeysProvider, ctx.HotkeysConfiguration)
+        elem.Id = nid
+        elem.OwningObjectGuid = vo.MetaObject.ObjectGuid
+        vo.VisualElemList.Add(elem)
+        ok = True
+    finally:
+        mgr.SetObject(mo, ok, None)
+    e = _script_element(visu, nid)
+    for p, v in (("Position.X", el["x"]), ("Position.Y", el["y"]), ("Position.Width", el["w"]), ("Position.Height", el["h"])):
+        e.set_property(p, int(v))
+    return e
+
+
 def _find_child(c, name):
     for ch in c.app.get_children(False):
         if name_of(ch).lower() == name.lower():
@@ -234,8 +279,28 @@ def op_visu_build(args):
             warnings.append("size/dialog: %s" % to_text(ex))
     T = se.VisualElementType
     corners = []
-    for i, el in enumerate(args.get("elements") or []):
+    queue = list(args.get("elements") or [])
+    editor = {}
+    i = -1
+    while queue:
+        el = queue.pop(0)
+        i += 1
         label = el.get("name") or "E%d" % i
+        if el["kind"] == "complex":
+            # Meters, bar displays and alarm tables need the visual editor's context, which only
+            # exists with CODESYS's window. Without it, the plan's fallback elements are drawn.
+            try:
+                e = _complex_element(c, visu, el, label, editor)
+            except Exception as ex:
+                warnings.append("%s: drawn without %s (%s)" % (label, el.get("type_name"), to_text(ex)[:160]))
+                queue = list(el.get("fallback") or []) + queue
+                continue
+            for pair in el.get("pairs") or []:
+                try:
+                    e.set_property(pair[0], _value(pair[1]))
+                except Exception as ex:
+                    warnings.append("%s %s: %s" % (label, pair[0], to_text(ex)[:120]))
+            continue
         try:
             if el["kind"] in _SIMPLE:
                 eid = _add_created(c.proj, visu, _simple_creator(el), label)
@@ -415,7 +480,22 @@ def op_visu_render(args):
     return {"path": path}
 
 
+def op_ui_open(args):
+    """With CODESYS's window: open an object in its editor (brings its tab forward)."""
+    import os
+    import mcp_ui
+    if os.environ.get("CODESYS_MCP_UI") != "1":
+        raise OpError("unavailable", "CODESYS runs without its window. Start the toolkit with --show-window to see objects in CODESYS.")
+    c = Ctx()
+    obj = c.resolve(args["path"])
+    state = mcp_ui.open_editor(se, obj)
+    if state == "unavailable":
+        raise OpError("unavailable", "This CODESYS doesn't let scripts open editors.")
+    return {"path": c.path_of(obj), "opened": state}
+
+
 mcp_ops.OPS.update({
+    "ui.open": op_ui_open,
     "visu.manager": op_visu_manager,
     "visu.build": op_visu_build,
     "visu.render": op_visu_render,

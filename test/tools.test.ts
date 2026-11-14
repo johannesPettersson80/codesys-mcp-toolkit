@@ -98,6 +98,7 @@ describe("MCP tools over the real watcher", () => {
         "rename_symbol",
         "save_project",
         "search_code",
+        "show_in_codesys",
         "trace_record",
         "trace_setup",
         "wait",

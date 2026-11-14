@@ -12,7 +12,13 @@ import { BUILTIN_SYMBOLS, findSymbol, symbolPicture, symbolSize, type SymbolColo
 
 type Argb = number;
 export interface NativeElement {
-  kind: "rect" | "round" | "circle" | "switcher" | "image";
+  kind: "rect" | "round" | "circle" | "switcher" | "image" | "complex";
+  /** complex: CODESYS's element type, e.g. VisuFbElemMeter180 (made through the visual editor, so only with CODESYS's window). */
+  type_name?: string;
+  /** complex: properties in the order to set them. */
+  pairs?: [string, string | number | boolean][];
+  /** complex: what to draw instead when CODESYS has no window. */
+  fallback?: NativeElement[];
   name?: string;
   x: number;
   y: number;
@@ -166,7 +172,11 @@ ${on ? `<circle cx="50" cy="50" r="46" fill="none" stroke="${ring}" stroke-width
   ];
 }
 
-export function nativePlan(screen: Screen, pages: { name: string; title: string }[] = [], custom: SymbolLib = {}): NativePlan {
+/**
+ * alarmIndex: each HMI alarm's position in the CODESYS alarm group AG_HMI (when the export put
+ * them there); those rows then follow CODESYS's alarm states and can be acknowledged.
+ */
+export function nativePlan(screen: Screen, pages: { name: string; title: string }[] = [], custom: SymbolLib = {}, alarmIndex?: Record<string, number>): NativePlan {
   const p = PALETTES[screen.theme];
   const lib: SymbolLib = { ...BUILTIN_SYMBOLS, ...custom };
   const dark = screen.theme === "dark";
@@ -249,11 +259,37 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         }));
         break;
       }
-      case "gauge":
+      case "gauge": {
+        // The browser's arc gauge as pictures: one per GAUGE_STEPS of the range, in the band's
+        // colour, chosen by the helper program; the value and limits are text on top.
+        const s = Math.max(80, Math.min(box.w, (box.h - 6) * 1.16));
+        const gw = r(s), gh = r(s * 0.86);
+        const gx = box.x + (box.w - gw) / 2, gy = box.y + Math.max(0, (box.h - gh) / 2);
+        const idx = `iG${++n}`;
+        decl.push(`    ${idx} : INT; // gauge ${w.value}`);
+        impl.push(`${idx} := REAL_TO_INT(LIMIT(0.0, (ANY_TO_REAL(${w.value}) - (${num(w.min)})) / (${num(w.max - w.min || 1)}), 1.0) * ${GAUGE_STEPS}.0);`);
+        const ids: string[] = [];
+        for (let k = 0; k <= GAUGE_STEPS; k++) {
+          const id = `gauge_${gw}_${k}${w.bands?.length ? `_${bandKey(w.bands)}` : ""}`;
+          if (!needed.has(id)) needed.set(id, gaugeSvg(p, k / GAUGE_STEPS, toneAt(w.bands, w.min + (k / GAUGE_STEPS) * (w.max - w.min)), gw, gh));
+          ids.push(id);
+        }
+        const prefix = `gauge_${gw}_`;
+        const suffix = w.bands?.length ? `_${bandKey(w.bands)}` : "";
+        els.push({ kind: "image", x: r(gx), y: r(gy), w: gw, h: gh, props: { "Static ID": `${pool}.${ids[0]}`, "Bitmap ID variable.Bitmap ID": `CONCAT('${pool}.${prefix}', CONCAT(INT_TO_STRING(${helperName}.${idx}), '${suffix}'))` } });
+        const hot = band(w.bands);
+        els.push(text(gx, gy + gh * 0.44, gw, gh * 0.2, fmt(w.decimals), [SEMI, Math.max(12, Math.min(28, gw * 0.12))], p.text, "HCENTER", {
+          props: { "Text variables.Text variable": real(w.value), ...(hot ? { "Color variables.Toggle color": above(w.value, hot.from), "Text properties.Font alarm color": c(p.tones[hot.tone]) } : {}) },
+        }));
+        if (w.unit) els.push(text(gx, gy + gh * 0.64, gw, gh * 0.12, w.unit, [FONT, Math.max(8, Math.min(12, gw * 0.055))], p.muted, "HCENTER"));
+        els.push(text(gx + gw * 0.08, gy + gh * 0.86, gw * 0.3, gh * 0.12, String(w.min), [FONT, 8], p.muted));
+        els.push(text(gx + gw * 0.62, gy + gh * 0.86, gw * 0.3, gh * 0.12, String(w.max), [FONT, 8], p.muted, "RIGHT"));
+        break;
+      }
       case "bar": {
         const hot = band(w.bands);
         const size = Math.max(16, Math.min(40, box.h * 0.3));
-        els.push(text(box.x, box.y, box.w, box.h * 0.5, `${fmt(w.type === "gauge" ? w.decimals : 1)}${w.unit ? ` ${w.unit}` : ""}`, [LIGHT, size], p.text, w.type === "gauge" ? "HCENTER" : "LEFT", { props: { "Text variables.Text variable": real(w.value) } }));
+        els.push(text(box.x, box.y, box.w, box.h * 0.5, `${fmt(1)}${w.unit ? ` ${w.unit}` : ""}`, [LIGHT, size], p.text, "LEFT", { props: { "Text variables.Text variable": real(w.value) } }));
         const ty = box.y + box.h * 0.62;
         const len = r(box.w);
         els.push({ kind: "round", x: r(box.x), y: r(ty), w: len, h: 14, fill: p.track, frame: null, radius: 7 });
@@ -329,11 +365,42 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
       }
       case "alarms": {
         const rowH = Math.min(34, (box.h - 6 * (w.items.length - 1)) / w.items.length);
-        els.push(text(box.x, box.y, box.w, 24, "No active alarms", [FONT, 10], p.tones.ok, "LEFT", { invisible: w.items.map((a) => a.active).join(" OR ") }));
+        const open: string[] = [];
+        const rows: (() => void)[] = [];
         w.items.forEach((a, k) => {
           const tone: Tone = a.severity === "info" ? "accent" : a.severity === "warning" ? "warn" : "alarm";
-          els.push({ kind: "round", x: r(box.x), y: r(box.y + k * (rowH + 6)), w: r(box.w), h: r(rowH), text: `  ${a.text}`, font: [SEMI, 9.5], color: p.tones[tone], align: "LEFT", fill: p.soft[tone], frame: p.tones[tone], radius: 8, invisible: `NOT ${a.active}` });
+          const y = box.y + k * (rowH + 6);
+          const idx = alarmIndex?.[a.active];
+          if (idx === undefined) {
+            // Not a CODESYS alarm (yet): the row shows while the variable is TRUE.
+            open.push(a.active);
+            rows.push(() => els.push({ kind: "round", x: r(box.x), y: r(y), w: r(box.w), h: r(rowH), text: `  ${a.text}`, font: [SEMI, 9.5], color: p.tones[tone], align: "LEFT", fill: p.soft[tone], frame: p.tones[tone], radius: 8, invisible: `NOT ${a.active}` }));
+            return;
+          }
+          // A CODESYS alarm: the row stays until it is acknowledged, with its state, time and ACK.
+          const al = `__Alm__GVL.g_inst.gen_Inst_AG_HMI_AlarmGroup.gen_ArrAllAlarms[${idx}]`;
+          const m = ++n;
+          decl.push(`    iAs${m} : INT; // alarm ${a.active}`, `    xAo${m} : BOOL;`, `    xAk${m} : BOOL;`, `    sAs${m} : STRING(24);`, `    sAt${m} : STRING(12);`);
+          impl.push(
+            `iAs${m} := TO_INT(${al}.m_eState);`,
+            `xAo${m} := iAs${m} <> 0;`,
+            `xAk${m} := iAs${m} = 2 OR iAs${m} = 3 OR iAs${m} = 5;`,
+            `CASE iAs${m} OF 1: sAs${m} := 'pending'; 2: sAs${m} := 'ACTIVE'; 3: sAs${m} := 'cleared - confirm'; 4: sAs${m} := 'acknowledged'; 5: sAs${m} := 'cleared - acknowledge'; ELSE sAs${m} := ''; END_CASE`,
+            // m_liTimestampActive is a FILETIME (100 ns since 1601, UTC); m_iOffsetActive the local offset in minutes.
+            `IF xAo${m} THEN sAt${m} := RIGHT(DT_TO_STRING(LINT_TO_DT(${al}.m_liTimestampActive / 10000000 - 11644473600 + INT_TO_LINT(${al}.m_iOffsetActive) * 60)), 8); END_IF`,
+          );
+          open.push(`${helperName}.xAo${m}`);
+          rows.push(() => {
+            const hide = `NOT ${helperName}.xAo${m}`;
+            els.push({ kind: "round", x: r(box.x), y: r(y), w: r(box.w), h: r(rowH), fill: p.soft[tone], frame: p.tones[tone], radius: 8, invisible: hide });
+            els.push(text(box.x + 12, y, 70, rowH, "%s", [SEMI, 9], p.muted, "LEFT", { invisible: hide, props: { "Text variables.Text variable": `${helperName}.sAt${m}` } }));
+            els.push(text(box.x + 84, y, box.w - 270, rowH, a.text, [SEMI, 9.5], p.tones[tone], "LEFT", { invisible: hide }));
+            els.push(text(box.x + box.w - 186, y, 120, rowH, "%s", [SEMI, 8.5], p.tones[tone], "RIGHT", { invisible: hide, props: { "Text variables.Text variable": `${helperName}.sAs${m}` } }));
+            els.push({ kind: "round", x: r(box.x + box.w - 58), y: r(y + 4), w: 50, h: r(rowH - 8), text: "ACK", font: [SEMI, 9], color: 0xffffffff, fill: p.tones[tone], frame: p.tones[tone], radius: 6, invisible: `NOT ${helperName}.xAk${m}`, click: `${al}.m_xToAcknowledge := TRUE;` });
+          });
         });
+        els.push(text(box.x, box.y, box.w, 24, "No active alarms", [FONT, 10], p.tones.ok, "LEFT", { invisible: open.join(" OR ") }));
+        rows.forEach((f) => f());
         break;
       }
       case "text":
@@ -535,6 +602,41 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
 }
 
 const SERIES = [0xff38bdf8, 0xffa78bfa, 0xfffbbf24, 0xff34d399, 0xfff472b6, 0xff60a5fa];
+
+/** Pictures per gauge: one every 2.5 % of the range. */
+export const GAUGE_STEPS = 40;
+
+/** The tone of a value by its bands (the last band it reaches), accent without bands. */
+function toneAt(bands: { from: number; tone: Tone }[] | undefined, v: number): Tone {
+  let t: Tone = "accent";
+  for (const b of [...(bands ?? [])].sort((a, b2) => a.from - b2.from)) if (v >= b.from) t = b.tone;
+  return t;
+}
+
+/** A short key for a band set, so gauges with different bands get their own pictures. */
+function bandKey(bands: { from: number; tone: Tone }[]): string {
+  let h = 0;
+  for (const ch of JSON.stringify(bands)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h.toString(36).slice(0, 5);
+}
+
+/** The arc gauge of the browser HMI at fraction f of its range (200 x 172 box, drawn at w x h). */
+function gaugeSvg(p: Palette, f: number, tone: Tone, w: number, h: number): string {
+  const R = 80;
+  const pt = (a: number) => [100 + R * Math.sin((a * Math.PI) / 180), 100 - R * Math.cos((a * Math.PI) / 180)].map((v) => Math.round(v * 10) / 10);
+  const arc = (a0: number, a1: number) => {
+    const [x0, y0] = pt(a0), [x1, y1] = pt(a1);
+    return `M${x0} ${y0} A${R} ${R} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1} ${y1}`;
+  };
+  const col = hex(p.tones[tone]);
+  const ticks = Array.from({ length: 11 }, (_, i) => {
+    const a = ((-120 + i * 24) * Math.PI) / 180;
+    const r0 = i % 5 === 0 ? 62 : 66;
+    return `<line x1="${(100 + r0 * Math.sin(a)).toFixed(1)}" y1="${(100 - r0 * Math.cos(a)).toFixed(1)}" x2="${(100 + 70 * Math.sin(a)).toFixed(1)}" y2="${(100 - 70 * Math.cos(a)).toFixed(1)}"/>`;
+  }).join("");
+  const value = f > 0.001 ? `<path d="${arc(-120, -120 + 240 * f)}" fill="none" stroke="${col}" stroke-opacity=".35" stroke-width="22" stroke-linecap="round"/><path d="${arc(-120, -120 + 240 * f)}" fill="none" stroke="${col}" stroke-width="14" stroke-linecap="round"/>` : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 200 172"><path d="${arc(-120, 120)}" fill="none" stroke="${hex(p.track)}" stroke-width="14" stroke-linecap="round"/>${value}<g stroke="${hex(p.muted)}" stroke-width="1.5" opacity=".6">${ticks}</g></svg>`;
+}
 
 function num(x: number): string {
   return Number.isInteger(x) ? `${x}.0` : String(x);

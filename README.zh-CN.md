@@ -205,8 +205,13 @@ Claude 可以在仿真中测试这些报警：`alarm_status` 从 CODESYS 报警�
 
 ![热处理线作为原生 CODESYS 可视化在仿真中运行：符号显示运行颜色，过滤器因堵塞显示为红色，并有报警行](docs/images/hmi-codesys-symbols.png)
 
-CODESYS 的脚本无法创建趋势、仪表或报警表元素，所以趋势显示当前值，仪表显示为棒图，报警页在
-报警活动时显示一行（可在 CODESYS 自带的报警表中确认报警，报警表可从工具箱添加）。已在 CODESYS
+仪表与浏览器中的弧形仪表相同（图片池中的图片，每 2.5% 一张，按色带着色），而不是 CODESYS 的金属仪表。
+报警行跟随 CODESYS 报警管理器：报警被确认之前一直显示，带有报警出现的时间、状态和 ACK 按钮（在 CODESYS
+中确认报警），而不是 CODESYS 的灰色报警表。趋势显示当前值：CODESYS 趋势需要脚本目前无法创建的趋势记录。
+
+![CODESYS 中导出的报警行：报警出现的时间、"Pump P-101 fault"、"cleared - confirm" 和 ACK 按钮](docs/images/hmi-codesys-alarm-row.png)
+
+已在 CODESYS
 V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `FloatingPointUtils` 库；如果缺少，导出会在
 开始构建之前提示。
 
@@ -244,7 +249,7 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 | **报警** | `alarm_list` `alarm_status` `alarm_acknowledge` |
 | **交接** | `project_report` `export_sources` |
 | **HMI 画面** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` |
-| **辅助** | `batch` `wait` `help` `open_workspace` |
+| **辅助** | `batch` `wait` `help` `open_workspace` `show_in_codesys` |
 
 `batch` 可以在一次调用中执行最多 50 个操作，比逐个调用快得多。
 

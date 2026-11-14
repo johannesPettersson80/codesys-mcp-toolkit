@@ -188,10 +188,25 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
         const warnings: string[] = [];
         const builtNames: string[] = [];
         let first: { visu: string; w: number; h: number } | undefined;
+        // The pages' alarms as CODESYS alarms first (timestamps and acknowledge in the PLC):
+        // the alarm rows then follow their states.
+        const alarms = allAlarms(all);
+        let alarmIndex: Record<string, number> | undefined;
+        if (alarms.length) {
+          reportProgress(`alarms: ${alarms.length} into CODESYS alarm management`);
+          try {
+            const cls = (sev: string) => (sev === "info" ? "Info" : sev === "warning" ? "Warning" : "Error");
+            const r = await b.call<{ alarms: string[] }>("alarms.configure", { group: "AG_HMI", alarms: alarms.map((a, i) => ({ id: i + 1, kind: "digital", expression: a.active, comparison: "Equal", compare_to: "TRUE", text: a.text, cls: cls(a.severity) })), save: false }, { timeoutMs: 120_000 });
+            notes.push(`${r.alarms.length} alarm(s) in CODESYS alarm management (Alarm Configuration / AG_HMI); the alarm rows show their state and time, with ACK.`);
+            alarmIndex = Object.fromEntries(alarms.map((a, i) => [a.active, i]));
+          } catch (e) {
+            warnings.push(`alarms: ${(e as Error).message}`);
+          }
+        }
         // The first page is built last, so a CODESYS window ends up showing the start page.
         for (const [k, s] of [...targets].reverse().entries()) {
           reportProgress(`page ${k + 1}/${targets.length}: Visu_${s.name}`);
-          const plan = nativePlan(s, pages, hmi.symbols());
+          const plan = nativePlan(s, pages, hmi.symbols(), alarmIndex);
           const images = plan.images.map((img) => {
             const path = join(dir, `${img.id}.svg`);
             writeFileSync(path, img.svg, "utf8");
@@ -225,18 +240,6 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
             }
           }
         }
-        // The pages' alarms as CODESYS alarms (timestamps, acknowledge and history in the PLC).
-        const alarms = allAlarms(all);
-        if (alarms.length) {
-          reportProgress(`alarms: ${alarms.length} into CODESYS alarm management`);
-          try {
-            const cls = (sev: string) => (sev === "info" ? "Info" : sev === "warning" ? "Warning" : "Error");
-            const r = await b.call<{ alarms: string[] }>("alarms.configure", { group: "AG_HMI", alarms: alarms.map((a, i) => ({ id: i + 1, kind: "digital", expression: a.active, comparison: "Equal", compare_to: "TRUE", text: a.text, cls: cls(a.severity) })), save: false }, { timeoutMs: 120_000 });
-            notes.push(`${r.alarms.length} alarm(s) in CODESYS alarm management (Alarm Configuration / AG_HMI).`);
-          } catch (e) {
-            warnings.push(`alarms: ${(e as Error).message}`);
-          }
-        }
         // User groups for the Login button; users and passwords are the engineer's to add.
         try {
           await b.call("visu.users", { groups: ["Operator", "Maintenance", "Admin"], save: false }, { timeoutMs: 120_000 });
@@ -265,7 +268,15 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
               : `The build has ${errors.length} errors, for example: ${errors.slice(0, 3).map((m) => `${m.object ?? ""} ${m.text}`.trim()).join("; ")}`,
           );
         } else notes.push("Compiles with 0 errors. Start the simulation to see it live.");
-        if (warnings.length) notes.push(`Not applied (${warnings.length}): ${warnings.slice(0, 6).join("; ")}`);
+        const plain = warnings.filter((w) => /drawn without VisuFbElem/.test(w));
+        const other = warnings.filter((w) => !plain.includes(w));
+        if (plain.length)
+          notes.push(
+            plain.some((w) => /CODESYS's window/.test(w))
+              ? `${plain.length} meter(s), bar display(s) or alarm table(s) drawn with plain elements: CODESYS's own ones can only be made with its window open (start the toolkit with --show-window and export again).`
+              : `${plain.length} meter(s), bar display(s) or alarm table(s) drawn with plain elements: ${plain[0]}`,
+          );
+        if (other.length) notes.push(`Not applied (${other.length}): ${other.slice(0, 6).join("; ")}`);
         const png = join(dir, "visu.png");
         let image: ActionResult["content"] = [];
         if (first) {

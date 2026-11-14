@@ -125,7 +125,7 @@ operation. [The reference](docs/reference.md) describes each one.
 | **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` |
 | **Alarms** | `alarm_list` `alarm_status` `alarm_acknowledge` |
 | **Handover** | `project_report` `export_sources` |
-| **Helpers** | `batch` `wait` `help` `open_workspace` |
+| **Helpers** | `batch` `wait` `help` `open_workspace` `show_in_codesys` |
 
 `batch` runs up to 50 actions in one call, which is much faster than separate
 calls.
@@ -258,11 +258,15 @@ and the symbol's on and fault variables choose which one CODESYS shows.
 
 ![The heat treatment line as a native CODESYS visualization in the simulation: the symbols in their on colours, the filter red because it is clogged, and the alarm row](docs/images/hmi-codesys-symbols.png)
 
-CODESYS's scripting can't create trend, meter or alarm-table elements, so
-trends show their current values, gauges show a bar, and the alarm page shows a
-row per alarm while it is active (acknowledge it in CODESYS's own alarm table,
-which you can add from the toolbox). Checked on CODESYS V3.5 SP21 in the
-simulation. A visualization needs the `FloatingPointUtils` library in CODESYS's
+Gauges are the same arc gauge as in the browser (pictures in the image pool,
+one per 2.5 % of the range, in the band's colour), not CODESYS's chrome meter.
+The alarm rows follow CODESYS's alarm manager: a row stays until the alarm is
+acknowledged, with the time it came, its state and an ACK button that
+acknowledges it in CODESYS, instead of CODESYS's grey alarm table. Trends show
+their current values: a CODESYS trend needs a trend recording that scripting
+can't create yet. Checked on CODESYS V3.5 SP21 in the simulation.
+
+![An exported alarm row in CODESYS: the time it came, "Pump P-101 fault", "cleared - confirm" and an ACK button](docs/images/hmi-codesys-alarm-row.png) A visualization needs the `FloatingPointUtils` library in CODESYS's
 library repository; if it's missing, the export says so before it builds
 anything. A long export reports its progress (each page, the alarms, the
 compile) to clients that show MCP progress.

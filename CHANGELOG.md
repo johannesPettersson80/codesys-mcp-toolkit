@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CODESYS's documented device scripting. Checked on SP22: a Modbus TCP server
   device's register and a single bit mapped, 0 build errors.
 
+- Native gauges look like the browser HMI's arc gauge (pictures per 2.5 %
+  of the range, in the band colours) instead of a bar.
+- Native alarm rows follow CODESYS's alarm manager: the time the alarm came,
+  its state, and an ACK button that acknowledges it in CODESYS; a cleared alarm
+  stays until acknowledged. Checked live on SP21.
+- `show_in_codesys`: with `--show-window`, open an object (a visualization, a
+  POU, a device) in its editor in the CODESYS window.
+
 ### Fixed
 - `get_io_list`, `get_devices` and `project_report` listed a mapped channel
   once for every device above it; each now appears once, under its own device.

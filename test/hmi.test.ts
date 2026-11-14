@@ -7,7 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { ProjectCache } from "../src/codesys/cache.js";
 import { renderScreen } from "../src/hmi/render.js";
-import { nativePlan } from "../src/hmi/native.js";
+import { GAUGE_STEPS, nativePlan, type NativeElement } from "../src/hmi/native.js";
 import { overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
 import { TEMPLATES } from "../src/hmi/templates.js";
 import { canvasOf } from "../src/hmi/render.js";
@@ -147,6 +147,9 @@ describe("pipe routing", () => {
   });
 });
 
+/** A plan's elements with the fallbacks of complex elements (drawn when CODESYS has no window). */
+const flat = (els: NativeElement[]): NativeElement[] => els.flatMap((e) => [e, ...(e.fallback ? flat(e.fallback) : [])]);
+
 describe("native CODESYS visualization plan", () => {
   const plan = nativePlan(screenSchema.parse(SCREEN));
 
@@ -157,23 +160,43 @@ describe("native CODESYS visualization plan", () => {
     expect(plan.helper.declaration).toMatch(/^PROGRAM PRG_HMI_Overview/);
   });
 
+  it("draws a gauge as the browser's arc, one picture per step chosen by the helper program", () => {
+    const gauge = plan.elements.find((e) => e.kind === "image" && String(e.props?.["Static ID"]).includes("gauge_"))!;
+    const ids = plan.images.filter((i) => i.id.startsWith(`gauge_${gauge.w}_`)).map((i) => i.id);
+    expect(ids).toHaveLength(GAUGE_STEPS + 1);
+    expect(gauge.props!["Bitmap ID variable.Bitmap ID"]).toMatch(/^CONCAT\('IP_Overview\.gauge_\d+_', CONCAT\(INT_TO_STRING\(PRG_HMI_Overview\.iG\d+\), '(_\w+)?'\)\)$/);
+    expect(plan.helper.implementation).toMatch(/iG\d+ := REAL_TO_INT\(LIMIT\(0\.0, \(ANY_TO_REAL\(PLC_PRG\.rLevel\)/);
+    expect(plan.images.find((i) => i.id === ids[0])!.svg).not.toMatch(/stroke-width="14" stroke-linecap="round"\/><path/); // empty at 0
+    expect(plan.elements.some((e) => e.kind === "complex")).toBe(false);
+  });
+
+  it("makes alarm rows follow CODESYS's alarm states, with time, state and ACK, when the alarms are exported", () => {
+    const withIdx = nativePlan(screenSchema.parse(SCREEN), [], {}, { "PLC_PRG.xHigh": 0 });
+    expect(withIdx.helper.implementation).toMatch(/iAs\d+ := TO_INT\(__Alm__GVL\.g_inst\.gen_Inst_AG_HMI_AlarmGroup\.gen_ArrAllAlarms\[0\]\.m_eState\);/);
+    expect(withIdx.helper.implementation).toMatch(/LINT_TO_DT\(.*m_liTimestampActive \/ 10000000 - 11644473600 \+ INT_TO_LINT\(.*m_iOffsetActive\) \* 60\)/);
+    const ack = withIdx.elements.find((e) => e.text === "ACK")!;
+    expect(ack.click).toBe("__Alm__GVL.g_inst.gen_Inst_AG_HMI_AlarmGroup.gen_ArrAllAlarms[0].m_xToAcknowledge := TRUE;");
+    expect(ack.invisible).toMatch(/^NOT PRG_HMI_Overview\.xAk\d+$/);
+    expect(withIdx.elements.find((e) => e.text === "No active alarms")!.invisible).toMatch(/PRG_HMI_Overview\.xAo\d+/);
+  });
+
   it("scales bars and tank levels in the helper program and binds them", () => {
     expect(plan.helper.implementation).toMatch(/ANY_TO_REAL\(PLC_PRG\.rLevel\)/);
-    const moving = plan.elements.filter((e) => e.props && Object.keys(e.props).some((k) => k.startsWith("Relative movement")));
-    expect(moving.length).toBeGreaterThanOrEqual(2); // gauge bar + tank fill
+    const moving = flat(plan.elements).filter((e) => e.props && Object.keys(e.props).some((k) => k.startsWith("Relative movement")));
+    expect(moving.length).toBeGreaterThanOrEqual(1); // the tank fill (the gauge is pictures now)
     for (const e of moving) for (const v of Object.values(e.props!)) if (typeof v === "string" && v.startsWith("PRG_HMI_")) expect(plan.helper.declaration).toContain(v.split(".")[1]!);
   });
 
   it("uses SVG symbols for pumps, with buttons, alarms and texts bound to the program", () => {
     const pump = plan.elements.find((e) => e.kind === "image")!;
     // one SVG per symbol size, drawn at exactly the box's size: the stopped picture and 8 running frames
-    expect(plan.images.map((i) => i.id).sort()).toEqual([...Array.from({ length: 8 }, (_, k) => `pump_f${k}_${pump.w}`), `pump_off_${pump.w}`].sort());
-    for (const i of plan.images) expect(i.svg).toMatch(new RegExp(`^<svg xmlns="http://www.w3.org/2000/svg" width="${pump.w}" height="${pump.w}"`));
+    expect(plan.images.filter((i) => i.id.startsWith("pump")).map((i) => i.id).sort()).toEqual([...Array.from({ length: 8 }, (_, k) => `pump_f${k}_${pump.w}`), `pump_off_${pump.w}`].sort());
+    for (const i of plan.images.filter((x) => x.id.startsWith("pump"))) expect(i.svg).toMatch(new RegExp(`^<svg xmlns="http://www.w3.org/2000/svg" width="${pump.w}" height="${pump.w}"`));
     expect(pump.props!["Static ID"]).toBe(`IP_Overview.pump_off_${pump.w}`);
     expect(pump.props!["Bitmap ID variable.Bitmap ID"]).toBe(`SEL(PLC_PRG.xRun, 'IP_Overview.pump_off_${pump.w}', CONCAT('IP_Overview.pump_f', CONCAT(INT_TO_STRING(PRG_HMI_Overview.iF${(plan.helper.implementation.match(/iF(\d+)/) ?? [])[1]}), '_${pump.w}')))`);
     expect(plan.helper.implementation).toMatch(/IF PLC_PRG\.xRun THEN iF\d+ := DINT_TO_INT\(\(TIME_TO_DINT\(TIME\(\)\) \/ 100\) MOD 8\); END_IF/);
     expect(plan.elements.find((e) => e.text === "Start")!.props).toMatchObject({ "Input configuration.Tap.Variable": "PLC_PRG.xStart" });
-    expect(plan.elements.find((e) => e.invisible === "NOT PLC_PRG.xHigh")!.text).toMatch(/High level <T-101>/);
+    expect(flat(plan.elements).find((e) => e.invisible === "NOT PLC_PRG.xHigh")!.text).toMatch(/High level <T-101>/);
     for (const e of plan.elements) expect(e.x + e.w).toBeLessThanOrEqual(1280);
   });
 });
