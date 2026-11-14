@@ -219,6 +219,7 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
         fbd: fbdSchema.optional(),
         sfc: sfcSchema.optional(),
         parent: z.string().optional().describe("Folder or object to create it under (default: the application)"),
+        replace: z.boolean().optional().describe("Replace an existing POU of this name (read it with read_objects, edit the description, send it back). The old one is deleted first; revert_object brings it back from a checkpoint"),
       }),
     },
     async (a) =>
@@ -234,10 +235,19 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
           if (p.length) throw new Error(p.join("\n"));
         }
         const xml = a.ladder ? ladderXml(a.name, pouType, a.ladder) : a.fbd ? fbdXml(a.name, pouType, a.fbd) : sfcXml(a.name, pouType, a.sfc!);
+        let replaced = false;
+        if (a.replace) {
+          try {
+            await ctx.bridge.call("object.delete", { path: a.parent ? `${a.parent}/${a.name}` : a.name, save: false });
+            replaced = true;
+          } catch (e) {
+            if (!/not.?found|no object/i.test(e instanceof Error ? e.message : String(e))) throw e;
+          }
+        }
         const r = await ctx.bridge.call<{ added: string[] }>("object.import_xml", { parent: a.parent, xml, save: false }, { timeoutMs: 120_000 });
         const path = r.added[0]!;
         await ctx.bridge.call("object.write", { path, declaration: a.declaration, save: ctx.autosave });
-        return `Created ${path} in ${kinds[0] === "ladder" ? "ladder (LD)" : kinds[0] === "fbd" ? "FBD" : "SFC"}${a.sfc ? ` with ${a.sfc.steps.length} steps` : ""}. Compile to check it, and call it from a task (configure_task) or another POU.`;
+        return `${replaced ? "Replaced" : "Created"} ${path} in ${kinds[0] === "ladder" ? "ladder (LD)" : kinds[0] === "fbd" ? "FBD" : "SFC"}${a.sfc ? ` with ${a.sfc.steps.length} steps` : ""}. Compile to check it, and call it from a task (configure_task) or another POU.`;
       }),
   );
 }

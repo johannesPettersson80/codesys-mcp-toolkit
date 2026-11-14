@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0200">
+  <fileHeader companyName="" productName="CODESYS" productVersion="CODESYS V3.5 SP22 Patch 4" creationDateTime="2026-11-14T13:54:09.5017854" />
+  <contentHeader name="Graph22.project" modificationDateTime="2026-11-14T11:32:24.722036">
+    <coordinateInfo>
+      <fbd>
+        <scaling x="1" y="1" />
+      </fbd>
+      <ld>
+        <scaling x="1" y="1" />
+      </ld>
+      <sfc>
+        <scaling x="1" y="1" />
+      </sfc>
+    </coordinateInfo>
+    <addData>
+      <data name="http://www.3s-software.com/plcopenxml/projectinformation" handleUnknown="implementation">
+        <ProjectInformation />
+      </data>
+    </addData>
+  </contentHeader>
+  <types>
+    <dataTypes />
+    <pous>
+      <pou name="LD_Motor" pouType="program">
+        <interface>
+          <localVars>
+            <variable name="xStart">
+              <type>
+                <BOOL />
+              </type>
+            </variable>
+            <variable name="xStop">
+              <type>
+                <BOOL />
+              </type>
+            </variable>
+            <variable name="xMotor">
+              <type>
+                <BOOL />
+              </type>
+            </variable>
+            <variable name="xLamp">
+              <type>
+                <BOOL />
+              </type>
+            </variable>
+          </localVars>
+        </interface>
+        <body>
+          <LD>
+            <leftPowerRail localId="0">
+              <position x="0" y="0" />
+              <connectionPointOut formalParameter="none" />
+            </leftPowerRail>
+            <comment localId="3" height="0" width="0">
+              <position x="0" y="0" />
+              <content>
+                <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+              </content>
+            </comment>
+            <vendorElement localId="2">
+              <position x="0" y="0" />
+              <alternativeText>
+                <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+              </alternativeText>
+              <addData>
+                <data name="http://www.3s-software.com/plcopenxml/fbdelementtype" handleUnknown="implementation">
+                  <ElementType xmlns="">networktitle</ElementType>
+                </data>
+              </addData>
+            </vendorElement>
+            <contact localId="5">
+              <position x="0" y="0" />
+              <connectionPointIn>
+                <connection refLocalId="0" />
+              </connectionPointIn>
+              <connectionPointOut />
+              <variable>xStart</variable>
+            </contact>
+            <contact localId="6">
+              <position x="0" y="0" />
+              <connectionPointIn>
+                <connection refLocalId="0" />
+              </connectionPointIn>
+              <connectionPointOut />
+              <variable>xMotor</variable>
+            </contact>
+            <contact localId="7" negated="true">
+              <position x="0" y="0" />
+              <connectionPointIn>
+                <connection refLocalId="5" />
+                <connection refLocalId="6" />
+              </connectionPointIn>
+              <connectionPointOut />
+              <variable>xStop</variable>
+            </contact>
+            <coil localId="8">
+              <position x="0" y="0" />
+              <connectionPointIn>
+                <connection refLocalId="7" />
+              </connectionPointIn>
+              <connectionPointOut />
+              <variable>xMotor</variable>
+            </coil>
+            <vendorElement localId="4">
+              <position x="0" y="0" />
+              <alternativeText>
+                <xhtml xmlns="http://www.w3.org/1999/xhtml">ParallelBranch</xhtml>
+              </alternativeText>
+              <addData>
+                <data name="http://www.3s-software.com/plcopenxml/ldparallelbranch" handleUnknown="implementation">
+                  <ParallelBranch mode="sce" xmlns="">
+                    <BranchInput>
+                      <connectionPointIn>
+                        <connection refLocalId="0" />
+                      </connectionPointIn>
+                    </BranchInput>
+                    <BranchTrees>
+                      <Tree>
+                        <connectionPointIn>
+                          <connection refLocalId="5" />
+                        </connectionPointIn>
+                      </Tree>
+                      <Tree>
+                        <connectionPointIn>
+                          <connection refLocalId="6" />
+                        </connectionPointIn>
+                      </Tree>
+                    </BranchTrees>
+                  </ParallelBranch>
+                </data>
+              </addData>
+            </vendorElement>
+            <comment localId="11" height="0" width="0">
+              <position x="0" y="0" />
+              <content>
+                <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+              </content>
+            </comment>
+            <vendorElement localId="10">
+              <position x="0" y="0" />
+              <alternativeText>
+                <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+              </alternativeText>
+              <addData>
+                <data name="http://www.3s-software.com/plcopenxml/fbdelementtype" handleUnknown="implementation">
+                  <ElementType xmlns="">networktitle</ElementType>
+                </data>
+              </addData>
+            </vendorElement>
+            <contact localId="12">
+              <position x="0" y="0" />
+              <connectionPointIn>
+                <connection refLocalId="0" />
+              </connectionPointIn>
+              <connectionPointOut />
+              <variable>xMotor</variable>
+            </contact>
+            <coil localId="13">
+              <position x="0" y="0" />
+              <connectionPointIn>
+                <connection refLocalId="12" />
+              </connectionPointIn>
+              <connectionPointOut />
+              <variable>xLamp</variable>
+            </coil>
+            <rightPowerRail localId="2147483647">
+              <position x="0" y="0" />
+              <connectionPointIn />
+            </rightPowerRail>
+          </LD>
+        </body>
+        <addData />
+      </pou>
+    </pous>
+  </types>
+  <instances>
+    <configurations />
+  </instances>
+</project>

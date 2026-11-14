@@ -9,6 +9,7 @@ import { registerSimTestAction } from "./codesys/simtest.js";
 import { registerDeviceActions } from "./codesys/device-tools.js";
 import { condition, listAlarms, registerAlarmActions } from "./codesys/alarm-tools.js";
 import { projectReport } from "./codesys/report.js";
+import { describeGraphical } from "./codesys/graphical-read.js";
 import { screenVariables } from "./hmi/spec.js";
 import { reportProgress } from "./progress.js";
 import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
@@ -406,7 +407,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     "read_objects",
     {
       description:
-        "Read the declaration and implementation text of ST objects: POUs, methods, property accessors (path 'FB/Prop/Get'), actions, interfaces, DUTs and GVLs. Objects with a graphical body (SFC, CFC, LD, FBD) come with their PLCopenXML, to read (they stay read-only).",
+        "Read the declaration and implementation text of ST objects: POUs, methods, property accessors (path 'FB/Prop/Get'), actions, interfaces, DUTs and GVLs. Ladder, FBD and SFC bodies come as the description create_graphical takes (edit it and call create_graphical with replace: true); CFC, and anything that description can't hold, come as PLCopenXML.",
       inputSchema: z.object({ paths: z.array(pathArg).min(1).max(50) }),
     },
     async ({ paths }) =>
@@ -429,7 +430,15 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
             for (const o of x.objects) {
               if (o.xml) {
                 const xml = compactPlcOpen(o.xml) + (o.truncated ? "\n(truncated)" : "");
-                graphicalBodies.set(o.path, `\n--- graphical body as PLCopenXML (read-only) ---\n${xml}`);
+                const d = o.truncated ? undefined : describeGraphical(o.xml);
+                if (d) {
+                  const label = d.kind === "ladder" ? "ladder (LD)" : d.kind === "fbd" ? "FBD" : "SFC";
+                  const how = `To change it: edit this and call create_graphical with name, declaration, ${d.kind}: <this> and replace: true.`;
+                  graphicalBodies.set(
+                    o.path,
+                    `\n--- ${label} body, as create_graphical's description ---\n${JSON.stringify({ [d.kind]: d.spec })}\n${d.notes.length ? `Not in the description: ${d.notes.join("; ")}. The PLCopenXML:\n${xml}` : how}`,
+                  );
+                } else graphicalBodies.set(o.path, `\n--- graphical body as PLCopenXML (read-only) ---\n${xml}`);
               } else if (o.error) {
                 graphicalBodies.set(o.path, `\nPLCopenXML export failed: ${o.error}`);
               }

@@ -141,8 +141,10 @@ feature isn't available, or not work.
 
 Claude writes Structured Text, and creates ladder (LD), FBD and SFC programs
 and function blocks with `create_graphical` from a simple description of rungs,
-networks or steps; CODESYS draws them. Existing graphical bodies can be read as
-PLCopenXML but not edited in place yet. CFC isn't supported.
+networks or steps; CODESYS draws them. Reading an LD, FBD or SFC POU gives the
+same description, so Claude can change existing graphical code too: it edits the
+description and sends it back with `replace: true`. CFC isn't supported, and
+stays read-only as PLCopenXML.
 
 ## Live panel
 

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-14
+
+### Added
+- Ladder, FBD and SFC POUs read back as `create_graphical`'s description:
+  `read_objects` turns CODESYS's PLCopenXML into rungs (contacts in series
+  and parallel, coils, set/reset), networks (functions, function blocks with
+  their inputs and outputs, outputs written on the block) or steps (actions,
+  conditions, the jump back). To change one, Claude edits the description and
+  calls `create_graphical` with `replace: true`. What the description can't
+  hold (function boxes in a rung, SFC branches) is named, with the XML.
+  Checked against CODESYS SP22's own export: read, add a rung, replace,
+  compile with 0 errors, read back.
+
 ## [2.4.0] - 2026-11-14
 
 ### Added

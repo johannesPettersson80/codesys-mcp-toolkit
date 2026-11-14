@@ -5,14 +5,14 @@ import { registerTools, revertObject, versionLine, type AppContext } from "./too
 import { registerPanel } from "./panel.js";
 import { HmiService } from "./hmi/service.js";
 
-export const VERSION = "2.4.0";
+export const VERSION = "2.5.0";
 
 const INSTRUCTIONS = `CODESYS V3.5 automation through a persistent CODESYS session.
 Everything goes through the one tool named codesys, as {"action": "<name>", "args": {...}}. The names below are its actions; {"action": "help"} lists them all with their arguments.
 Use batch whenever you know the next steps: it sends several actions in one call and is much faster than separate calls. For example, all the create_object and write_object calls of a step followed by compile, or codesys_sim_force, wait, codesys_sim_cycle and codesys_sim_read for one test.
 Workflow: open_project (or create_project) -> get_project_tree -> read_objects -> write_object / create_object -> compile.
 Object paths are relative to the active application: 'PLC_PRG', 'FB_Pump/Start' (method), 'FB_Pump/Speed/Get' (property accessor).
-Write code as Structured Text; create ladder, FBD or SFC POUs with create_graphical. Existing graphical bodies are marked [non-ST] and can't be edited in place. Before calling a library FB, check its interface with get_signature instead of guessing; find_references shows where a name is used.
+Write code as Structured Text; create ladder, FBD or SFC POUs with create_graphical. read_objects gives an LD, FBD or SFC body as create_graphical's description: to change it, edit that and call create_graphical with replace: true (CFC stays read-only). Before calling a library FB, check its interface with get_signature instead of guessing; find_references shows where a name is used.
 The first call after start can take 1-3 minutes while CODESYS starts; codesys_status shows progress without waiting.
 To check that logic works, use CODESYS's own simulation (no controller, nothing extra to install, the real compiler and libraries): codesys_sim_start -> codesys_sim_control (run) or codesys_sim_cycle (exact cycles) -> codesys_sim_read / write / force / unforce -> codesys_sim_stop. The project is locked until codesys_sim_stop.
 Fix code with write_object after codesys_sim_stop, then codesys_sim_start again to load it.

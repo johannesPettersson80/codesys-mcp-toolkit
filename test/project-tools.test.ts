@@ -317,7 +317,7 @@ describe("project tools over MCP (fake CODESYS)", () => {
     const r = await call("revert_object", { path: "SEQ_Fill" });
     expect(r.text).toContain("recreated SEQ_Fill (graphical, from its PLCopenXML)");
     expect((await call("get_project_tree")).text).toMatch(/SEQ_Fill .*\[non-ST\]/);
-    expect((await call("read_objects", { paths: ["SEQ_Fill"] })).text).toContain("<SFC>");
+    expect((await call("read_objects", { paths: ["SEQ_Fill"] })).text).toMatch(/SFC body, as create_graphical's description[\s\S]*"name":"Init"/);
   });
 
   it("keeps the workspace cache current as a side effect of the tools", async () => {

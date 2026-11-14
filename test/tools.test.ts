@@ -207,12 +207,11 @@ describe("MCP tools over the real watcher", () => {
     expect(missing.text).toContain("NoSuchLib is not referenced");
   });
 
-  it("reads a graphical object as PLCopenXML", async () => {
+  it("reads an SFC as create_graphical's description, ready to edit", async () => {
     const r = (await call("read_objects", { paths: ["SEQ_Fill"] })).text;
-    expect(r).toContain("--- graphical body as PLCopenXML (read-only) ---");
-    expect(r).toContain('<pou name="SEQ_Fill" pouType="program">');
-    expect(r).toContain('<step localId="0" initialStep="true" name="Init">');
-    expect(r).not.toContain("addData");
+    expect(r).toContain("--- SFC body, as create_graphical's description ---");
+    expect(r).toMatch(/\{"sfc":\{"steps":\[\{"name":"Init","initial":true/);
+    expect(r).toContain("create_graphical with name, declaration, sfc: <this> and replace: true");
     expect(r).not.toContain("<?xml");
   });
 

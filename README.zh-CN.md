@@ -254,8 +254,8 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 验证（见[更新日志](CHANGELOG.md)），在其他版本上可能提示功能不可用，或无法正常工作。
 
 Claude 编写结构化文本，并可用 `create_graphical` 根据梯级、网络或步骤的简单描述创建梯形图（LD）、
-FBD 和 SFC 程序及功能块，由 CODESYS 绘制。已有的图形化代码可以以 PLCopenXML 形式读取，但还不能
-就地编辑。不支持 CFC。
+FBD 和 SFC 程序及功能块，由 CODESYS 绘制。读取 LD、FBD 或 SFC POU 时会得到同样的描述，因此 Claude
+也能修改已有的图形化代码：修改描述后用 `replace: true` 发回即可。不支持 CFC，CFC 仍以 PLCopenXML 只读显示。
 
 ## 安全
 
