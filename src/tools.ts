@@ -21,7 +21,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { BridgeError, type CodesysBridge } from "./bridge/bridge.js";
 import { buildOutline, ioList, type OutlineTask } from "./codesys/outline.js";
-import { describeDevices, parseIoMappingCsv, shortVariable, type DeviceInfo } from "./codesys/devices.js";
+import { describeDevices, mappedChannels, parseIoMappingCsv, shortVariable, type DeviceInfo } from "./codesys/devices.js";
 import { diffObjects, formatDiff, lineDiff, snapshot, type ChangeStore, type SnapObject } from "./codesys/changes.js";
 import { parseDeclaration } from "./codesys/decl.js";
 import type { ProjectCache } from "./codesys/cache.js";
@@ -744,7 +744,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         };
         // Channels mapped to variables in the device tree (not in the ST).
         const devices = (await b.call<{ devices: DeviceInfo[] }>("devices.list", { io: true }, { timeoutMs: 180_000 }).catch(() => ({ devices: [] }))).devices;
-        let mapped = devices.flatMap((d) => (d.io_csv ? parseIoMappingCsv(d.io_csv) : [])).filter((c) => c.variable);
+        let mapped = mappedChannels(devices);
         if (filter) {
           const f = filter.toLowerCase();
           mapped = mapped.filter((c) => `${c.variable} ${c.address} ${c.description} ${c.device}`.toLowerCase().includes(f));
@@ -805,7 +805,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
           outline: buildOutline(nodes, tasks),
           tasks,
           io: ioList(nodes),
-          mapped: devices.flatMap((d) => (d.io_csv ? parseIoMappingCsv(d.io_csv) : [])).filter((c) => c.variable),
+          mapped: mappedChannels(devices),
           devices: describeDevices(devices.map((d) => ({ ...d, io_csv: undefined }))),
           libraries: libraries.map((l) => ({ name: l.name, ...(l.effective_resolution ? { resolution: l.effective_resolution } : {}) })),
           alarms,

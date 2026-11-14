@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
-import { describeDevices, parseIoMappingCsv, shortVariable } from "../src/codesys/devices.js";
+import { describeDevices, mappedChannels, parseIoMappingCsv, shortVariable } from "../src/codesys/devices.js";
+import { describeParam } from "../src/codesys/device-tools.js";
 import { createServer } from "../src/server.js";
 import type { AppContext } from "../src/tools.js";
 import { fakeBridge, tempDir, viaCodesys } from "./helpers.js";
@@ -52,6 +53,27 @@ describe("device I/O mapping", () => {
     expect(text).toContain("    %IX0.0     Input@1 Bit0 -> GVL_IO.xLS101_High");
     expect(text).toContain("    %IX0.1     Input@1 Bit1 -> (not mapped)");
     expect(text).toContain("    %IW2       Value@2 Level, scaled [m] -> GVL_IO.rLevel");
+  });
+
+  it("shows each channel once, under its own device, though parents export their children's", () => {
+    const devices = [
+      { path: "PLC", name: "PLC", depth: 0, io_csv: CSV },
+      { path: "PLC/EK1100", name: "EK1100", depth: 1, io_csv: CSV },
+      { path: "PLC/EK1100/EL1008", name: "EL1008", depth: 2, io_csv: CSV },
+      { path: "PLC/EK1100/EL3062", name: "EL3062", depth: 2, io_csv: CSV },
+    ];
+    expect(mappedChannels(devices).map((c) => `${c.device} ${c.address} ${c.variable}`)).toEqual(["EL1008 %IX0.0 Application.GVL_IO.xLS101_High", "EL3062 %IW2 Application.GVL_IO.rLevel"]);
+    const text = describeDevices(devices);
+    expect(text).toContain("PLC\n  EK1100\n    EL1008: 2 channel(s), 1 mapped");
+    expect(text).toContain("    EL3062: 1 channel(s), 1 mapped");
+    expect(text.match(/%IW2/g)).toHaveLength(1);
+  });
+
+  it("describes device parameters and channels for configure_device", () => {
+    expect(describeParam({ key: "c1/4", name: "IPConfigMode", depth: 0, type: "Enumeration of BYTE", value: "1", choices: ["FIXED=FIXED", "DHCP=DHCP"] })).toBe("c1/4  IPConfigMode [Enumeration of BYTE] = 1 (one of FIXED=FIXED, DHCP=DHCP)");
+    expect(describeParam({ key: "c0/1000/1000_0_0_0", name: "Holding Registers[0]", depth: 1, channel: "Input", mapping: { variable: "wSpeed", address: "%IW0", automatic_address: true } })).toBe("  c0/1000/1000_0_0_0  Holding Registers[0] [input channel] -> wSpeed at %IW0");
+    expect(describeParam({ key: "c0/8000", name: "NewChannelConfig", depth: 0, type: "BOOL", value: "true", access: "Read" })).toBe("c0/8000  NewChannelConfig [BOOL] = true (read-only)");
+    expect(describeParam({ key: "7", name: "Out", depth: 0, channel: "Output", mapping: { variable: "", address: "%QX4.0", automatic_address: false } })).toBe("7  Out [output channel] -> (not mapped) at %QX4.0 (fixed)");
   });
 
   it("names a module by its module id instead of its owner's type and id", () => {

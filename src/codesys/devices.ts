@@ -90,6 +90,25 @@ export function parseIoMappingCsv(text: string): IoChannel[] {
 /** "Application.GVL_IO.xValve" -> "GVL_IO.xValve" (the toolkit's paths are relative to the application). */
 export const shortVariable = (v: string) => v.replace(/^[A-Za-z_][A-Za-z0-9_]*\.(?=[A-Za-z_][A-Za-z0-9_]*\.)/, "");
 
+/**
+ * The channels mapped to variables across the device tree, each once: a device's
+ * export of its I/O mapping also contains its children's, so the same channel
+ * shows up under every device above it.
+ */
+export function mappedChannels(devices: DeviceInfo[]): IoChannel[] {
+  const seen = new Set<string>();
+  const out: IoChannel[] = [];
+  for (const d of devices)
+    for (const c of d.io_csv ? parseIoMappingCsv(d.io_csv) : []) {
+      if (!c.variable) continue;
+      const k = `${c.device}|${c.parameter}|${c.address}|${c.variable}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(c);
+    }
+  return out;
+}
+
 export function describeDevices(devices: DeviceInfo[]): string {
   if (!devices.length) return "No devices in the project.";
   const lines: string[] = [];
@@ -99,7 +118,10 @@ export function describeDevices(devices: DeviceInfo[]): string {
       : d.id
         ? ` (type ${d.type ?? "?"}, id ${d.id}, version ${d.version ?? "?"})`
         : "";
-    const channels = d.io_csv ? parseIoMappingCsv(d.io_csv) : [];
+    // A device's export also lists its children's channels: keep its own (the export names the device of each).
+    const all = d.io_csv ? parseIoMappingCsv(d.io_csv) : [];
+    const own = all.filter((c) => !c.device || c.device === d.name);
+    const channels = own.length || !all.length ? own : all.filter((c) => !devices.some((o) => o !== d && o.name === c.device));
     const mapped = channels.filter((c) => c.variable).length;
     lines.push(
       `${"  ".repeat(d.depth)}${d.name}${ident}${d.enabled === false ? " [disabled]" : ""}${channels.length ? `: ${channels.length} channel(s), ${mapped} mapped` : ""}${d.io_error ? ` (I/O mapping not readable: ${d.io_error})` : ""}`,

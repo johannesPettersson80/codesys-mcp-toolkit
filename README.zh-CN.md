@@ -236,7 +236,7 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 | **编译** | `compile` |
 | **库** | `list_libraries` `add_library` `remove_library` `get_library_api` `get_signature` |
 | **代码导航** | `find_references` `rename_symbol` |
-| **任务与 I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` `find_device` `add_device` |
+| **任务与 I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` `find_device` `add_device` `device_parameters` `configure_device` |
 | **改动跟踪** | `checkpoint` `get_changes` `revert_object` |
 | **仿真** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` `codesys_sim_test` |
 | **跟踪（Trace）** | `trace_setup` `trace_record` |

@@ -117,7 +117,7 @@ operation. [The reference](docs/reference.md) describes each one.
 | **Build** | `compile` |
 | **Libraries** | `list_libraries` `add_library` `remove_library` `get_library_api` `get_signature` |
 | **Navigate code** | `find_references` `rename_symbol` |
-| **Tasks and I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` `find_device` `add_device` |
+| **Tasks and I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` `find_device` `add_device` `device_parameters` `configure_device` |
 | **Change tracking** | `checkpoint` `get_changes` `revert_object` |
 | **Simulation** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` `codesys_sim_test` |
 | **Trace** | `trace_setup` `trace_record` |

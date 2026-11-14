@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `device_parameters` and `configure_device`: read and set a device's
+  parameters (IP addresses, ports, unit IDs, enumerations such as DHCP) and map
+  its I/O channels to variables, with automatic or fixed IEC addresses, through
+  CODESYS's documented device scripting. Checked on SP22: a Modbus TCP server
+  device's register and a single bit mapped, 0 build errors.
+
+### Fixed
+- `get_io_list`, `get_devices` and `project_report` listed a mapped channel
+  once for every device above it; each now appears once, under its own device.
+
 ## [2.5.0] - 2026-11-14
 
 ### Added
