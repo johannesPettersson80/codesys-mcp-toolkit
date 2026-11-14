@@ -882,18 +882,26 @@ def op_libraries_pin(args):
         return {"reference": name, "was": eff, "now": now, "placeholder": True, "saved": c.save_if(args)}
     if target == name:
         return {"reference": name, "was": eff, "now": eff, "unchanged": True, "saved": False}
-    ns = to_text(_safe(lambda: ref.namespace))
+    # The new reference gets the library's defaults (Standard comes back qualified-only, so
+    # every unqualified CONCAT or TON breaks): carry the old reference's settings over.
+    keep = {}
+    for attr in ("namespace", "qualified_only", "optional", "hide_when_referenced_as_depencency", "publish_symbols_in_container"):
+        v = _safe(lambda: getattr(ref, attr))
+        if v is not None:
+            keep[attr] = v
     lm.remove_library(name)
     lm.add_library(target)
     new = None
     for r in list(_safe(lambda: lm.references, []) or []):
         if to_text(_safe(lambda: r.name)).split(",")[0].strip().lower() == title.lower():
             new = r
-    if new is not None and ns and to_text(_safe(lambda: new.namespace)) != ns:
-        try:
-            new.namespace = ns
-        except Exception:
-            pass
+    if new is not None:
+        for attr, v in keep.items():
+            try:
+                if getattr(new, attr) != v:
+                    setattr(new, attr, v)
+            except Exception:
+                pass
     now = to_text(_safe(lambda: new.effective_resolution)) if new is not None else target
     return {"reference": target, "was": eff, "now": now or target, "placeholder": False, "saved": c.save_if(args)}
 

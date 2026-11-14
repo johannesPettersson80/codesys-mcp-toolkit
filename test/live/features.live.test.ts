@@ -139,6 +139,9 @@ describe("live CODESYS: features beyond ST", () => {
     await sleep(1500);
     expect(await ok("alarm_status")).toMatch(/cleared, waiting for confirmation/);
     expect(await ok("alarm_acknowledge")).toMatch(/-> normal/);
+    await sleep(1000);
+    // The export added the alarm history: active, cleared, normal, newest first.
+    expect(await ok("alarm_history")).toMatch(/normal\s+Motor fault[\s\S]*cleared, waiting for confirmation\s+Motor fault[\s\S]*ACTIVE\s+Motor fault/);
     await ok("codesys_sim_stop");
   }, LONG);
 
@@ -150,5 +153,60 @@ describe("live CODESYS: features beyond ST", () => {
     expect(exp).toMatch(/\d+ \.st file\(s\), 1 graphical body\(ies\) as \.xml/);
     expect(existsSync(join(dir, "src", "PLC_PRG.st"))).toBe(true);
     expect(await ok("export_sources", { dir: join(dir, "src") })).toMatch(/ 0 file\(s\) written or changed/);
+  }, LONG);
+
+  it("draws an SFC with alternative and parallel branches and a CFC, and runs them", async () => {
+    const chart = [
+      { step: "Idle" },
+      { when: "xGo" },
+      { step: "Check" },
+      { alternative: [[{ when: "xBad" }, { step: "Reject" }, { when: "NOT xBad" }, { jump: "Idle" }], [{ when: "NOT xBad" }]] },
+      { parallel: [[{ step: "Fill", actions: [{ name: "A_Fill", qualifier: "N", st: "nA := nA + 1;" }] }], [{ step: "Heat", actions: [{ name: "A_Heat", qualifier: "N", st: "nB := nB + 1;" }] }]] },
+      { when: "nA >= 3 AND nB >= 3" },
+      { step: "Done" },
+      { when: "NOT xGo" },
+    ];
+    await ok("create_graphical", { name: "SFC_Branch", declaration: "PROGRAM SFC_Branch\nVAR\n    xGo, xBad : BOOL;\n    nA, nB : INT;\nEND_VAR", sfc: { chart } });
+    await ok("create_graphical", { name: "CFC_Calc", declaration: "PROGRAM CFC_Calc\nVAR\n    nIn, nOut : INT;\nEND_VAR", cfc: { networks: [{ expr: { fn: "LIMIT", args: ["0", { fn: "ADD", args: ["nIn", "5"] }, "100"] }, to: "nOut" }] } });
+    expect(await ok("read_objects", { paths: ["SFC_Branch"] })).toContain('"alternative":[[{"when":"xBad"}');
+    expect(await ok("read_objects", { paths: ["CFC_Calc"] })).toContain('"cfc":{"networks":[{"expr":{"fn":"LIMIT"');
+    await ok("write_object", { path: "PLC_PRG", implementation: `${PRG.implementation}\nSFC_Branch();\nCFC_Calc();` });
+    expect(await ok("compile")).toMatch(/0 error\(s\)/);
+    await ok("codesys_sim_start", { run: false });
+    await ok("codesys_sim_write", { values: { "SFC_Branch.xGo": "TRUE", "CFC_Calc.nIn": "98" } });
+    let r = "";
+    for (let k = 0; k < 6 && !/Done\.x = TRUE/.test(r); k++) {
+      await ok("codesys_sim_cycle", { count: 10 });
+      r = await ok("codesys_sim_read", { names: ["SFC_Branch.Done.x", "SFC_Branch.Idle.x", "SFC_Branch.Check.x", "SFC_Branch.nA", "SFC_Branch.nB", "CFC_Calc.nOut"] });
+    }
+    expect(r).toMatch(/SFC_Branch\.Done\.x = TRUE/);
+    expect(r).toMatch(/CFC_Calc\.nOut = INT#100/);
+  }, LONG);
+
+  it("watches values and halts on a data breakpoint and a line breakpoint", async () => {
+    await ok("codesys_sim_control", { action: "run" });
+    await ok("codesys_sim_write", { values: { "PLC_PRG.xStart": "TRUE" } });
+    expect(await ok("watch", { add: ["PLC_PRG.rLevel", "PLC_PRG.xRun"], samples: 3, every: 300 })).toMatch(/PLC_PRG\.rLevel = REAL#[\d.]+\s+\[min [\d.]+, max [\d.]+, \d change/);
+    await ok("breakpoint_on_change", { variable: "PLC_PRG.rLevel" });
+    await sleep(1500);
+    expect(await ok("debug_status")).toMatch(/Halted in PLC_PRG/);
+    await ok("breakpoint_clear");
+    await ok("debug_continue");
+    await ok("breakpoint_set", { path: "PLC_PRG", line: 6 });
+    await sleep(1500);
+    expect(await ok("debug_status")).toMatch(/Halted in PLC_PRG at line 6/);
+    await ok("breakpoint_clear");
+    await ok("debug_continue");
+    await ok("codesys_sim_stop");
+  }, LONG);
+
+  it("compares the project with its earlier export, and pins a library", async () => {
+    const cmp = await ok("compare_sources", { with: join(dir, "src") });
+    expect(cmp).toMatch(/Only in .*\(open\):[\s\S]*\+ SFC_Branch/);
+    expect(cmp).toMatch(/~ PLC_PRG/);
+    expect(await ok("find_library", { query: "Standard", limit: 3 })).toMatch(/^Standard \(System\)/m);
+    expect(await ok("pin_library", { name: "Standard" })).toMatch(/-> Standard, [\d.]+ \(System\) \(pinned\)/);
+    expect(await ok("compile")).toMatch(/0 error\(s\)/);
+    expect(await ok("pin_library", { name: "Standard", unpin: true })).toMatch(/Standard, \* \(System\)/);
   }, LONG);
 });
