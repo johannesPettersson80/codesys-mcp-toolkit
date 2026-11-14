@@ -123,7 +123,12 @@ export const screenSchema = z.object({
   name: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/).describe("Screen name, e.g. 'Overview'"),
   title: z.string().describe("Shown in the header"),
   subtitle: z.string().optional(),
-  theme: z.enum(["dark", "light"]).default("dark"),
+  theme: z.enum(["dark", "light", "contrast"]).default("dark").describe("contrast: black and white with strong colours and no glow, for bright light or poor eyesight"),
+  accent: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional()
+    .describe("Brand colour for highlights (current page, accent tiles, flow), e.g. '#e30613'; text on it turns black or white to stay readable"),
   size: z.enum(["1280x720", "1920x1080", "1024x768", "800x480"]).default("1280x720").describe("Panel resolution; use the same on every page"),
   grid: z.tuple([z.number().int().min(2).max(24), z.number().int().min(2).max(16)]).default([12, 8]).describe("[columns, rows]"),
   widgets: z.array(widgetSchema).min(1),

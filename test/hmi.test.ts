@@ -7,7 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { ProjectCache } from "../src/codesys/cache.js";
 import { renderScreen } from "../src/hmi/render.js";
-import { GAUGE_STEPS, nativePlan, type NativeElement } from "../src/hmi/native.js";
+import { GAUGE_STEPS, nativePlan, onColor, paletteFor, type NativeElement } from "../src/hmi/native.js";
 import { overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
 import { TEMPLATES } from "../src/hmi/templates.js";
 import { canvasOf } from "../src/hmi/render.js";
@@ -198,6 +198,45 @@ describe("native CODESYS visualization plan", () => {
     expect(plan.elements.find((e) => e.text === "Start")!.props).toMatchObject({ "Input configuration.Tap.Variable": "PLC_PRG.xStart" });
     expect(flat(plan.elements).find((e) => e.invisible === "NOT PLC_PRG.xHigh")!.text).toMatch(/High level <T-101>/);
     for (const e of plan.elements) expect(e.x + e.w).toBeLessThanOrEqual(1280);
+  });
+});
+
+describe("themes, brand colour and pipe flow", () => {
+  it("high contrast and a brand colour in the browser", () => {
+    const contrast = renderScreen(screenSchema.parse({ ...SCREEN, theme: "contrast" }));
+    expect(contrast.html).toContain('class="hmi theme-contrast');
+    expect(contrast.css).toContain(".theme-contrast{--bg:#000;--fg:#fff");
+    const red = renderScreen(screenSchema.parse({ ...SCREEN, accent: "#e30613" }));
+    expect(red.html).toContain("--accent:#e30613;--on-accent:#fff");
+    const yellow = renderScreen(screenSchema.parse({ ...SCREEN, accent: "#ffd400" }));
+    expect(yellow.html).toContain("--accent:#ffd400;--on-accent:#04121f");
+    expect(() => screenSchema.parse({ ...SCREEN, accent: "red" })).toThrow();
+  });
+
+  it("the native palette follows the theme and the brand colour", () => {
+    expect(paletteFor({ theme: "contrast" }).bg).toBe(0xff000000);
+    expect(paletteFor({ theme: "contrast" }).border).toBe(0xffffffff);
+    expect(paletteFor({ theme: "light", accent: "#e30613" }).tones.accent).toBe(0xffe30613);
+    expect(paletteFor({ theme: "dark" }).tones.accent).toBe(0xff38bdf8);
+    expect(onColor(0xffe30613)).toBe(0xffffffff);
+    expect(onColor(0xffffd400)).toBe(0xff04121f);
+    const plan = nativePlan(screenSchema.parse({ ...SCREEN, theme: "contrast", accent: "#e30613" }), [{ name: "Overview", title: "A" }, { name: "Other", title: "B" }]);
+    const nav = plan.elements.find((e) => e.name === "Nav_Overview")!;
+    expect(nav.fill).toBe(0xffe30613);
+    expect(nav.color).toBe(0xffffffff);
+  });
+
+  it("native pipes with flow get dashes that slide with the clock", () => {
+    const plan = nativePlan(screenSchema.parse(SCREEN));
+    const dashes = plan.elements.filter((e) => e.invisible === "NOT (PLC_PRG.xRun)" && e.kind === "rect");
+    expect(dashes.length).toBeGreaterThan(0);
+    for (const d of dashes) {
+      const moves = Object.entries(d.props ?? {}).filter(([k]) => k.startsWith("Relative movement."));
+      expect(moves).toHaveLength(2);
+      expect(new Set(moves.map(([, v]) => v)).size).toBe(1);
+    }
+    expect(plan.helper.declaration).toContain("iFlow : INT;");
+    expect(plan.helper.implementation).toContain("iFlow := DINT_TO_INT((TIME_TO_DINT(TIME()) / 20) MOD 24);");
   });
 });
 

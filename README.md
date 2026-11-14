@@ -205,11 +205,17 @@ bound to your PLC variables.
   can operate your program before any hardware exists.
 - **Stored with the project.** Screens are saved next to the project file as
   `<project>.hmi.json`, so they travel with it and can go into version control.
-- **Dark and light themes,** on a 1280x720 canvas that scales to any window.
+- **Dark, light and high-contrast themes,** per page, on a 1280x720 canvas
+  that scales to any window. The high-contrast theme is black and white with
+  full-strength colours and no glow, for bright light or poor eyesight.
+  `accent` puts your company colour on the highlights, the flow and the
+  current page, and text on it turns black or white to stay readable.
 
 ![The standard process symbols in their on, off and fault colours, and a decanter centrifuge drawn as the project's own SVG symbol](docs/images/hmi-symbols.png)
 
 ![A heat treatment line built from the symbols: tank with level switch, pump, filter, heat exchanger fed by a compressor, control valve, a second tank with an agitator, a motor-driven centrifuge and a conveyor](docs/images/hmi-process.png)
+
+![The same heat treatment line in the high-contrast theme: black background, white outlines, cyan flow and green running symbols](docs/images/hmi-contrast.png)
 
 The HMI writes only into CODESYS's own simulation, like the rest of the
 toolkit. Screenshots use Microsoft Edge or Google Chrome, whichever is
@@ -235,6 +241,11 @@ Maintenance, Admin) behind a Login button. Users and passwords are yours to add
 in the Visualization Manager.
 
 ![The same pump station as a native CODESYS visualization, running in CODESYS's simulation](docs/images/hmi-codesys.png)
+
+Themes and the company colour carry over, and pipes with flow show dashes
+moving along them, as in the browser:
+
+![The pump station exported with a red company colour: red current-page button, gauge and sensor frames, and red pipes with white dashes moving while water flows](docs/images/hmi-codesys-brand.png)
 
 The alarms are CODESYS's own, not a copy in the HMI: an alarm group with its
 observations, classes and messages, which CODESYS's alarm manager evaluates in

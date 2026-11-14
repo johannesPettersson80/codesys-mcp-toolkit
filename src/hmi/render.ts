@@ -5,6 +5,7 @@
  * carry `data-b` (an index into `bindings`), and the live client (live.ts)
  * applies values through CSS variables and classes, so animations keep running.
  */
+import { darkTextOn } from "./color.js";
 import { routed } from "./route.js";
 import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
 import { BUILTIN_SYMBOLS, findSymbol, scopeIds, symbolBox, symbolSize, type SymbolDef, type SymbolLib } from "./symbols.js";
@@ -87,7 +88,7 @@ export function renderScreen(screen: Screen, page: PageContext = {}): Rendered {
   const nav = (page.pages?.length ?? 0) > 1 ? `<nav class="h-nav">${page.pages!.map((p) => `<button class="h-page${p.name === screen.name ? " cur" : ""}" data-nav="${esc(p.name)}">${esc(p.title)}</button>`).join("")}</nav>` : "";
   const alarmVars = (page.alarms ?? []).map((a) => a.active);
   const badge = alarmVars.length ? `<div class="h-alarm" ${bind({ kind: "count", vars: alarmVars })}><span class="dot"></span><span class="n">0</span><span class="lbl">alarms</span></div>` : "";
-  const html = `<div class="hmi theme-${screen.theme}${cv.h <= 480 ? " small" : cv.h >= 1080 ? " large" : ""}" style="width:${cv.w}px;height:${cv.h}px;--hdr:${cv.header}px">
+  const html = `<div class="hmi theme-${screen.theme}${cv.h <= 480 ? " small" : cv.h >= 1080 ? " large" : ""}" style="width:${cv.w}px;height:${cv.h}px;--hdr:${cv.header}px${screen.accent ? `;--accent:${screen.accent};--on-accent:${darkTextOn(parseInt(screen.accent.slice(1), 16)) ? "#04121f" : "#fff"}` : ""}">
 <div class="glow"></div>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">${DEFS}</svg>
 <header class="h-bar"><div class="h-titles"><div class="h-title">${esc(screen.title)}</div>${screen.subtitle ? `<div class="h-sub">${esc(screen.subtitle)}</div>` : ""}</div>
@@ -279,6 +280,9 @@ export const HMI_CSS = String.raw`
 .theme-dark{--bg:radial-gradient(1200px 600px at 15% -10%,#13284a 0%,transparent 60%),radial-gradient(900px 500px at 110% 110%,#1c1640 0%,transparent 55%),#070d1a;--fg:#e6edf7;--muted:#8193ad;--tile:linear-gradient(160deg,rgba(30,41,64,.72),rgba(14,21,37,.78));--tile-bd:rgba(148,163,184,.13);--tile-sh:0 10px 30px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.05);--track:rgba(148,163,184,.16);--accent:#38bdf8;--ok:#22c55e;--warn:#f59e0b;--alarm:#ef4444;--neutral:#64748b;--shell-a:#1e293b;--shell-b:#334155;--liq-a:#38bdf8;--liq-b:#0369a1;--hub-a:#475569;--hub-b:#0f172a;--pipe:#334155;--pipe-in:#1e293b;--btn:rgba(148,163,184,.1)}
 .theme-light{--bg:radial-gradient(1000px 500px at 10% -10%,#dbeafe 0%,transparent 60%),#eef2f7;--fg:#0f172a;--muted:#64748b;--tile:linear-gradient(160deg,#ffffff,#f8fafc);--tile-bd:#e2e8f0;--tile-sh:0 6px 20px rgba(15,23,42,.06);--track:#e2e8f0;--accent:#0284c7;--ok:#16a34a;--warn:#d97706;--alarm:#dc2626;--neutral:#94a3b8;--shell-a:#cbd5e1;--shell-b:#f1f5f9;--liq-a:#38bdf8;--liq-b:#0284c7;--hub-a:#e2e8f0;--hub-b:#94a3b8;--pipe:#94a3b8;--pipe-in:#cbd5e1;--btn:#f1f5f9}
 .glow{position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(56,189,248,.06),transparent 30%)}
+.theme-contrast{--bg:#000;--fg:#fff;--muted:#e5e7eb;--tile:#000;--tile-bd:#fff;--tile-sh:none;--track:#4b5563;--accent:#00e5ff;--ok:#00ff6a;--warn:#ffd400;--alarm:#ff3b30;--neutral:#9ca3af;--shell-a:#111827;--shell-b:#1f2937;--liq-a:#00e5ff;--liq-b:#0091ea;--hub-a:#374151;--hub-b:#000;--pipe:#9ca3af;--pipe-in:#1f2937;--btn:#000;--on-accent:#000}
+.theme-contrast .glow{display:none}.theme-contrast .tile{border-width:2px;backdrop-filter:none}.theme-contrast .h-bar{border-bottom:2px solid #fff}
+.theme-contrast *{text-shadow:none!important}.theme-contrast .g-val,.theme-contrast .pipe.on .pipe-flow{filter:none}.theme-contrast .bar-fill,.theme-contrast .led.on .led-dot{box-shadow:none}.theme-contrast .sym.on,.theme-contrast .clickable:hover .sym{filter:none}.theme-contrast .tile button{box-shadow:none}
 .h-bar{position:absolute;left:20px;right:20px;top:0;height:var(--hdr,76px);display:flex;align-items:center;justify-content:space-between}
 .h-title{font-size:24px;font-weight:650;letter-spacing:-.01em}
 .h-sub{font-size:13px;color:var(--muted);margin-top:2px}
@@ -289,9 +293,9 @@ export const HMI_CSS = String.raw`
 .h-sim.stop{color:var(--warn)}.h-sim.stop .dot{background:var(--warn)}
 .h-nav{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:4px;padding:4px;border-radius:12px;background:var(--tile);border:1px solid var(--tile-bd)}
 .h-page{border:0;border-radius:9px;padding:8px 16px;background:transparent;color:var(--muted);font:600 13px/1 inherit;cursor:pointer;letter-spacing:.02em}
-.h-page:hover{color:var(--fg)}.h-page.cur{background:var(--accent);color:#04121f}
+.h-page:hover{color:var(--fg)}.h-page.cur{background:var(--accent);color:var(--on-accent,#04121f)}
 .h-langs{display:flex;gap:2px;padding:3px;border-radius:10px;background:var(--tile);border:1px solid var(--tile-bd)}
-.h-lang{border:0;border-radius:7px;padding:5px 8px;background:transparent;color:var(--muted);font:700 11px/1 inherit;letter-spacing:.06em;cursor:pointer}.h-lang.cur{background:var(--accent);color:#04121f}
+.h-lang{border:0;border-radius:7px;padding:5px 8px;background:transparent;color:var(--muted);font:700 11px/1 inherit;letter-spacing:.06em;cursor:pointer}.h-lang.cur{background:var(--accent);color:var(--on-accent,#04121f)}
 .h-alarm{display:flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;border:1px solid var(--tile-bd);background:var(--tile);font-size:12px;font-weight:700;color:var(--muted)}
 .h-alarm .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}.h-alarm.on{color:#fff;background:color-mix(in srgb,var(--alarm) 75%,transparent);border-color:var(--alarm);animation:blink 1.2s infinite}.h-alarm.on .dot{background:#fff}
 .clickable{cursor:pointer}.clickable:hover .pump-ring,.clickable:hover .valve-body{filter:drop-shadow(0 0 1.5px var(--accent))}

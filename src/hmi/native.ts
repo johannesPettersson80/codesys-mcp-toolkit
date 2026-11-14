@@ -4,6 +4,7 @@
  * embedded image pool and a small helper program that scales values for bars
  * and tank levels. The watcher builds it (watcher/mcp_visu.py).
  */
+import { darkTextOn } from "./color.js";
 import { canvasOf, tileBox } from "./render.js";
 import { routed } from "./route.js";
 import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
@@ -66,7 +67,7 @@ export interface NativePlan {
   helper: { name: string; declaration: string; implementation: string };
 }
 
-interface Palette {
+export interface Palette {
   bg: Argb;
   header: [Argb, Argb];
   headerText: Argb;
@@ -81,10 +82,13 @@ interface Palette {
   liquid: [Argb, Argb];
   tones: Record<Tone, Argb>;
   soft: Record<Tone, Argb>;
+  /** Dark surfaces (symbol bodies and shading follow it). */
+  dark: boolean;
 }
 
-const PALETTES: Record<"dark" | "light", Palette> = {
+const PALETTES: Record<"dark" | "light" | "contrast", Palette> = {
   dark: {
+    dark: true,
     bg: 0xff0a1222,
     header: [0xff0b1630, 0xff1e3a8a],
     headerText: 0xffe6edf7,
@@ -101,6 +105,7 @@ const PALETTES: Record<"dark" | "light", Palette> = {
     soft: { accent: 0xff0c3a52, ok: 0xff0f3d24, warn: 0xff3f2a07, alarm: 0xff4a1515, neutral: 0xff26324a },
   },
   light: {
+    dark: false,
     bg: 0xffeef2f7,
     header: [0xff0f172a, 0xff1e3a8a],
     headerText: 0xffffffff,
@@ -116,7 +121,47 @@ const PALETTES: Record<"dark" | "light", Palette> = {
     tones: { accent: 0xff0284c7, ok: 0xff16a34a, warn: 0xffd97706, alarm: 0xffdc2626, neutral: 0xff94a3b8 },
     soft: { accent: 0xffe0f2fe, ok: 0xffdcfce7, warn: 0xfffef3c7, alarm: 0xfffee2e2, neutral: 0xfff1f5f9 },
   },
+  // High contrast: black, white outlines and full-strength colours.
+  contrast: {
+    dark: true,
+    bg: 0xff000000,
+    header: [0xff000000, 0xff000000],
+    headerText: 0xffffffff,
+    tile: 0xff000000,
+    tile2: 0xff000000,
+    border: 0xffffffff,
+    text: 0xffffffff,
+    muted: 0xffd1d5db,
+    track: 0xff4b5563,
+    pipe: 0xff9ca3af,
+    shell: 0xff1f2937,
+    liquid: [0xff00e5ff, 0xff0091ea],
+    tones: { accent: 0xff00e5ff, ok: 0xff00ff6a, warn: 0xffffd400, alarm: 0xffff3b30, neutral: 0xff9ca3af },
+    soft: { accent: 0xff003844, ok: 0xff003d1a, warn: 0xff403500, alarm: 0xff4a0d0a, neutral: 0xff1f2937 },
+  },
 };
+
+/** 0xAARRGGBB from '#rrggbb'. */
+const argbOf = (h: string): Argb => (0xff000000 | parseInt(h.slice(1), 16)) >>> 0;
+/** a over b by t (0..1), per channel. */
+function mix(a: Argb, b: Argb, t: number): Argb {
+  const ch = (x: Argb, s: number) => (x >>> s) & 0xff;
+  const m = (s: number) => Math.round(ch(a, s) * t + ch(b, s) * (1 - t)) << s;
+  return (0xff000000 | m(16) | m(8) | m(0)) >>> 0;
+}
+
+/** Black or white text, whichever reads better on a colour (WCAG relative luminance). */
+export function onColor(c: Argb): Argb {
+  return darkTextOn(c & 0xffffff) ? 0xff04121f : 0xffffffff;
+}
+
+/** The screen's palette: its theme, with the brand colour as the accent. */
+export function paletteFor(screen: { theme: "dark" | "light" | "contrast"; accent?: string }): Palette {
+  const p = PALETTES[screen.theme];
+  if (!screen.accent) return p;
+  const a = argbOf(screen.accent);
+  return { ...p, tones: { ...p.tones, accent: a }, soft: { ...p.soft, accent: mix(a, p.tile, p.dark ? 0.28 : 0.14) } };
+}
 
 const FONT = "Segoe UI";
 const SEMI = "Segoe UI Semibold";
@@ -141,7 +186,7 @@ export function symbols(p: Palette): { id: string; svg: string }[] {
   const pump = (on: boolean, angle = 0) => {
     const ring = on ? hex(p.tones.ok) : hex(p.tones.neutral);
     const blades = [0, 60, 120, 180, 240, 300].map((a) => `<path d="M0 0 Q 12 -10 5 -26" transform="rotate(${a})" fill="none" stroke="${ring}" stroke-width="4.5" stroke-linecap="round"/>`).join("");
-    return wrap(`<defs><radialGradient id="h" cx=".35" cy=".35" r=".8"><stop offset="0" stop-color="${hex(p.shell === 0xff1e293b ? 0xff475569 : 0xfff1f5f9)}"/><stop offset="1" stop-color="${hex(p.shell === 0xff1e293b ? 0xff0f172a : 0xffcbd5e1)}"/></radialGradient>
+    return wrap(`<defs><radialGradient id="h" cx=".35" cy=".35" r=".8"><stop offset="0" stop-color="${hex(p.dark ? 0xff475569 : 0xfff1f5f9)}"/><stop offset="1" stop-color="${hex(p.dark ? 0xff0f172a : 0xffcbd5e1)}"/></radialGradient>
 <filter id="g" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="${on ? 3 : 0.01}"/></filter></defs>
 ${on ? `<circle cx="50" cy="50" r="46" fill="none" stroke="${ring}" stroke-width="6" opacity=".55" filter="url(#g)"/>` : ""}
 <circle cx="50" cy="50" r="47" fill="none" stroke="${ring}" stroke-width="5"/><circle cx="50" cy="50" r="41" fill="url(#h)"/>
@@ -177,9 +222,9 @@ ${on ? `<circle cx="50" cy="50" r="46" fill="none" stroke="${ring}" stroke-width
  * them there); those rows then follow CODESYS's alarm states and can be acknowledged.
  */
 export function nativePlan(screen: Screen, pages: { name: string; title: string }[] = [], custom: SymbolLib = {}, alarmIndex?: Record<string, number>, languages: string[] = []): NativePlan {
-  const p = PALETTES[screen.theme];
+  const p = paletteFor(screen);
   const lib: SymbolLib = { ...BUILTIN_SYMBOLS, ...custom };
-  const dark = screen.theme === "dark";
+  const dark = p.dark;
   const symColors = (state: "off" | "on" | "fault"): SymbolColors => ({
     state: hex(state === "on" ? p.tones.ok : state === "fault" ? p.tones.alarm : p.tones.neutral),
     body: dark ? "#334155" : "#f1f5f9",
@@ -211,6 +256,40 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     impl.push(`${name} := ${negative ? "-" : ""}REAL_TO_INT(LIMIT(0.0, (ANY_TO_REAL(${v}) - (${num(min)})) / (${num(max - min || 1)}), 1.0) * ${len}.0);`);
     return `${helperName}.${name}`;
   };
+  // Flow in pipes: dashes inside the pipe slide with the clock (not per cycle) while the flow
+  // variable is TRUE; each moves by up to one gap and the pattern repeats, so it looks endless.
+  const FLOW_GAP = 24;
+  let flowVar: { pos: string; neg: string } | undefined;
+  const flowPhase = () => {
+    if (!flowVar) {
+      decl.push("    iFlow : INT; // pipe flow phase, px", "    iFlowN : INT;");
+      impl.push(`iFlow := DINT_TO_INT((TIME_TO_DINT(TIME()) / 20) MOD ${FLOW_GAP});`, "iFlowN := -iFlow;");
+      flowVar = { pos: `${helperName}.iFlow`, neg: `${helperName}.iFlowN` };
+    }
+    return flowVar;
+  };
+  const flowDashes = (x1: number, y1: number, x2: number, y2: number, flow: string) => {
+    const horiz = y1 === y2;
+    const lo = horiz ? Math.min(x1, x2) : Math.min(y1, y2);
+    const hi = horiz ? Math.max(x1, x2) : Math.max(y1, y2);
+    const dash = 9;
+    const thick = 3;
+    const fwd = horiz ? x2 >= x1 : y2 >= y1;
+    if (hi - lo < FLOW_GAP + dash + 8) return;
+    const move = fwd ? flowPhase().pos : flowPhase().neg;
+    const axis = horiz ? "X" : "Y";
+    for (let d = 4; d + FLOW_GAP + dash <= hi - lo - 4; d += FLOW_GAP) {
+      const at = fwd ? lo + d : hi - d - dash;
+      els.push({
+        kind: "rect",
+        ...(horiz ? { x: r(at), y: r(y1 - thick / 2), w: dash, h: thick } : { x: r(x1 - thick / 2), y: r(at), w: thick, h: dash }),
+        fill: onColor(p.tones.accent),
+        frame: null,
+        invisible: `NOT (${flow})`,
+        props: { [`Relative movement.Movement top-left.${axis}`]: move, [`Relative movement.Movement bottom-right.${axis}`]: move },
+      });
+    }
+  };
   const above = (v: string, from: number) => {
     const name = `xB${++n}`;
     decl.push(`    ${name} : BOOL; // ${v} >= ${from}`);
@@ -238,7 +317,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     let x = cv.w - 24 - pages.length * bw - (pages.length - 1) * gap;
     for (const pg of pages) {
       const cur = pg.name === screen.name;
-      els.push({ kind: "round", name: `Nav_${pg.name}`, x: r(x), y: 13, w: bw, h: 34, text: pg.title, font: [SEMI, 10], color: cur ? 0xff04121f : p.headerText, fill: cur ? p.tones.accent : 0x33ffffff, frame: cur ? p.tones.accent : 0x55ffffff, radius: 10, ...(cur ? {} : { goto: `Visu_${pg.name}` }) });
+      els.push({ kind: "round", name: `Nav_${pg.name}`, x: r(x), y: 13, w: bw, h: 34, text: pg.title, font: [SEMI, 10], color: cur ? onColor(p.tones.accent) : p.headerText, fill: cur ? p.tones.accent : 0x33ffffff, frame: cur ? p.tones.accent : 0x55ffffff, radius: 10, ...(cur ? {} : { goto: `Visu_${pg.name}` }) });
       x += bw + gap;
     }
   }
@@ -472,6 +551,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
           for (const [a1, b1, a2, b2] of segs) {
             const x = Math.min(X(a1), X(a2)) - th / 2, y = Math.min(Y(b1), Y(b2)) - th / 2;
             els.push({ kind: "round", x: r(x), y: r(y), w: r(Math.abs(X(a2) - X(a1)) + th), h: r(Math.abs(Y(b2) - Y(b1)) + th), fill: p.pipe, frame: null, radius: 3, ...(it.flow ? { props: { "Color variables.Toggle color": it.flow, "Colors.Alarm state.Fill color": c(p.tones.accent), "Colors.Alarm state.Frame color": c(p.tones.accent) } } : {}) });
+            if (it.flow) flowDashes(X(a1), Y(b1), X(a2), Y(b2), it.flow);
           }
         }
         break;

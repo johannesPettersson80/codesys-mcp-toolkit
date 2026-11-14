@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- HMI themes: `theme: 'contrast'` (black and white, full-strength colours,
+  no glow) besides dark and light, per page; `accent` sets a company colour
+  for highlights, flow and the current page, with black or white text on it,
+  whichever reads better. Both in the browser and in the native export.
+- Native pipe flow: pipes with `flow` show dashes moving along them in the
+  CODESYS visualization (driven by the clock in the generated program),
+  checked in the SP21 simulation.
+
 ## [2.8.0] - 2026-11-14
 
 ### Added
