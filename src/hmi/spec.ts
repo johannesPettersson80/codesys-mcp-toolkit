@@ -114,7 +114,12 @@ export const widgetSchema = z.discriminatedUnion("type", [
     max: num.optional(),
     seconds: z.number().int().min(5).max(3600).default(60),
   }),
-  z.object({ type: z.literal("alarms"), ...base, items: z.array(z.object({ active: v, text: z.string(), severity: z.enum(["info", "warning", "alarm"]).default("alarm") })).min(1) }),
+  z.object({
+    type: z.literal("alarms"),
+    ...base,
+    items: z.array(z.object({ active: v, text: z.string(), severity: z.enum(["info", "warning", "alarm"]).default("alarm") })).min(1),
+    history: z.number().int().min(1).max(12).optional().describe("Also list the last N alarm events (time, message, state) from the alarm history the export puts in the PLC"),
+  }),
   z.object({ type: z.literal("text"), ...base, text: z.string() }),
   z
     .object({

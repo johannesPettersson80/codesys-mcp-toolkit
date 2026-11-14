@@ -212,6 +212,13 @@ Claude 可以在仿真中测试这些报警：`alarm_status` 从 CODESYS 报警�
 活动、活动已确认、已消失但等待确认），`alarm_acknowledge` 像操作员一样确认报警。在浏览器 HMI 中，
 已消失的报警会一直留在列表中，直到有人按下它的 ACK 按钮，在 CODESYS 中确认它。
 
+报警恢复正常后，CODESYS 运行时的报警会清除其时间，因此导出还会在 PLC 中加入报警历史：生成的 ST 代码把每个报警的
+每次状态变化（使用 CODESYS 自己记录的变化时间）写入 RETAIN 环形缓冲区。`alarm_history` 列出这些记录，
+带有 `history: 5` 的报警画块会在浏览器和 CODESYS 中显示最近的事件（`create_alarm_history` 可为自带报警的项目
+加入同样的功能）：
+
+![CODESYS 中导出的报警画块：活动的 "Level high" 报警行带有 ACK，下方是历史：Pump fault 的恢复正常、消失、活动，以及 Level high 的活动，每条都有时间](docs/images/hmi-codesys-history.png)
+
 ![浏览器 HMI 的报警页："Pump P-101 fault" 已消失，等待确认，带有 ACK 按钮](docs/images/hmi-alarm-ack.png)
 
 符号也会一起导出：每个状态是图片池中的一张图片，由符号的运行和故障变量决定 CODESYS 显示哪一张。
@@ -260,7 +267,7 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 | **仿真** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` `codesys_sim_test` |
 | **跟踪（Trace）** | `trace_setup` `trace_record` |
 | **调试** | `breakpoint_set` `breakpoint_on_change` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` `watch` |
-| **报警** | `alarm_list` `alarm_status` `alarm_acknowledge` |
+| **报警** | `alarm_list` `alarm_status` `alarm_acknowledge` `alarm_history` `create_alarm_history` |
 | **交接** | `project_report` `export_sources` `compare_sources` `create_recipes` |
 | **HMI 画面** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` `hmi_translate` |
 | **辅助** | `batch` `wait` `help` `open_workspace` `show_in_codesys` |

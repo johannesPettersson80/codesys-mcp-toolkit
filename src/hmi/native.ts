@@ -233,7 +233,7 @@ ${on ? `<circle cx="50" cy="50" r="46" fill="none" stroke="${ring}" stroke-width
  * alarmIndex: each HMI alarm's position in the CODESYS alarm group AG_HMI (when the export put
  * them there); those rows then follow CODESYS's alarm states and can be acknowledged.
  */
-export function nativePlan(screen: Screen, pages: { name: string; title: string }[] = [], custom: SymbolLib = {}, alarmIndex?: Record<string, number>, languages: string[] = []): NativePlan {
+export function nativePlan(screen: Screen, pages: { name: string; title: string }[] = [], custom: SymbolLib = {}, alarmIndex?: Record<string, number>, languages: string[] = [], alarmTexts: string[] = []): NativePlan {
   const p = paletteFor(screen);
   const lib: SymbolLib = { ...BUILTIN_SYMBOLS, ...custom };
   const dark = p.dark;
@@ -464,7 +464,12 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         break;
       }
       case "alarms": {
-        const rowH = Math.min(34, (box.h - 6 * (w.items.length - 1)) / w.items.length);
+        // The last events from the PLC's alarm history (GVL_AlarmHistory, which the export adds) below the rows.
+        const histN = w.history && alarmIndex ? w.history : 0;
+        const HROW = 20;
+        const histH = histN ? 26 + histN * HROW : 0;
+        const areaH = box.h - histH;
+        const rowH = Math.min(34, (areaH - 6 * (w.items.length - 1)) / w.items.length);
         const open: string[] = [];
         const rows: (() => void)[] = [];
         w.items.forEach((a, k) => {
@@ -501,6 +506,35 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         });
         els.push(text(box.x, box.y, box.w, 24, "No active alarms", [FONT, 10], p.tones.ok, "LEFT", { invisible: open.join(" OR ") }));
         rows.forEach((f) => f());
+        if (histN) {
+          const hy = box.y + box.h - histH;
+          els.push({ kind: "rect", x: r(box.x), y: r(hy + 4), w: r(box.w), h: 1, fill: p.border, frame: null });
+          els.push(text(box.x, hy + 6, box.w, 18, "HISTORY", [SEMI, 8], p.muted, "LEFT"));
+          // The message of an event: the HMI's alarms are AG_HMI's alarms 1..n, in this order.
+          const msgs = alarmTexts.map((t, k) => `IF GVL_AlarmHistory.aEvents[iHi].sGroup = 'AG_HMI' AND GVL_AlarmHistory.aEvents[iHi].sAlarm = '${k + 1}' THEN sHx := '${t.replace(/'/g, "$$'").slice(0, 78)}'; END_IF`);
+          for (let rr = 0; rr < histN; rr++) {
+            const m = ++n;
+            decl.push(`    xHv${m} : BOOL; // history row ${rr + 1}`, `    sHt${m} : STRING(12);`, `    sHx${m} : STRING(80);`, `    sHs${m} : STRING(16);`);
+            if (rr === 0) decl.push("    iHi : INT;", "    sHx : STRING(80);");
+            impl.push(
+              `iHi := GVL_AlarmHistory.iNext - 1 - ${rr};`,
+              "IF iHi < 0 THEN iHi := iHi + GVL_AlarmHistory.iSize; END_IF",
+              `xHv${m} := ${rr} < GVL_AlarmHistory.iCount;`,
+              `IF xHv${m} THEN`,
+              `    sHt${m} := RIGHT(DT_TO_STRING(GVL_AlarmHistory.aEvents[iHi].dtTime), 8);`,
+              "    sHx := CONCAT(CONCAT(GVL_AlarmHistory.aEvents[iHi].sGroup, '/'), GVL_AlarmHistory.aEvents[iHi].sAlarm);",
+              ...msgs.map((x) => `    ${x}`),
+              `    sHx${m} := sHx;`,
+              `    CASE GVL_AlarmHistory.aEvents[iHi].iState OF 0: sHs${m} := 'normal'; 1: sHs${m} := 'pending'; 2: sHs${m} := 'ACTIVE'; 3, 5: sHs${m} := 'cleared'; 4: sHs${m} := 'acknowledged'; ELSE sHs${m} := ''; END_CASE`,
+              "END_IF",
+            );
+            const y = hy + 26 + rr * HROW;
+            const hide = `NOT ${helperName}.xHv${m}`;
+            els.push(text(box.x, y, 70, HROW, "%s", [FONT, 8.5], p.muted, "LEFT", { invisible: hide, props: { "Text variables.Text variable": `${helperName}.sHt${m}` } }));
+            els.push(text(box.x + 74, y, box.w - 190, HROW, "%s", [FONT, 8.5], p.text, "LEFT", { invisible: hide, props: { "Text variables.Text variable": `${helperName}.sHx${m}` } }));
+            els.push(text(box.x + box.w - 112, y, 112, HROW, "%s", [SEMI, 8], p.muted, "RIGHT", { invisible: hide, props: { "Text variables.Text variable": `${helperName}.sHs${m}` } }));
+          }
+        }
         break;
       }
       case "text":

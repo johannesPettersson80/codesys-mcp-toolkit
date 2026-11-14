@@ -8,6 +8,8 @@ import * as z from "zod/v4";
 import type { ActionResult, RegisterAction } from "../actions.js";
 import { reportProgress } from "../progress.js";
 import { currentCodesysSim } from "../codesys/simulation.js";
+import { HISTORY, historyCode, installHistory } from "../codesys/alarm-history.js";
+import { listAlarms } from "../codesys/alarm-tools.js";
 import type { AppContext } from "../tools.js";
 import { findBrowser, hmiScript, previewValues, screenshot, staticPage, symbolSheet, type HmiService } from "./service.js";
 import { BUILTIN_SYMBOLS, importSvg, svgProblems, symbolSchema, type SymbolDef } from "./symbols.js";
@@ -241,11 +243,21 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
           } catch (e) {
             warnings.push(`alarms: ${(e as Error).message}`);
           }
+          // The alarms' history in the PLC (CODESYS's runtime alarm forgets its times once normal).
+          if (alarmIndex) {
+            try {
+              const code = historyCode(await listAlarms(ctx), 100);
+              const task = await installHistory(ctx, code, false);
+              notes.push(`Alarm history: ${HISTORY.program}${task ? ` in ${task}` : ""} records every state change (alarm_history shows it).`);
+            } catch (e) {
+              warnings.push(`alarm history: ${(e as Error).message}`);
+            }
+          }
         }
         // The first page is built last, so a CODESYS window ends up showing the start page.
         for (const [k, s] of [...targets].reverse().entries()) {
           reportProgress(`page ${k + 1}/${targets.length}: Visu_${s.name}`);
-          const plan = nativePlan(s, pages, hmi.symbols(), alarmIndex, Object.keys(translations));
+          const plan = nativePlan(s, pages, hmi.symbols(), alarmIndex, Object.keys(translations), alarms.map((a) => a.text));
           const images = plan.images.map((img) => {
             const path = join(dir, `${img.id}.svg`);
             writeFileSync(path, img.svg, "utf8");

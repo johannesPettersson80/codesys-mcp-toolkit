@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Alarm history: `create_alarm_history` generates ST that records every state
+  change of every alarm, with CODESYS's own time of the change, in a RETAIN
+  ring buffer (CODESYS's runtime alarm forgets its times once it is normal
+  again); `alarm_history` lists the events. `hmi_export_codesys` adds it when
+  the HMI has alarms, and an alarms tile with `history: N` shows the last
+  events in the browser and in CODESYS. Checked in the SP21 simulation.
+
 ### Fixed
 - CODESYS in another language: the native HMI export set the button and
   switch inputs (Input configuration) by their English names, which a German

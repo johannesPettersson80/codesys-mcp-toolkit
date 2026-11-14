@@ -76,6 +76,8 @@ panel to one tool.
 | `alarm_list` | The Alarm Configuration: each group's alarms with ID, condition, class and message. |
 | `alarm_status` | Each alarm's state from CODESYS's alarm manager in the running simulation: normal, pending, active, active acknowledged, cleared and waiting for confirmation, cleared and not acknowledged. Lists the state variables (`__Alm__GVL.g_inst.gen_Inst_<group>_AlarmGroup.gen_ArrAllAlarms[k].m_eState`) for `codesys_sim_test`. |
 | `alarm_acknowledge` | Acknowledge (or confirm) alarms in the simulation, by default every one that isn't normal, and report each one's state before and after. An Error-class alarm whose condition is still true stays active. |
+| `create_alarm_history` | Generated ST that records every state change of every alarm in the Alarm Configuration: `ST_AlarmEvent`, `GVL_AlarmHistory` (a RETAIN ring buffer, `size` events), `F_AlarmHistoryAdd` and `PRG_AlarmHistory` in MainTask. The time is CODESYS's own time of the change (`m_liTimestampLast`, local time). `hmi_export_codesys` adds it when the HMI has alarms. |
+| `alarm_history` | The recorded events from the running simulation, newest first: time, alarm, the state it went to, and its message. |
 | `create_recipes` | Recipes for setpoints as generated ST (`name`, `variables`, `recipes: {name: {variable: value}}`): `ST_Recipe_<name>`, `GVL_Recipe_<name>` (the recipes in a RETAIN array, and their names) and `PRG_Recipe_<name>` added to MainTask. `iApply := k` writes recipe k to the variables (through pointers, so program variables work too), `iSave := k` stores the current values in it; `iActive`, `sActive` say which was applied. The HMI widget `{type: 'recipe', recipe, recipes}` shows Apply and Save buttons in the browser and in CODESYS. Types are looked up in the declarations, or given as `{path, type}`. |
 | `project_report` | A Markdown handover report next to the project (or at `path`): summary, tasks, I/O, device-tree mappings, alarms, HMI pages, libraries, devices, program structure, and a commissioning checklist built from the project. |
 | `export_sources` | The project as plain text in a folder (default `<project>_src`): one `.st` per object, graphical bodies as `.xml`, `project.txt` (tasks, libraries, devices, alarms) and `hmi.json`. Rewrites only changed files and removes files of deleted objects that an earlier export wrote (listed in `.codesys-export.json`). |
@@ -110,6 +112,7 @@ action that can't work there says so instead of failing halfway.
 | `find_library`, `pin_library` | not checked | yes | not checked |
 | HMI themes, native pipe flow, access rights per tile | yes | not checked | not checked |
 | Native HMI export with CODESYS in German or Chinese | yes | not checked | not checked |
+| `create_alarm_history`, `alarm_history`, alarms tile `history` | yes | not checked | not checked |
 | `find_device`, `add_device`, `device_parameters`, `configure_device` | yes | yes | not checked |
 | `project_report`, `export_sources` | yes | yes | not checked |
 

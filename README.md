@@ -123,7 +123,7 @@ operation. [The reference](docs/reference.md) describes each one.
 | **Trace** | `trace_setup` `trace_record` |
 | **Debug** | `breakpoint_set` `breakpoint_on_change` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` `watch` |
 | **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` `hmi_translate` |
-| **Alarms** | `alarm_list` `alarm_status` `alarm_acknowledge` |
+| **Alarms** | `alarm_list` `alarm_status` `alarm_acknowledge` `alarm_history` `create_alarm_history` |
 | **Handover** | `project_report` `export_sources` `compare_sources` `create_recipes` |
 | **Helpers** | `batch` `wait` `help` `open_workspace` `show_in_codesys` |
 
@@ -271,6 +271,15 @@ cleared but waiting for confirmation or acknowledgement), and
 `alarm_acknowledge` acknowledges as an operator would. In the browser HMI, a
 cleared alarm stays in the list until someone presses its ACK button, which
 acknowledges it in CODESYS.
+
+CODESYS's runtime alarm forgets its times once it is normal again, so the
+export also adds an alarm history to the PLC: generated ST that records every
+state change of every alarm (with CODESYS's own time of the change) in a
+RETAIN ring buffer. `alarm_history` lists it, and an alarms tile with
+`history: 5` shows the last events, in the browser and in CODESYS
+(`create_alarm_history` adds the same to a project with alarms of its own):
+
+![The exported alarms tile in CODESYS: the active "Level high" row with ACK, and below it the history: Pump fault normal, cleared, active, and Level high active, each with its time](docs/images/hmi-codesys-history.png)
 
 ![The browser HMI's alarm page: "Pump P-101 fault" has cleared and waits for confirmation, with an ACK button](docs/images/hmi-alarm-ack.png)
 

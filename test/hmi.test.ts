@@ -201,6 +201,20 @@ describe("native CODESYS visualization plan", () => {
   });
 });
 
+describe("alarm history on the alarms widget", () => {
+  it("native rows read GVL_AlarmHistory with the AG_HMI messages; the browser gets a history list", () => {
+    const widgets = SCREEN.widgets.map((w: { type: string }) => (w.type === "alarms" ? { ...w, history: 3 } : w));
+    const s = screenSchema.parse({ ...SCREEN, widgets });
+    const plan = nativePlan(s, [], {}, { "PLC_PRG.xHigh": 0 }, [], ["Level high", "Pump fault"]);
+    expect(plan.helper.implementation).toContain("IF GVL_AlarmHistory.aEvents[iHi].sGroup = 'AG_HMI' AND GVL_AlarmHistory.aEvents[iHi].sAlarm = '2' THEN sHx := 'Pump fault'; END_IF");
+    expect(plan.helper.declaration.match(/sHt\d+ : STRING\(12\);/g)).toHaveLength(3);
+    expect(plan.elements.some((e) => e.text === "HISTORY")).toBe(true);
+    // Without CODESYS alarms there is no history in the PLC.
+    expect(nativePlan(s).helper.implementation).not.toContain("GVL_AlarmHistory");
+    expect(renderScreen(s).html).toContain('<ul class="al-hist" data-hist="3"></ul>');
+  });
+});
+
 describe("access rights per tile", () => {
   it("rights per user group, with None for nobody logged in", () => {
     expect(accessRights("Maintenance", "see")).toEqual([["None", "OnlyVisible"], ["Operator", "OnlyVisible"], ["Maintenance", "Operable"], ["Admin", "Operable"]]);

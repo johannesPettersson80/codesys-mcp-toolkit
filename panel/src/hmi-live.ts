@@ -156,6 +156,32 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, n
       for (const el of list) apply(el, b);
     });
     root.querySelectorAll<HTMLElement>(".alarms").forEach((ul) => ul.classList.toggle("has", !!ul.querySelector(".al.active")));
+    // The PLC's alarm history (the server sends the latest events as "@history").
+    const hist = last["@history"];
+    if (hist !== undefined) {
+      let events: { t: string; x: string; s: string; st: string }[] = [];
+      try {
+        events = JSON.parse(hist) as typeof events;
+      } catch {
+        events = [];
+      }
+      root.querySelectorAll<HTMLElement>(".al-hist").forEach((ul) => {
+        const n = Number(ul.dataset.hist) || 5;
+        ul.replaceChildren(
+          ...events.slice(0, n).map((e) => {
+            const li = document.createElement("li");
+            li.className = `st-${e.st}`;
+            for (const [cls, txt] of [["h-t", e.t], ["h-x", e.x], ["h-s", e.s]] as const) {
+              const span = document.createElement("span");
+              span.className = cls;
+              span.textContent = txt;
+              li.append(span);
+            }
+            return li;
+          }),
+        );
+      });
+    }
     const s = root.querySelector<HTMLElement>("[data-sim]");
     if (s) {
       const st = sim?.state;

@@ -14,6 +14,7 @@ import * as z from "zod/v4";
 import type { ActionResult, RegisterAction } from "../actions.js";
 import type { AppContext } from "../tools.js";
 import { currentCodesysSim } from "./simulation.js";
+import { HISTORY, historyCode, installHistory, readHistory } from "./alarm-history.js";
 
 export interface AlarmDef {
   id: string;
@@ -98,6 +99,41 @@ export function registerAlarmActions(reg: RegisterAction, ctx: AppContext, run: 
         const groups = await listAlarms(ctx);
         if (!groups.length) return "This project has no Alarm Configuration (or no alarm groups in it).";
         return groups.map((g) => [`${g.name} (${g.alarms.length} alarms):`, ...g.alarms.map((a) => `  ${a.id}  [${a.cls || "?"}] ${a.text || "(no message)"}  when ${condition(a)}`)].join("\n")).join("\n");
+      }),
+  );
+
+  reg(
+    "create_alarm_history",
+    {
+      description:
+        "Record the alarms' history in the PLC: generated ST (ST_AlarmEvent, GVL_AlarmHistory with a RETAIN ring buffer, F_AlarmHistoryAdd, PRG_AlarmHistory called from MainTask) that logs every state change of every alarm (active, cleared, acknowledged, normal) with CODESYS's own time of the change. CODESYS's runtime alarm forgets its times once it is normal again. alarm_history reads it; hmi_export_codesys adds it on its own. Recreate it after adding alarms.",
+      inputSchema: z.object({ size: z.number().int().min(10).max(1000).default(100).describe("Events kept (oldest dropped first)") }),
+    },
+    async ({ size }) =>
+      run(async () => {
+        const groups = await listAlarms(ctx);
+        const code = historyCode(groups, size);
+        const task = await installHistory(ctx, code, ctx.autosave);
+        return `Alarm history for ${code.alarms} alarm(s) in ${groups.map((g) => g.name).join(", ")}: ${HISTORY.program}${task ? ` (called from ${task})` : " (add it to a task with configure_task)"} records each state change in ${HISTORY.gvl}.aEvents (RETAIN, ${size} events). Compile, start the simulation, then alarm_history.`;
+      }),
+  );
+
+  reg(
+    "alarm_history",
+    {
+      description: "The recorded alarm events from the running simulation, newest first: time, alarm, message and the state it went to (needs create_alarm_history, or an HMI exported with hmi_export_codesys).",
+      inputSchema: z.object({ limit: z.number().int().min(1).max(1000).default(30) }),
+    },
+    async ({ limit }) =>
+      run(async () => {
+        needSim();
+        const [h, groups] = await Promise.all([readHistory(ctx, limit), listAlarms(ctx)]);
+        if (!h.events.length) return "No alarm events recorded yet.";
+        const text = (g: string, id: string) => groups.find((x) => x.name === g)?.alarms.find((a) => a.id === id)?.text ?? "";
+        return [
+          `Alarm history (${h.events.length} of ${h.stored} stored, newest first; the buffer keeps ${h.size}):`,
+          ...h.events.map((e) => `  ${e.time}  ${`${e.group}/${e.alarm}`.padEnd(12)} ${STATE_TEXT[e.state].padEnd(34)} ${text(e.group, e.alarm)}`),
+        ].join("\n");
       }),
   );
 

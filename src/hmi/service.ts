@@ -8,7 +8,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { alarmPath, alarmState } from "../codesys/alarm-tools.js";
+import { readHistory } from "../codesys/alarm-history.js";
+import { alarmPath, alarmState, STATE_TEXT } from "../codesys/alarm-tools.js";
 import { currentCodesysSim } from "../codesys/simulation.js";
 
 /** The alarm group hmi_export_codesys puts the HMI's alarms in. */
@@ -40,6 +41,7 @@ export function hmiScript(): string | undefined {
 export class HmiService {
   private cache = new Map<string, { at: number; values: Values; errors: Record<string, string> }>();
   private reading?: Promise<unknown>;
+  private history?: { at: number; json: string };
 
   constructor(private ctx: AppContext) {}
 
@@ -190,6 +192,20 @@ export class HmiService {
         delete errors[statePaths[k]!];
         if (raw !== undefined) values[`@alarm:${a.active}`] = alarmState(raw);
       });
+      // The PLC's alarm history (after hmi_export_codesys), for alarms widgets with history: once a second.
+      const histN = Math.max(0, ...screen.widgets.map((w) => (w.type === "alarms" ? (w.history ?? 0) : 0)));
+      if (histN) {
+        if (!this.history || Date.now() - this.history.at > 1000) {
+          try {
+            const h = await readHistory(this.ctx, histN);
+            const text = (g: string, id: string) => (g === HMI_ALARM_GROUP ? alarms[Number(id) - 1]?.text : undefined) ?? `${g}/${id}`;
+            this.history = { at: Date.now(), json: JSON.stringify(h.events.map((e) => ({ t: e.time.slice(11), x: text(e.group, e.alarm), s: STATE_TEXT[e.state], st: e.state }))) };
+          } catch {
+            this.history = { at: Date.now(), json: "[]" };
+          }
+        }
+        values["@history"] = this.history.json;
+      }
       const out = { at: Date.now(), values, errors };
       this.cache.set(screen.name, out);
       return out;
