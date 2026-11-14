@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-14
+
+Several of the new actions use CODESYS's own services inside the IDE, beyond
+what its scripting API documents: `get_signature`, `find_references`,
+`rename_symbol`, `trace_setup`, `trace_record`, the debug actions,
+`hmi_export_codesys` and `--show-window`. They are experimental and checked on
+the versions noted below.
+
 ### Added
 - HMI screens: Claude designs live operator screens for the program
   (`hmi_save_screen`): a process diagram with tanks, pumps, fans, valves and
@@ -61,7 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clock), faceplates as CODESYS dialog visualizations, the pages' alarms in
   CODESYS alarm management (an alarm group with Error/Warning/Info classes
   and message texts), and visualization user groups with a Login button.
-  Checked on SP21: three pages and two dialogs compile with 0 errors.
+  Checked on SP21: three pages and two dialogs compile with 0 errors; the
+  alarms show in CODESYS's alarm group editor with their messages after the
+  project is reopened, and in the simulation CODESYS's alarm manager reports
+  the raised fault as an active alarm.
 - Input actions only go on shapes: CODESYS raises an assertion dialog when
   an image element gets one.
 - The browser viewer closes open connections when it stops, so an open HMI
@@ -73,6 +84,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   simulation runs, its live values. CODESYS's scripting API has no call for
   this, so it uses CODESYS's own frame (checked on SP21 and SP22); where that
   isn't available, nothing opens and the call works as before.
+
+### Changed
+- The Chinese README states model support directly and lists the models
+  tested with OpenCode, as suggested by Zhen Yang (Alfabete-spec), who
+  reviews the Chinese documentation.
 
 ## [2.2.0] - 2026-11-14
 

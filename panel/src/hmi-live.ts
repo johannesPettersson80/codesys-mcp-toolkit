@@ -131,7 +131,10 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, n
     return { min, max };
   }
 
-  function update(values: Values, sim?: { state?: string }) {
+  // An optimistic write passes no simulation state: keep the last one (else the header blinks "Offline").
+  let simNow: { state?: string } | undefined;
+  function update(values: Values, sim: { state?: string } | undefined = simNow) {
+    simNow = sim;
     last = { ...last, ...values };
     const t = now();
     for (const [k, raw] of Object.entries(values)) {

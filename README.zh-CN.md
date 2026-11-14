@@ -17,8 +17,10 @@
 
 这是一个 [MCP](https://modelcontextprotocol.io)（模型上下文协议）服务器。它在后台保持一个
 CODESYS 会话，让 AI 助手直接操作你的真实项目：用真正的 CODESYS 编译器编译，在 CODESYS
-自带的仿真中测试，而你可以实时看到代码的变化。它不绑定 Claude：DeepSeek、通义千问（Qwen）、
-GLM、MiniMax 等模型通过 OpenCode 等客户端同样可以使用。
+自带的仿真中测试，而你可以实时看到代码的变化。
+
+工具包支持任何能够通过 MCP 客户端调用工具的 AI 模型。我们用 OpenCode 测试了 DeepSeek V4.1 Flash、
+通义千问 Qwen 3.6 Plus、GLM 5.3 和 MiniMax M3，均完成了全部步骤（见[已测试的模型](#已测试的模型)）。
 
 ![Claude 在 CODESYS 中编写液位控制功能块：对话中的实时面板、0 错误编译和 5 项仿真测试全部通过，右侧是同一功能块在工作区中的代码](docs/images/claude-and-codesys.png)
 
@@ -146,8 +148,13 @@ Cline、Trae、通义灵码、Cursor、Claude Desktop 等使用 `mcpServers` 配
 让 Claude 为你的程序设计操作画面：带储罐、泵、风机、阀门和流动管道的工艺流程图，以及仪表盘、
 数值、趋势图、状态灯、报警、按钮、开关和设定值，全部绑定到 PLC 变量。
 
-![Claude 为泵站设计的 HMI 画面：工艺流程图、液位仪表、状态灯、流量、趋势图、泵按钮、模式开关、设定值和报警](docs/images/hmi-screen.png)
+![Claude 为泵站设计的实时 HMI，连接 CODESYS 仿真运行：打开泵的面板切换到手动并启动，泵转动、管道流动，在报警页触发故障，趋势页，以及总览页上的报警](docs/images/hmi-live.gif)
 
+- **完整的 HMI，而不只是一个画面。** 多个页面（总览、单元、报警、趋势、设置）共用一个页眉，
+  页眉链接到每个页面并统计所有页面的活动报警。`hmi_template` 为每种页面提供良好的布局。
+  面板尺寸：1280x720、1920x1080、1024x768 或 800x480。
+- **操作面板（faceplate）。** 点击泵、风机或阀门会弹出面板：模式开关、启动/停止或开/关、复位、
+  实时数值和设定值。
 - **Claude 会检查自己的设计。** `hmi_screenshot` 把画面作为图片返回给 Claude，它能发现重叠、
   空白或不清楚的标签并自行修正。
 - **在浏览器中实时运行。** 让 Claude 打开 HMI（`open_hmi`）。页面由工具包在 127.0.0.1 上提供，
@@ -163,7 +170,22 @@ HMI 只写入 CODESYS 自带的仿真，不会连接真实控制器。
 渐变卡片、嵌入图片池的 SVG 泵/风机/阀门符号、实时数值、液位和棒图、按钮、开关、设定值和报警行，
 它是普通的可视化对象，随应用程序一起使用（我们在 CODESYS 仿真中验证过，未在真实控制器上测试）。
 
+多页 HMI 会生成为每页一个可视化，页眉中有页面按钮；第一页设为 TargetVisu 和 WebVisu 的起始页；
+运行中的泵和风机会转动；操作面板生成为 CODESYS 对话框；用户组（Operator、Maintenance、Admin）
+配有登录按钮（用户和密码由你在 Visualization Manager 中添加）。
+
 ![同一个泵站画面，作为原生 CODESYS 可视化在仿真中运行](docs/images/hmi-codesys.png)
+
+报警是 CODESYS 自己的报警，而不是 HMI 中的副本：导出会创建报警配置（Alarm Configuration）中的
+报警组，包括观察条件、报警类别和报警消息，由 CODESYS 的报警管理器在 PLC 中计算。在仿真中触发
+故障后，报警组报告一个活动报警；故障消失后它仍保持待确认状态，直到被确认，这正是 Error 类报警
+应有的行为。
+
+![导出的报警在 CODESYS 报警组编辑器中：PLC_PRG.xHighLevel 的数字观察，类别 Warning，消息 "High level T-101 (above 90 %)"；PLC_PRG.xFault 的数字观察，类别 Error，消息 "Pump P-101 fault"](docs/images/codesys-alarms.png)
+
+CODESYS 的脚本无法创建趋势、仪表或报警表元素，所以趋势显示当前值，仪表显示为棒图，报警页在
+报警活动时显示一行（可在 CODESYS 自带的报警表中确认报警，报警表可从工具箱添加）。已在 CODESYS
+V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `FloatingPointUtils` 库；如果缺少，导出会提示。
 
 ## 可用操作
 
@@ -174,18 +196,28 @@ HMI 只写入 CODESYS 自带的仿真，不会连接真实控制器。
 | --- | --- |
 | **项目** | `open_project` `create_project` `save_project` `close_project` `codesys_status` |
 | **读取代码** | `get_project_tree` `read_objects` `search_code` `get_outline` |
-| **修改代码** | `write_object` `create_object` `delete_object` `rename_object` |
+| **修改代码** | `write_object` `create_object` `create_graphical` `delete_object` `rename_object` |
 | **编译** | `compile` |
-| **库** | `list_libraries` `add_library` `remove_library` `get_library_api` |
-| **任务与 I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` |
+| **库** | `list_libraries` `add_library` `remove_library` `get_library_api` `get_signature` |
+| **代码导航** | `find_references` `rename_symbol` |
+| **任务与 I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` `find_device` `add_device` |
 | **改动跟踪** | `checkpoint` `get_changes` `revert_object` |
-| **仿真** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` |
+| **仿真** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` `codesys_sim_test` |
+| **跟踪（Trace）** | `trace_setup` `trace_record` |
+| **调试** | `breakpoint_set` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` |
+| **HMI 画面** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` |
 | **辅助** | `batch` `wait` `help` `open_workspace` |
 
 `batch` 可以在一次调用中执行最多 50 个操作，比逐个调用快得多。
 
-第 2 版只编辑结构化文本。图形化语言（SFC、CFC、LD、FBD）的对象会显示在项目树中，可以以
-PLCopenXML 形式读取，但不能编辑。
+有些操作超出了 CODESYS 脚本 API 文档的范围，使用 IDE 内部的 CODESYS 服务：`get_signature`、
+`find_references`、`rename_symbol`、`trace_setup`、`trace_record`、调试操作、`hmi_export_codesys`
+（包括报警和用户组）以及 `--show-window`。它们属于**实验性功能**：已在 CODESYS V3.5 SP21 和 SP22 上
+验证（见[更新日志](CHANGELOG.md)），在其他版本上可能提示功能不可用，或无法正常工作。
+
+Claude 编写结构化文本，并可用 `create_graphical` 根据梯级、网络或步骤的简单描述创建梯形图（LD）、
+FBD 和 SFC 程序及功能块，由 CODESYS 绘制。已有的图形化代码可以以 PLCopenXML 形式读取，但还不能
+就地编辑。不支持 CFC。
 
 ## 安全
 
@@ -206,6 +238,10 @@ PLCopenXML 形式读取，但不能编辑。
 - [参与贡献](CONTRIBUTING.md)
 
 欢迎提交 Issue 和 Pull Request，中文或英文均可。
+
+## 致谢
+
+感谢 Zhen Yang（Alfabete-spec）审阅本中文文档。
 
 ## 许可证
 

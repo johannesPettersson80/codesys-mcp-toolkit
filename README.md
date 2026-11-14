@@ -124,6 +124,14 @@ operation. [The reference](docs/reference.md) describes each one.
 `batch` runs up to 50 actions in one call, which is much faster than separate
 calls.
 
+Some actions go beyond what CODESYS's scripting API documents and use CODESYS's
+own services inside the IDE: `get_signature`, `find_references`,
+`rename_symbol`, `trace_setup`, `trace_record`, the debug actions,
+`hmi_export_codesys` (with its alarms and user groups) and `--show-window`.
+They are **experimental**: checked on CODESYS V3.5 SP21 and SP22 as noted in
+the [changelog](CHANGELOG.md). On another version they may report that the
+feature isn't available, or not work.
+
 Claude writes Structured Text, and creates ladder (LD), FBD and SFC programs
 and function blocks with `create_graphical` from a simple description of rungs,
 networks or steps; CODESYS draws them. Existing graphical bodies can be read as
@@ -157,7 +165,7 @@ process diagram with tanks, pumps, fans, valves and flowing pipes, and gauges,
 values, trends, status lights, alarms, buttons, switches and setpoints, all
 bound to your PLC variables.
 
-![An HMI screen Claude designed for a pump station: the process diagram, tank level gauge, status lights, flow, a trend, pump buttons, mode switch, setpoint and alarms](docs/images/hmi-screen.png)
+![The live HMI Claude designed for a pump station, running against CODESYS's simulation: the pump's faceplate switched to manual and started, the pump turning and the pipes flowing, a fault raised on the alarm page, the trend page, and the alarm on the overview](docs/images/hmi-live.gif)
 
 - **A whole HMI, not one screen.** Pages (overview, unit, alarms, trends,
   settings) share a header that links to every page and counts the active
@@ -207,11 +215,20 @@ in the Visualization Manager.
 
 ![The same pump station as a native CODESYS visualization, running in CODESYS's simulation](docs/images/hmi-codesys.png)
 
-CODESYS's scripting can't create trend or meter elements, so trends show their
-current values and gauges show a bar. Checked on CODESYS V3.5 SP21 in the
-simulation. A
-visualization needs the `FloatingPointUtils` library in CODESYS's library
-repository; if it's missing, the export says so.
+The alarms are CODESYS's own, not a copy in the HMI: an alarm group with its
+observations, classes and messages, which CODESYS's alarm manager evaluates in
+the PLC. In the simulation, raising the fault made the group report an active
+alarm, and it stayed pending after the fault cleared, until acknowledged, as an
+Error-class alarm should.
+
+![The exported alarms in CODESYS's alarm group editor: a digital observation on PLC_PRG.xHighLevel with class Warning and message "High level T-101 (above 90 %)", and one on PLC_PRG.xFault with class Error and message "Pump P-101 fault"](docs/images/codesys-alarms.png)
+
+CODESYS's scripting can't create trend, meter or alarm-table elements, so
+trends show their current values, gauges show a bar, and the alarm page shows a
+row per alarm while it is active (acknowledge it in CODESYS's own alarm table,
+which you can add from the toolbox). Checked on CODESYS V3.5 SP21 in the
+simulation. A visualization needs the `FloatingPointUtils` library in CODESYS's
+library repository; if it's missing, the export says so.
 
 ## Other clients and models
 
@@ -445,6 +462,8 @@ The persistent-watcher design borrows ideas from
 (op-handler registry, heartbeat, prompt handling) and
 [phobicdotno/Codesys-MCP-Master](https://github.com/phobicdotno/Codesys-MCP-Master)
 (file-queue IPC, version-safe opening). Both are MIT-licensed.
+
+The [Chinese README](README.zh-CN.md) was reviewed by Zhen Yang (Alfabete-spec).
 
 ## License
 

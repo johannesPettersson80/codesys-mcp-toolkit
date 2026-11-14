@@ -50,9 +50,12 @@ def op_alarms_configure(args):
         fac.ObjectCreated(h, g)
         cfg = _child(c, "Alarm Configuration")
     name = args["group"]
-    old = _child(c, name, cfg)
-    if old is not None:
-        old.remove()
+    # The group and its text list share the name: replace both.
+    for old in [ch for ch in cfg.get_children(True) if name_of(ch).lower() == name.lower()]:
+        try:
+            old.remove()
+        except Exception:
+            pass
     gf = System.Activator.CreateInstance(_alarm_type("AlarmGroupObjectFactory"), True)
     g_grp = mgr.AddObject(h, cfg.guid, Guid.NewGuid(), gf.Create(System.Array[str]([])), name, -1)
     gf.ObjectCreated(h, g_grp)
@@ -66,7 +69,9 @@ def op_alarms_configure(args):
     op_type = _alarm_type("DigitalObservation").GetProperty("Comparison").PropertyType
     kinds = {"digital": "DigitalObservation", "upper": "UpperLimitObservation", "lower": "LowerLimitObservation"}
     made = []
+    texts = []
     with _Modify(c.proj, _Ref(g_grp)) as grp:
+        tl_guid = grp.TextList.MetaObject.ObjectGuid
         for i, a in enumerate(args["alarms"]):
             aid = str(a.get("id") or i + 1)
             al = System.Activator.CreateInstance(_alarm_type("Alarm"), True)
@@ -78,8 +83,14 @@ def op_alarms_configure(args):
             al.ObservationType = ob
             al.SetAlarmClass(classes.get(a.get("cls") or "Error") or list(classes.values())[0], h, c.app.guid)
             grp.AddAlarm(al)
-            grp.TextList.AddText(a["text"], aid, clr.Reference[bool]())
+            texts.append((aid, a["text"]))
             made.append(aid)
+    # An alarm's message is the row of the group's text list whose ID is the alarm ID. The
+    # group's TextList is its own object (the same-named child): written through the group,
+    # the rows are lost on save, so it is modified on its own.
+    with _Modify(c.proj, _Ref(tl_guid)) as tl:
+        for aid, text in texts:
+            tl.AddText(text, aid, clr.Reference[bool]())
     return {"group": name, "alarms": made, "classes": sorted(classes.keys()), "saved": c.save_if(args)}
 
 
