@@ -245,7 +245,7 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 | **改动跟踪** | `checkpoint` `get_changes` `revert_object` |
 | **仿真** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` `codesys_sim_test` |
 | **跟踪（Trace）** | `trace_setup` `trace_record` |
-| **调试** | `breakpoint_set` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` |
+| **调试** | `breakpoint_set` `breakpoint_on_change` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` `watch` |
 | **报警** | `alarm_list` `alarm_status` `alarm_acknowledge` |
 | **交接** | `project_report` `export_sources` `create_recipes` |
 | **HMI 画面** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` `hmi_translate` |

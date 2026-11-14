@@ -70,3 +70,15 @@ describe("simulation test expectations", () => {
     expect(check(undefined, "TRUE")).toBe(false);
   });
 });
+
+describe("dataSize", () => {
+  it("knows the bytes of elementary values", async () => {
+    const { dataSize } = await import("../src/codesys/debug.js");
+    expect(dataSize("TRUE")).toBe(1);
+    expect(dataSize("INT#5")).toBe(2);
+    expect(dataSize("REAL#1.5")).toBe(4);
+    expect(dataSize("LREAL#1")).toBe(8);
+    expect(dataSize("T#1s")).toBe(4);
+    expect(dataSize("'text'")).toBeUndefined();
+  });
+});

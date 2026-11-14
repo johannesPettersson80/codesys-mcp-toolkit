@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `breakpoint_on_change`: a data breakpoint that halts the simulation right
+  after a variable is written, optionally only when a condition holds.
+- `watch`: a watch list of expressions, read together, with what changed since
+  the previous read, or sampled several times with min, max and changes.
+- `debug_status` shows the call stack while halted (for example
+  `PLC_PRG.fbCount <- PLC_PRG`).
+- Checked in the SP22 simulation: the call stack, step into, over and out, a
+  data breakpoint with and without a condition, and the watch list.
+
+### Fixed
+- `debug_continue` no longer fails when the simulation is already running.
+
 ## [2.7.0] - 2026-11-14
 
 ### Added

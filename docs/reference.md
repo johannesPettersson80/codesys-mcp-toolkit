@@ -56,7 +56,9 @@ panel to one tool.
 | `configure_device` | Set parameters (`values: {key: value}`, an enumeration by identifier or name; arrays as `[192, 168, 1, 20]`) and map channels (`mappings: [{channel, variable, address?}]`: an existing variable as `Application.GVL_IO.xValve`, or a plain name for CODESYS to create; `""` unmaps; `address` fixes the IEC address, `null` makes it automatic). Offline; compile afterwards. |
 | `checkpoint` / `get_changes` / `revert_object` | Snapshots of the project's ST, and of graphical bodies as PLCopenXML (one is taken automatically when a project is opened: `session-start`), what changed since one (with a line diff per object), and putting an object back, including its methods and properties. A deleted SFC, CFC, LD or FBD object is re-imported from its XML. |
 | `trace_setup` / `trace_record` | CODESYS Trace in the simulation: set up the variables to record every cycle of a task (before `codesys_sim_start`), then record for some seconds. Returns a summary per variable (BOOL edges with times, min and max with times), a table and a chart image. |
-| `breakpoint_set` / `breakpoint_clear` / `debug_status` / `debug_step` / `debug_continue` | Debugging in the simulation through CODESYS's breakpoint manager: a breakpoint at a line of a POU's implementation (with the instance for a function block), where the simulation is halted (POU, line, code), step over, into or out, and continue. Values are read with `codesys_sim_read` while halted. |
+| `breakpoint_set` / `breakpoint_clear` / `debug_status` / `debug_step` / `debug_continue` | Debugging in the simulation through CODESYS's breakpoint manager: a breakpoint at a line of a POU's implementation (with the instance for a function block), where the simulation is halted (POU, line, code), step over, into or out, and continue. Values are read with `codesys_sim_read` while halted. While halted, `debug_status` also shows the call stack (innermost first). |
+| `breakpoint_on_change` | A data breakpoint: the simulation halts right after a statement writes the variable, optionally only when a condition holds (CODESYS then checks it on every write, which slows the simulation). The size comes from the variable's type; elementary variables only. |
+| `watch` | A watch list in the simulation: `add`, `remove`, `clear`, then one read of all expressions, each marked with its value at the previous read. `samples` > 1 reads several times (`every` ms apart) and reports min, max and the number of changes. |
 | `codesys_sim_test` | Test cases in the simulation: steps that write, force or unforce inputs, run exact cycles or wait in real time, and expect values (exact, or a comparison with an optional tolerance). Returns a pass/fail table with the actual values of failed checks. |
 | `show_in_codesys` | With `--show-window`: open an object in its editor in the CODESYS window (a visualization, a POU, a device). While the simulation runs, a visualization runs there. |
 | `open_workspace` | Open the live workspace in the browser. |
@@ -99,7 +101,8 @@ action that can't work there says so instead of failing halfway.
 | `create_graphical` (LD, FBD, SFC) | yes | yes | not checked |
 | Reading LD, FBD, SFC as a description, `replace` | yes | yes | not checked |
 | `trace_setup`, `trace_record` | yes (probe) | yes | not checked |
-| Debugging (breakpoints, stepping) | yes (probe) | yes | not checked |
+| Debugging (breakpoints, stepping, call stack) | yes (probe) | yes | not checked |
+| `breakpoint_on_change`, `watch` | not checked | yes | not checked |
 | `find_device`, `add_device`, `device_parameters`, `configure_device` | yes | yes | not checked |
 | `project_report`, `export_sources` | yes | yes | not checked |
 

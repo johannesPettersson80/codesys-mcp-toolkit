@@ -40,6 +40,7 @@ describe("MCP tools over the real watcher", () => {
         "add_device",
         "batch",
         "breakpoint_clear",
+        "breakpoint_on_change",
         "breakpoint_set",
         "checkpoint",
         "get_changes",
@@ -104,6 +105,7 @@ describe("MCP tools over the real watcher", () => {
         "trace_record",
         "trace_setup",
         "wait",
+        "watch",
         "write_object",
       ].sort(),
     );
@@ -296,5 +298,51 @@ describe("MCP tools over the real watcher", () => {
     const r = await call("read_objects", { paths: ["PLC_PRG", "FB_Pump/Running"] });
     expect(r.text).toContain("sText : STRING := 'Nivå';");
     expect(r.text).toContain("=== FB_Pump/Running (property) ===");
+  });
+});
+
+describe("watch list and data breakpoints", () => {
+  it("reads the watch list, marks changes and samples min/max", async () => {
+    ctx.codesysSim = { state: "run", forced: [], cycles: 0, restarts: ctx.bridge.health().restarts };
+    let n = 0;
+    const spy = vi.spyOn(ctx.bridge, "call").mockImplementation(async (op: string) => {
+      if (op !== "sim.read") throw new Error("unexpected " + op);
+      n++;
+      return { values: { "PLC_PRG.n": `INT#${n * 10}`, "PLC_PRG.x": "TRUE" } } as never;
+    });
+    try {
+      expect((await call("watch", {})).text).toContain("The watch list is empty");
+      const first = await call("watch", { add: ["PLC_PRG.n", "PLC_PRG.x"] });
+      expect(first.text).toContain("Watch (2):\n  PLC_PRG.n = INT#10\n  PLC_PRG.x = TRUE");
+      const sampled = await call("watch", { samples: 3, every: 20 });
+      expect(sampled.text).toContain("PLC_PRG.n = INT#40  [min 20, max 40, 2 change(s) in 3 reads]  (was INT#10)");
+      expect(sampled.text).toContain("PLC_PRG.x = TRUE  [0 change(s) in 3 reads]");
+      expect((await call("watch", { remove: ["PLC_PRG.x"] })).text).toContain("Watch (1):");
+      expect((await call("watch", { clear: true })).text).toContain("The watch list is empty");
+    } finally {
+      spy.mockRestore();
+      ctx.codesysSim = undefined;
+    }
+  });
+
+  it("sets a data breakpoint with the variable's size", async () => {
+    ctx.codesysSim = { state: "run", forced: [], cycles: 0, restarts: ctx.bridge.health().restarts };
+    const sent: Record<string, unknown>[] = [];
+    const spy = vi.spyOn(ctx.bridge, "call").mockImplementation(async (op: string, args?: Record<string, unknown>) => {
+      if (op === "sim.read") return { values: { "PLC_PRG.r": "REAL#50", "PLC_PRG.s": "'abc'" } } as never;
+      if (op === "debug.set_data") return sent.push(args!), { id: "data", enabled: true } as never;
+      throw new Error("unexpected " + op);
+    });
+    try {
+      const r = await call("breakpoint_on_change", { variable: "PLC_PRG.r", condition: "PLC_PRG.r > 55" });
+      expect(r.isError).toBe(false);
+      expect(sent[0]).toEqual({ expression: "PLC_PRG.r", size: 4, condition: "PLC_PRG.r > 55" });
+      const s = await call("breakpoint_on_change", { variable: "PLC_PRG.s" });
+      expect(s.isError).toBe(true);
+      expect(s.text).toContain("Can't tell the size of PLC_PRG.s");
+    } finally {
+      spy.mockRestore();
+      ctx.codesysSim = undefined;
+    }
   });
 });

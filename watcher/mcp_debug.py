@@ -83,6 +83,55 @@ def op_debug_set(args):
     return {"id": key}
 
 
+def op_debug_set_data(args):
+    """A data breakpoint: halt when a variable is written (optionally only when a condition holds)."""
+    import System
+    c = Ctx()
+    mcp_sim._online()
+    bpm = _bpm()
+    expr = args["expression"]
+    tasks = System.Array[str](args.get("tasks") or [])
+    try:
+        bp = bpm.CreateDataBreakpoint(c.app.guid, c.proj.handle, expr, int(args.get("size") or 0), tasks, _hit_always(), 0, False, args.get("condition") or "", "", "")
+    except AttributeError:
+        raise OpError("unavailable", "This CODESYS has no data breakpoints for scripts.")
+    bpm.SetBreakpoint(bp)
+    bpm.EnableBreakpoint(bp)
+    key = "data:%s" % expr
+    BPS[key] = bp
+    # With size 0 CODESYS keeps the breakpoint disabled; the server passes the variable's size.
+    return {"id": key, "enabled": bool(bp.IsEnabled)}
+
+
+def _call_stack(c):
+    """The call stack while halted: each entry's POU and instance, innermost first."""
+    out = []
+    try:
+        from System.Reflection import BindingFlags
+        om = None
+        for tname in ("_3S.CoDeSys.MemoryTools.APEnvironment", "_3S.CoDeSys.VisualEditor.APEnvironment", "_3S.CoDeSys.RecipeManObject.APEnvironment"):
+            t = _find_type(tname)
+            p = t.GetProperty("OnlineMgr", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static) if t is not None else None
+            if p is not None:
+                om = p.GetValue(None, None)
+                if om is not None:
+                    break
+        if om is None:
+            return []
+        app = om.GetApplication(c.app.guid)
+        for e in list(app.CallStack or []):
+            # LocationInformation.EditorInstancePath: 'PLCWinNT.Application.PLC_PRG.fbCount';
+            # the task's own frames ('CallTask__MainTask', '__cycle__code__MainTask') are left out.
+            info = e.LocationInformation
+            path = to_text(info.EditorInstancePath or "")
+            if not path or path.split(".")[-1].startswith("__") or path.split(".")[-1].startswith("CallTask__"):
+                continue
+            out.append({"instance": path})
+    except Exception as ex:
+        out.append({"error": to_text(ex)[:160]})
+    return out
+
+
 def op_debug_clear(args):
     mcp_sim._online()
     bpm = _bpm()
@@ -120,6 +169,7 @@ def op_debug_status(args):
                     out["at"]["implementation"] = pos["implementation"]
         except Exception as e:
             out["at_error"] = to_text(e)
+        out["call_stack"] = _call_stack(c)
     return out
 
 
@@ -135,14 +185,16 @@ def op_debug_step(args):
 
 def op_debug_continue(args):
     online = mcp_sim._online()
-    online.start()
-    mcp_sim._pause(200)
+    if to_text(online.application_state).lower() != "run":
+        online.start()
+        mcp_sim._pause(200)
     return {"state": to_text(online.application_state)}
 
 
 mcp_ops.OPS.update({
     "debug.positions": op_debug_positions,
     "debug.set": op_debug_set,
+    "debug.set_data": op_debug_set_data,
     "debug.clear": op_debug_clear,
     "debug.status": op_debug_status,
     "debug.step": op_debug_step,
