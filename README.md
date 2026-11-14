@@ -35,8 +35,12 @@ can watch the code change as it happens.
 - **Shows its work.** A live panel with the project tree, the code as it is
   written, compile results, and Accept or Revert for each change.
 - **Designs operator screens.** Claude builds a live HMI for your program,
-  with tanks, pumps, valves, gauges, trends and alarms, looks at it, and
-  polishes it. You operate it in the browser against the simulation.
+  with tanks, pumps, valves, a library of process symbols (or your own SVG),
+  gauges, trends and alarms, looks at it, and polishes it. You operate it in
+  the browser against the simulation, and it exports as a native CODESYS
+  visualization with real CODESYS alarms.
+- **Ready for handover.** A project report with a commissioning checklist
+  built from the project, and a plain-text export of every object for git.
 - **Never touches a real controller.** The only online connection is to
   CODESYS's own simulation, and every online call checks for it first.
 
@@ -118,7 +122,9 @@ operation. [The reference](docs/reference.md) describes each one.
 | **Simulation** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` `codesys_sim_test` |
 | **Trace** | `trace_setup` `trace_record` |
 | **Debug** | `breakpoint_set` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` |
-| **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` |
+| **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` |
+| **Alarms** | `alarm_list` `alarm_status` `alarm_acknowledge` |
+| **Handover** | `project_report` `export_sources` |
 | **Helpers** | `batch` `wait` `help` `open_workspace` |
 
 `batch` runs up to 50 actions in one call, which is much faster than separate
@@ -127,7 +133,8 @@ calls.
 Some actions go beyond what CODESYS's scripting API documents and use CODESYS's
 own services inside the IDE: `get_signature`, `find_references`,
 `rename_symbol`, `trace_setup`, `trace_record`, the debug actions,
-`hmi_export_codesys` (with its alarms and user groups) and `--show-window`.
+`hmi_export_codesys` (with its alarms and user groups), the alarm actions and
+`--show-window`.
 They are **experimental**: checked on CODESYS V3.5 SP21 and SP22 as noted in
 the [changelog](CHANGELOG.md). On another version they may report that the
 feature isn't available, or not work.
@@ -178,6 +185,14 @@ bound to your PLC variables.
   connects, and the toolkit routes it with right angles to meet each symbol
   exactly, in the browser and in CODESYS alike. Unknown symbols or ports are
   refused with the list of valid ones.
+- **A symbol library, and your own symbols.** Besides tanks, pumps, fans and
+  valves: motor, conveyor, heat exchanger, mixer, filter, compressor,
+  cylinder, level and pressure switches, check valve and control valve, each
+  grey when off, green when on and red on a fault, with ports for pipes and
+  rotation. Claude can draw a symbol you need as SVG, or import yours from an
+  SVG file (`hmi_save_symbol`), and gets back a picture of it in every state
+  to check. Custom SVG is checked against a short list of elements and
+  attributes: scripts, styles, links and external images are refused.
 - **Claude checks its own work.** `hmi_screenshot` returns the screen as an
   image, so Claude can see overlaps, empty space or unclear labels and fix
   them before you look.
@@ -189,6 +204,10 @@ bound to your PLC variables.
 - **Stored with the project.** Screens are saved next to the project file as
   `<project>.hmi.json`, so they travel with it and can go into version control.
 - **Dark and light themes,** on a 1280x720 canvas that scales to any window.
+
+![The standard process symbols in their on, off and fault colours, and a decanter centrifuge drawn as the project's own SVG symbol](docs/images/hmi-symbols.png)
+
+![A heat treatment line built from the symbols: tank with level switch, pump, filter, heat exchanger fed by a compressor, control valve, a second tank with an agitator, a motor-driven centrifuge and a conveyor](docs/images/hmi-process.png)
 
 The HMI writes only into CODESYS's own simulation, like the rest of the
 toolkit. Screenshots use Microsoft Edge or Google Chrome, whichever is
@@ -223,12 +242,47 @@ Error-class alarm should.
 
 ![The exported alarms in CODESYS's alarm group editor: a digital observation on PLC_PRG.xHighLevel with class Warning and message "High level T-101 (above 90 %)", and one on PLC_PRG.xFault with class Error and message "Pump P-101 fault"](docs/images/codesys-alarms.png)
 
+Claude can test them in the simulation: `alarm_status` reads each alarm's
+state from CODESYS's alarm manager (normal, active, active acknowledged,
+cleared but waiting for confirmation or acknowledgement), and
+`alarm_acknowledge` acknowledges as an operator would. In the browser HMI, a
+cleared alarm stays in the list until someone presses its ACK button, which
+acknowledges it in CODESYS.
+
+![The browser HMI's alarm page: "Pump P-101 fault" has cleared and waits for confirmation, with an ACK button](docs/images/hmi-alarm-ack.png)
+
+The symbols come along too: each state is its own picture in the image pool,
+and the symbol's on and fault variables choose which one CODESYS shows.
+
+![The heat treatment line as a native CODESYS visualization in the simulation: the symbols in their on colours, the filter red because it is clogged, and the alarm row](docs/images/hmi-codesys-symbols.png)
+
 CODESYS's scripting can't create trend, meter or alarm-table elements, so
 trends show their current values, gauges show a bar, and the alarm page shows a
 row per alarm while it is active (acknowledge it in CODESYS's own alarm table,
 which you can add from the toolbox). Checked on CODESYS V3.5 SP21 in the
 simulation. A visualization needs the `FloatingPointUtils` library in CODESYS's
-library repository; if it's missing, the export says so.
+library repository; if it's missing, the export says so before it builds
+anything. A long export reports its progress (each page, the alarms, the
+compile) to clients that show MCP progress.
+
+## Handover and version control
+
+`project_report` writes a Markdown report next to the project for whoever
+commissions or takes over the machine: a summary, the tasks, the I/O list and
+device-tree mappings, the CODESYS alarms, the HMI pages, libraries, devices and
+the program structure. It ends with a commissioning checklist built from the
+project itself: every task's cycle time, every input and output, every mapped
+channel, every alarm, every HMI page and the persistent variables to check on
+the real machine, plus the safety and archiving items no checklist should
+skip. Everything Claude did was tested in CODESYS's simulation only, and the
+report says so.
+
+`export_sources` writes the project as plain text for git: one `.st` file per
+POU, method, property, action, DUT, GVL and interface, in folders like the
+project tree, ladder/FBD/SFC bodies as PLCopenXML, a `project.txt` with tasks,
+libraries, devices and alarms, and the HMI screens. A `.project` file is
+binary; this folder is what makes a change reviewable as a diff. Exporting
+again rewrites only what changed and removes the files of deleted objects.
 
 ## Other clients and models
 

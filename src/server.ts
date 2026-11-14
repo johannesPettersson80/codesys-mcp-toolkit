@@ -5,7 +5,7 @@ import { registerTools, revertObject, versionLine, type AppContext } from "./too
 import { registerPanel } from "./panel.js";
 import { HmiService } from "./hmi/service.js";
 
-export const VERSION = "2.3.0";
+export const VERSION = "2.4.0";
 
 const INSTRUCTIONS = `CODESYS V3.5 automation through a persistent CODESYS session.
 Everything goes through the one tool named codesys, as {"action": "<name>", "args": {...}}. The names below are its actions; {"action": "help"} lists them all with their arguments.
@@ -17,7 +17,8 @@ The first call after start can take 1-3 minutes while CODESYS starts; codesys_st
 To check that logic works, use CODESYS's own simulation (no controller, nothing extra to install, the real compiler and libraries): codesys_sim_start -> codesys_sim_control (run) or codesys_sim_cycle (exact cycles) -> codesys_sim_read / write / force / unforce -> codesys_sim_stop. The project is locked until codesys_sim_stop.
 Fix code with write_object after codesys_sim_stop, then codesys_sim_start again to load it.
 To check timing, set up a trace (trace_setup, before codesys_sim_start) and record it (trace_record) while the simulation runs.
-Operator screens: hmi_template gives page layouts; hmi_save_screen stores a page, hmi_screenshot shows it to you, open_hmi opens it live for the user, hmi_export_codesys builds it as a native CODESYS visualization.
+Operator screens: hmi_template gives page layouts; hmi_save_screen stores a page, hmi_screenshot shows it to you, open_hmi opens it live for the user, hmi_export_codesys builds it as a native CODESYS visualization with CODESYS alarms. hmi_symbols lists the process symbols; hmi_save_symbol adds your own SVG symbol.
+Alarms: alarm_status and alarm_acknowledge test CODESYS alarms in the simulation. For the handover: project_report (report with a commissioning checklist) and export_sources (the project as text files for git).
 Right after opening or creating a project, call the separate tool open_sim_panel: it shows the user a live CODESYS-style workspace in the chat (the project tree and the code as you write it, changes, compile results and the simulation), so they can watch you work.`;
 
 export function createServer(ctx: AppContext): McpServer {

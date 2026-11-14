@@ -32,6 +32,9 @@ CODESYS 会话，让 AI 助手直接操作你的真实项目：用真正的 CODE
   无需安装其他软件，也不需要 PLC 硬件。
 - **理解整个项目。** 提供项目大纲、I/O 列表、设备树和库接口，无需逐个读取对象。
 - **过程可见。** 实时面板显示项目树、正在编写的代码和编译结果，每个改动都可以接受或还原。
+- **设计操作画面。** Claude 为你的程序设计实时 HMI：储罐、泵、阀门、工艺符号库（或你自己的 SVG
+  符号）、仪表、趋势和报警，并能导出为带有 CODESYS 原生报警的 CODESYS 可视化。
+- **便于交接。** 生成项目报告和基于项目内容的调试检查清单，并可把每个对象导出为纯文本以便用 git 管理。
 - **绝不连接真实控制器。** 唯一的在线连接是 CODESYS 自带的仿真，每次在线操作前都会先检查。
 
 ## 快速开始
@@ -155,6 +158,11 @@ Cline、Trae、通义灵码、Cursor、Claude Desktop 等使用 `mcpServers` 配
   面板尺寸：1280x720、1920x1080、1024x768 或 800x480。
 - **操作面板（faceplate）。** 点击泵、风机或阀门会弹出面板：模式开关、启动/停止或开/关、复位、
   实时数值和设定值。
+- **符号库，以及你自己的符号。** 除储罐、泵、风机和阀门外，还有电机、输送带、换热器、搅拌器、
+  过滤器、压缩机、气缸、液位开关、压力开关、止回阀和调节阀；每个符号关闭时为灰色、运行时为绿色、
+  故障时为红色，带有管道接口并可旋转。Claude 可以把你需要的符号画成 SVG，或从 SVG 文件导入
+  （`hmi_save_symbol`），并返回该符号各状态的图片供检查。自定义 SVG 只允许少量元素和属性，
+  脚本、样式、链接和外部图片都会被拒绝。
 - **Claude 会检查自己的设计。** `hmi_screenshot` 把画面作为图片返回给 Claude，它能发现重叠、
   空白或不清楚的标签并自行修正。
 - **在浏览器中实时运行。** 让 Claude 打开 HMI（`open_hmi`）。页面由工具包在 127.0.0.1 上提供，
@@ -163,6 +171,10 @@ Cline、Trae、通义灵码、Cursor、Claude Desktop 等使用 `mcpServers` 配
 - **管道自动连接。** 储罐、泵、风机、阀门和三通都有命名接口（如 `T-101.right`、`P-101.in`），Claude 只需说明管道连接哪两个接口，
   工具包会以直角自动布线，在浏览器和 CODESYS 中都能精确对接。
 - **与项目一起保存。** 画面保存在项目文件旁边的 `<项目名>.hmi.json` 中。
+
+![标准工艺符号的运行、关闭和故障颜色，以及一个作为项目自定义 SVG 符号绘制的卧螺离心机](docs/images/hmi-symbols.png)
+
+![用这些符号搭建的热处理线：带液位开关的储罐、泵、过滤器、由压缩机供气的换热器、调节阀、带搅拌器的第二个储罐、电机驱动的离心机和输送带](docs/images/hmi-process.png)
 
 HMI 只写入 CODESYS 自带的仿真，不会连接真实控制器。
 
@@ -183,9 +195,33 @@ HMI 只写入 CODESYS 自带的仿真，不会连接真实控制器。
 
 ![导出的报警在 CODESYS 报警组编辑器中：PLC_PRG.xHighLevel 的数字观察，类别 Warning，消息 "High level T-101 (above 90 %)"；PLC_PRG.xFault 的数字观察，类别 Error，消息 "Pump P-101 fault"](docs/images/codesys-alarms.png)
 
+Claude 可以在仿真中测试这些报警：`alarm_status` 从 CODESYS 报警管理器读取每个报警的状态（正常、
+活动、活动已确认、已消失但等待确认），`alarm_acknowledge` 像操作员一样确认报警。在浏览器 HMI 中，
+已消失的报警会一直留在列表中，直到有人按下它的 ACK 按钮，在 CODESYS 中确认它。
+
+![浏览器 HMI 的报警页："Pump P-101 fault" 已消失，等待确认，带有 ACK 按钮](docs/images/hmi-alarm-ack.png)
+
+符号也会一起导出：每个状态是图片池中的一张图片，由符号的运行和故障变量决定 CODESYS 显示哪一张。
+
+![热处理线作为原生 CODESYS 可视化在仿真中运行：符号显示运行颜色，过滤器因堵塞显示为红色，并有报警行](docs/images/hmi-codesys-symbols.png)
+
 CODESYS 的脚本无法创建趋势、仪表或报警表元素，所以趋势显示当前值，仪表显示为棒图，报警页在
 报警活动时显示一行（可在 CODESYS 自带的报警表中确认报警，报警表可从工具箱添加）。已在 CODESYS
-V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `FloatingPointUtils` 库；如果缺少，导出会提示。
+V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `FloatingPointUtils` 库；如果缺少，导出会在
+开始构建之前提示。
+
+## 交接与版本管理
+
+`project_report` 在项目旁边生成一份 Markdown 报告，供调试或接手设备的人使用：摘要、任务、I/O 列表和
+设备树映射、CODESYS 报警、HMI 页面、库、设备和程序结构。报告最后是一份根据项目本身生成的调试检查
+清单：每个任务的周期、每个输入输出、每个映射通道、每个报警、每个 HMI 页面以及保持型变量，都列为需要
+在真实设备上检查的项目，另外还有安全和归档事项。Claude 所做的一切都只在 CODESYS 仿真中测试过，报告中
+也会说明这一点。
+
+`export_sources` 把项目导出为纯文本以便用 git 管理：每个 POU、方法、属性、动作、DUT、GVL 和接口一个
+`.st` 文件，按项目树的结构放在文件夹中；梯形图、FBD 和 SFC 以 PLCopenXML 保存；`project.txt` 包含任务、
+库、设备和报警；以及 HMI 画面。`.project` 文件是二进制的，这个文件夹让每次改动都能以差异的形式审阅。
+再次导出时只重写有变化的文件，并删除已删除对象的文件。
 
 ## 可用操作
 
@@ -205,14 +241,16 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 | **仿真** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` `codesys_sim_test` |
 | **跟踪（Trace）** | `trace_setup` `trace_record` |
 | **调试** | `breakpoint_set` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` |
-| **HMI 画面** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` |
+| **报警** | `alarm_list` `alarm_status` `alarm_acknowledge` |
+| **交接** | `project_report` `export_sources` |
+| **HMI 画面** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` |
 | **辅助** | `batch` `wait` `help` `open_workspace` |
 
 `batch` 可以在一次调用中执行最多 50 个操作，比逐个调用快得多。
 
 有些操作超出了 CODESYS 脚本 API 文档的范围，使用 IDE 内部的 CODESYS 服务：`get_signature`、
 `find_references`、`rename_symbol`、`trace_setup`、`trace_record`、调试操作、`hmi_export_codesys`
-（包括报警和用户组）以及 `--show-window`。它们属于**实验性功能**：已在 CODESYS V3.5 SP21 和 SP22 上
+（包括报警和用户组）、报警操作以及 `--show-window`。它们属于**实验性功能**：已在 CODESYS V3.5 SP21 和 SP22 上
 验证（见[更新日志](CHANGELOG.md)），在其他版本上可能提示功能不可用，或无法正常工作。
 
 Claude 编写结构化文本，并可用 `create_graphical` 根据梯级、网络或步骤的简单描述创建梯形图（LD）、
