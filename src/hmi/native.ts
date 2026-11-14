@@ -409,6 +409,21 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
       case "text":
         els.push(text(box.x, box.y, box.w, box.h, w.text, [FONT, 10.5], p.muted));
         break;
+      case "recipe": {
+        const prg = `PRG_Recipe_${w.recipe}`;
+        els.push(text(box.x, box.y, 60, 22, "Active", [FONT, 9], p.muted));
+        els.push(text(box.x + 60, box.y, box.w - 60, 22, "%s", [SEMI, 11], p.tones.accent, "LEFT", { props: { "Text variables.Text variable": `${prg}.sActive` } }));
+        const rowH = Math.min(42, (box.h - 30) / w.recipes.length);
+        w.recipes.forEach((name, k) => {
+          const y = box.y + 30 + k * rowH;
+          const bh = Math.min(32, rowH - 6);
+          els.push(text(box.x, y, box.w - 170, rowH - 6, name, [SEMI, 10.5], p.text));
+          const btn = (x: number, label: string, tone: Argb, code: string): NativeElement => ({ kind: "round", x: r(x), y: r(y), w: 76, h: r(bh), text: label, font: [SEMI, 9.5], color: 0xffffffff, fill: tone, frame: tone, radius: 8, gradient: [tone, darken(tone, 0.18), 90], click: code });
+          els.push(btn(box.x + box.w - (w.save ? 160 : 76), "Apply", p.tones.accent, `${prg}.iApply := ${k};`));
+          if (w.save) els.push(btn(box.x + box.w - 76, "Save", p.tones.neutral, `${prg}.iSave := ${k};`));
+        });
+        break;
+      }
       case "process": {
         const sx = box.w / 100;
         const sy = box.h / 100;

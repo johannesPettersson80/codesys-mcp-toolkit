@@ -9,6 +9,7 @@ import { registerSimTestAction } from "./codesys/simtest.js";
 import { registerDeviceActions } from "./codesys/device-tools.js";
 import { condition, listAlarms, registerAlarmActions } from "./codesys/alarm-tools.js";
 import { projectReport } from "./codesys/report.js";
+import { registerRecipeAction } from "./codesys/recipes.js";
 import { describeGraphical } from "./codesys/graphical-read.js";
 import { screenVariables } from "./hmi/spec.js";
 import { reportProgress } from "./progress.js";
@@ -1120,6 +1121,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   registerSimTestAction(reg, ctx, (fn) => run(ctx, fn));
   registerDeviceActions(reg, ctx, (fn) => run(ctx, fn));
   registerAlarmActions(reg, ctx, (fn) => run(ctx, fn));
+  registerRecipeAction(reg, ctx, (fn) => run(ctx, fn));
   if (ctx.hmi) registerHmiActions(reg, ctx, ctx.hmi, (fn) => run(ctx, fn));
 
   registerActionTool(server, actions);

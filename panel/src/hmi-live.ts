@@ -68,6 +68,7 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, n
       window.addEventListener("pointerup", up);
       window.addEventListener("pointercancel", up);
     } else if (act === "toggle") write(v, truthy(val(v)) ? "FALSE" : "TRUE");
+    else if (act === "value") write(v, el.dataset.val ?? "0");
     else if (act === "set") write(v, "TRUE");
     else if (act === "reset") write(v, "FALSE");
     e.preventDefault();

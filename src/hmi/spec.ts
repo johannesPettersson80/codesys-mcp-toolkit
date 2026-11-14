@@ -107,6 +107,15 @@ export const widgetSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("alarms"), ...base, items: z.array(z.object({ active: v, text: z.string(), severity: z.enum(["info", "warning", "alarm"]).default("alarm") })).min(1) }),
   z.object({ type: z.literal("text"), ...base, text: z.string() }),
+  z
+    .object({
+      type: z.literal("recipe"),
+      ...base,
+      recipe: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/).describe("The name given to create_recipes"),
+      recipes: z.array(z.string()).min(1).describe("Its recipe names, in order"),
+      save: z.boolean().default(true).describe("Also offer Save (store the current values in a recipe)"),
+    })
+    .describe("Recipes made with create_recipes: the active one, and Apply / Save per recipe"),
   z.object({ type: z.literal("process"), ...base, items: z.array(processItem).min(1) }),
 ]);
 
@@ -161,6 +170,9 @@ export function screenVariables(s: Screen): string[] {
         break;
       case "alarms":
         w.items.forEach((i) => add(i.active));
+        break;
+      case "recipe":
+        for (const m of ["iApply", "iSave", "sActive"]) add(`PRG_Recipe_${w.recipe}.${m}`);
         break;
       case "process":
         for (const p of w.items) {

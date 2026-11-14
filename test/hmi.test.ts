@@ -68,7 +68,7 @@ describe("HMI spec and renderer", () => {
     expect(plcValue("INT#8")).toBe(8);
     expect(plcValue("REAL#72.5")).toBe(72.5);
     expect(plcValue("T#1s500ms")).toBe(1500);
-    expect(plcValue("'abc'")).toBe("'abc'");
+    expect(plcValue("'abc'")).toBe("abc"); // a STRING shows without its quotes
   });
 });
 

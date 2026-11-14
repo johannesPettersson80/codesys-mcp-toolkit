@@ -5,6 +5,8 @@ export function plcValue(raw: string | undefined): number | boolean | string | u
   const s = raw.trim();
   if (/^true$/i.test(s)) return true;
   if (/^false$/i.test(s)) return false;
+  const str = /^(?:W?STRING#)?["'](.*)["']$/is.exec(s);
+  if (str) return str[1]!;
   const typed = /^[A-Z_]+#(.*)$/i.exec(s);
   const body = typed ? typed[1]! : s;
   if (/^[+-]?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(body)) return Number(body);

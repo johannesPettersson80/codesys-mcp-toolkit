@@ -174,6 +174,13 @@ function widget(w: Widget, box: { w: number; h: number }, bind: Bind, id: (p: st
       return `<ul class="alarms">${w.items.map((i) => `<li class="al sev-${i.severity}" ${bind({ kind: "alarm", v: i.active })}><span class="al-badge">${i.severity === "info" ? "INFO" : i.severity === "warning" ? "WARN" : "ALARM"}</span><span class="al-text">${esc(i.text)}</span><span class="al-st"></span><button class="al-ack" data-ack="${esc(i.active)}">ACK</button></li>`).join("")}<li class="al-none">No active alarms</li></ul>`;
     case "text":
       return `<div class="txt">${esc(w.text).replace(/\n/g, "<br>")}</div>`;
+    case "recipe": {
+      const prg = `PRG_Recipe_${w.recipe}`;
+      const rows = w.recipes
+        .map((name, k) => `<li><span class="rcp-name">${esc(name)}</span><button class="btn tone-accent rcp-btn" data-act="value" data-var="${prg}.iApply" data-val="${k}">Apply</button>${w.save ? `<button class="btn tone-neutral rcp-btn" data-act="value" data-var="${prg}.iSave" data-val="${k}">Save</button>` : ""}</li>`)
+        .join("");
+      return `<div class="rcp"><div class="rcp-active">Active <b ${bind({ kind: "text", v: `${prg}.sActive` })}>–</b></div><ul class="rcp-list">${rows}</ul></div>`;
+    }
     case "process": {
       const vw = 100;
       const vh = r1((100 * Math.max(60, bodyH)) / Math.max(60, box.w - 24));
@@ -348,6 +355,9 @@ export const HMI_CSS = String.raw`
 .al-none{display:flex;align-items:center;gap:9px;color:var(--ok);font-size:14px}.al-none::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok)}
 .alarms.has .al-none{display:none}
 .txt{font-size:14px;line-height:1.5;color:var(--muted)}
+.t-recipe .t-body{justify-content:flex-start}.rcp-active{font-size:12px;color:var(--muted);margin-bottom:8px}.rcp-active b{color:var(--accent);margin-left:6px;font-size:14px}
+.rcp-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}.rcp-list li{display:flex;align-items:center;gap:8px}
+.rcp-name{flex:1;font-size:14px;font-weight:600}.rcp-btn{flex:none;min-height:32px;padding:0 14px;font-size:12.5px}
 .proc{width:100%;height:100%;overflow:visible}
 .p-label{font-size:1.75px;fill:var(--muted);text-anchor:middle;font-weight:600;letter-spacing:.05em}.p-label.left{text-anchor:start}.p-text{font-size:2px;fill:var(--fg);font-weight:600}
 .junction{fill:var(--pipe)}

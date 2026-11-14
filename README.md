@@ -124,7 +124,7 @@ operation. [The reference](docs/reference.md) describes each one.
 | **Debug** | `breakpoint_set` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` |
 | **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` `hmi_translate` |
 | **Alarms** | `alarm_list` `alarm_status` `alarm_acknowledge` |
-| **Handover** | `project_report` `export_sources` |
+| **Handover** | `project_report` `export_sources` `create_recipes` |
 | **Helpers** | `batch` `wait` `help` `open_workspace` `show_in_codesys` |
 
 `batch` runs up to 50 actions in one call, which is much faster than separate

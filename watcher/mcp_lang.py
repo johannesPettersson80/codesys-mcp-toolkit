@@ -101,7 +101,19 @@ def _signature(lmm, c, sig):
     ins = set(to_text(_get(v, "OrgName")) for v in (_get(sig, "Inputs") or []))
     outs = set(to_text(_get(v, "OrgName")) for v in (_get(sig, "Outputs") or []))
     variables = []
-    for v in lmm.GetAllVariables(sig, c.app.guid):
+    found = list(lmm.GetAllVariables(sig, c.app.guid) or [])
+    if not found:
+        # A method of a library FB: the language model keeps its variables on the signature.
+        for prop in ("All", "Variables", "AllVariables"):
+            vs = _get(sig, prop)
+            if vs:
+                try:
+                    found = list(vs)
+                except Exception:
+                    found = []
+                if found:
+                    break
+    for v in found:
         n = to_text(_get(v, "OrgName"))
         variables.append(_var(v, "input" if n in ins else "output" if n in outs else "other"))
     subs = []

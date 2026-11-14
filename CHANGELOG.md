@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Recipes: `create_recipes` generates ST for setpoint recipes (a struct, the
+  recipes in a RETAIN array, a program that applies a recipe or stores the
+  current values in one, through pointers so program variables work) and adds
+  it to MainTask; an HMI `recipe` widget offers Apply and Save in the browser
+  and in CODESYS. Checked in the SP21 simulation: apply, save, apply again.
+  (CODESYS's own Recipe Manager can be created by script, but in the
+  simulation its runtime never found the recipes.)
+- `get_signature` lists the parameters of library methods (for example
+  `RecipeManCommands.SetRecipeValues`).
+- STRING values show without quotes on HMI screens.
 - Languages: `hmi_translate` stores translations of the HMI's texts per
   language and lists what is still untranslated; the browser HMI gets language
   buttons in its header and switches live (checked on SP21); `hmi_screenshot`

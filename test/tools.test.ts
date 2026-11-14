@@ -65,6 +65,7 @@ describe("MCP tools over the real watcher", () => {
         "create_graphical",
         "create_object",
         "create_project",
+        "create_recipes",
         "configure_device",
         "debug_continue",
         "debug_status",
