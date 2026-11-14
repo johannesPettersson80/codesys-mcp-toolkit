@@ -48,6 +48,11 @@ panel to one tool.
 | `get_devices` | The device tree: identification, enabled state, and each device's I/O channels with the variable mapped to each (from CODESYS's I/O mapping export). |
 | `checkpoint` / `get_changes` / `revert_object` | Snapshots of the project's ST, and of graphical bodies as PLCopenXML (one is taken automatically when a project is opened: `session-start`), what changed since one (with a line diff per object), and putting an object back, including its methods and properties. A deleted SFC, CFC, LD or FBD object is re-imported from its XML. |
 | `open_workspace` | Open the live workspace in the browser. |
+| `hmi_save_screen` | Create or replace an HMI screen: a grid of tiles (12 x 8 by default; `at` is `[column, row, width, height]`), each one widget bound to PLC variables by their full path. Widgets: `value`, `gauge`, `bar`, `status`, `buttons` (tap, toggle, set, reset), `switch`, `setpoint`, `trend`, `alarms`, `text`, and `process`, a diagram in a 0..100 box with `tank`, `pump`, `fan`, `valve`, `pipe`, `sensor`, `lamp`, `junction` and `label`. Pipes connect ports (`{from: 'T-101.right', to: 'P-101.in'}`) and are routed with right angles; ports: tank `top` `bottom` `left` `right` `left-high` `right-high`, pump and fan `in` `out` `top` `bottom`, valve `in` `out`, junction `c`. A symbol's name is its `id` or its label. Overlapping tiles and unknown ports are refused. Stored next to the project as `<project>.hmi.json`. |
+| `hmi_screenshot` | The screen as a PNG image, with live values while the simulation runs, otherwise example values or the values you pass. Needs Edge or Chrome. |
+| `hmi_export_codesys` | Build the screen as a native CODESYS visualization (`Visu_<screen>`) with an embedded SVG image pool (`IP_<screen>`) and a helper program (`PRG_HMI_<screen>`, called from VISU_TASK) that scales values for bars and tank levels. Rebuilds them if they exist, compiles, and returns a picture. Trends become value rows and gauges become bars. |
+| `hmi_list` / `hmi_delete_screen` | The project's screens (or one screen's full description), and deleting one. |
+| `open_hmi` | Open the live HMI in the browser: live values from the simulation, and buttons, switches and setpoints that write to it. |
 
 The simulation actions are listed under [CODESYS simulation](#codesys-simulation).
 

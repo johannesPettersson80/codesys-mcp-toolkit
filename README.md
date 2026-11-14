@@ -34,6 +34,9 @@ can watch the code change as it happens.
   interfaces, without reading every object.
 - **Shows its work.** A live panel with the project tree, the code as it is
   written, compile results, and Accept or Revert for each change.
+- **Designs operator screens.** Claude builds a live HMI for your program,
+  with tanks, pumps, valves, gauges, trends and alarms, looks at it, and
+  polishes it. You operate it in the browser against the simulation.
 - **Never touches a real controller.** The only online connection is to
   CODESYS's own simulation, and every online call checks for it first.
 
@@ -112,6 +115,7 @@ operation. [The reference](docs/reference.md) describes each one.
 | **Tasks and I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` |
 | **Change tracking** | `checkpoint` `get_changes` `revert_object` |
 | **Simulation** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` |
+| **HMI screens** | `hmi_save_screen` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` |
 | **Helpers** | `batch` `wait` `help` `open_workspace` |
 
 `batch` runs up to 50 actions in one call, which is much faster than separate
@@ -140,6 +144,55 @@ Ask Claude to open the workspace in your browser if you'd rather have it there;
 the browser never opens by itself.
 
 [More about the panel](docs/reference.md#live-panel)
+
+## HMI screens
+
+Ask Claude for an operator screen and it designs one for your program: a
+process diagram with tanks, pumps, fans, valves and flowing pipes, and gauges,
+values, trends, status lights, alarms, buttons, switches and setpoints, all
+bound to your PLC variables.
+
+![An HMI screen Claude designed for a pump station: the process diagram, tank level gauge, status lights, flow, a trend, pump buttons, mode switch, setpoint and alarms](docs/images/hmi-screen.png)
+
+- **Pipes connect themselves.** Tanks, pumps, fans, valves and junctions have
+  named ports (`T-101.right`, `P-101.in`, `V-102.out`). Claude says what a pipe
+  connects, and the toolkit routes it with right angles to meet each symbol
+  exactly, in the browser and in CODESYS alike. Unknown symbols or ports are
+  refused with the list of valid ones.
+- **Claude checks its own work.** `hmi_screenshot` returns the screen as an
+  image, so Claude can see overlaps, empty space or unclear labels and fix
+  them before you look.
+- **Live in your browser.** Ask Claude to open the HMI (`open_hmi`). The page
+  is served by the toolkit on 127.0.0.1 with a token, like the workspace. While
+  CODESYS's simulation runs, it shows live values, pumps spin, pipes flow and
+  trends draw. Buttons, switches and setpoints write to the simulation, so you
+  can operate your program before any hardware exists.
+- **Stored with the project.** Screens are saved next to the project file as
+  `<project>.hmi.json`, so they travel with it and can go into version control.
+- **Dark and light themes,** on a 1280x720 canvas that scales to any window.
+
+The HMI writes only into CODESYS's own simulation, like the rest of the
+toolkit. Screenshots use Microsoft Edge or Google Chrome, whichever is
+installed.
+
+### As a native CODESYS visualization
+
+`hmi_export_codesys` builds the same screen as a real CODESYS visualization in
+your project. It is an ordinary visualization object, so it goes with the
+application like one you drew yourself (we checked it in CODESYS's simulation,
+not on a controller). It doesn't use CODESYS's stock lamps: cards with gradients, SVG
+pump, fan and valve symbols in an embedded image pool, live values, bars and
+tank levels, colour states, buttons, switches, setpoints and alarm rows that
+appear only while active. A generated program, `PRG_HMI_<screen>`, scales
+values for the bars and levels. Claude gets a picture of the result.
+
+![The same pump station as a native CODESYS visualization, running in CODESYS's simulation](docs/images/hmi-codesys.png)
+
+CODESYS's scripting can't create trend or meter elements, so trends show their
+current values and gauges show a bar. Checked on CODESYS V3.5 SP21 in the
+simulation. A
+visualization needs the `FloatingPointUtils` library in CODESYS's library
+repository; if it's missing, the export says so.
 
 ## Other clients and models
 

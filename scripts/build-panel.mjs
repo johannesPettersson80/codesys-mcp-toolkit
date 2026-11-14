@@ -57,3 +57,18 @@ if (!vtemplate.includes("/*VIEWER_SCRIPT*/")) throw new Error("viewer template h
 const vhtml = vtemplate.replace("/*VIEWER_SCRIPT*/", () => vjs);
 await writeFile(join(root, "dist", "panel", "viewer.html"), vhtml, "utf8");
 console.error(`viewer: dist/panel/viewer.html (${(vhtml.length / 1024).toFixed(0)} kB)`);
+
+// HMI screens: renderer + live client, used by the /hmi page and by screenshots.
+const hmi = await build({
+  entryPoints: [join(root, "panel", "src", "hmi-entry.ts")],
+  bundle: true,
+  minify: true,
+  format: "iife",
+  target: "es2022",
+  platform: "browser",
+  write: false,
+  legalComments: "none",
+  logLevel: "warning",
+});
+await writeFile(join(root, "dist", "panel", "hmi.js"), hmi.outputFiles[0].text, "utf8");
+console.error(`hmi: dist/panel/hmi.js (${(hmi.outputFiles[0].text.length / 1024).toFixed(0)} kB)`);

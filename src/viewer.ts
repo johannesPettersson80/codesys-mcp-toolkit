@@ -19,6 +19,7 @@ import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { createServer } from "./server.js";
 import { panelHtml, VIEWER_CLIENT } from "./panel.js";
 import type { AppContext } from "./tools.js";
+import { hmiScript } from "./hmi/service.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -37,7 +38,7 @@ export function viewerMayCall(name: string): boolean {
 export interface Viewer {
   url: string;
   /** Open the viewer in the default browser (once per process unless forced). */
-  open(force?: boolean): boolean;
+  open(force?: boolean, target?: string): boolean;
   close(): Promise<void>;
 }
 
@@ -71,6 +72,12 @@ export async function startViewer(ctx: AppContext, o: { port?: number; log?: (m:
         if (u.searchParams.get("t") !== token) return send(403, "text/plain; charset=utf-8", "This link is out of date. Ask Claude to open the workspace again.");
         const html = viewerHtml();
         return html ? send(200, "text/html; charset=utf-8", html) : send(500, "text/plain", "The viewer is not built. Run npm run build.");
+      }
+      if (req.method === "GET" && u.pathname === "/hmi") {
+        if (u.searchParams.get("t") !== token) return send(403, "text/plain; charset=utf-8", "This link is out of date. Ask Claude to open the HMI again.");
+        const js = hmiScript();
+        if (!js) return send(500, "text/plain", "The HMI page is not built. Run npm run build.");
+        return send(200, "text/html; charset=utf-8", `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HMI</title></head><body data-page="live"><div id="stage"></div><nav id="tabs"></nav><div id="banner" hidden></div><script>${js.replace(/<\/script/gi, "<\\/script")}</script></body></html>`);
       }
       if (req.method === "GET" && u.pathname === "/panel.html") {
         if (u.searchParams.get("t") !== token) return send(403, "text/plain", "forbidden");
@@ -119,10 +126,10 @@ export async function startViewer(ctx: AppContext, o: { port?: number; log?: (m:
 
   return {
     url,
-    open(force = false) {
+    open(force = false, target?: string) {
       if (opened && !force) return false;
       opened = true;
-      openBrowser(url);
+      openBrowser(target ?? url);
       return true;
     },
     async close() {

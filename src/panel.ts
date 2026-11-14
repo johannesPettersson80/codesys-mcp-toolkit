@@ -18,6 +18,7 @@ import type { PanelState } from "./panel-types.js";
 import type { ProjectCache } from "./codesys/cache.js";
 import { diffObjects, REVIEW, snapshot, type ChangeStore, type SnapObject } from "./codesys/changes.js";
 import type { Driver } from "./driver.js";
+import type { HmiService } from "./hmi/service.js";
 
 export const PANEL_URI = "ui://codesys/sim-panel.html";
 
@@ -54,6 +55,8 @@ export interface PanelDeps {
   revert?: (path: string, to: string) => Promise<string>;
   /** The server log: how far a card got, since a client can accept the tool and draw nothing. */
   log?: (message: string) => void;
+  /** HMI screens of the open project. */
+  hmi?: HmiService;
 }
 
 export function registerPanel(server: McpServer, ws: PanelDeps = { project: () => undefined }): void {
@@ -252,6 +255,30 @@ export function registerPanel(server: McpServer, ws: PanelDeps = { project: () =
     baseline = undefined;
     ws.cache?.bump();
     return r;
+  });
+
+  tools.push(
+    registerAppTool(
+      server,
+      "get_hmi",
+      {
+        description: "Panel: the project's HMI screens, one screen's description and its live values from the simulation.",
+        inputSchema: z.object({ screen: z.string().optional() }),
+        annotations: { readOnlyHint: true },
+        _meta: appOnly,
+      },
+      async ({ screen }) => {
+        const hmi = ws.hmi;
+        const all = hmi?.screens() ?? [];
+        const s = hmi?.screen(screen) ?? all[0];
+        const live = s && hmi ? await hmi.values(s).catch(() => ({ values: {}, errors: {} })) : { values: {}, errors: {} };
+        return json({ screens: all.map((x) => ({ name: x.name, title: x.title })), ...(s ? { screen: s } : {}), values: live.values, sim: hmi?.sim() ?? {} });
+      },
+    ),
+  );
+  action("ui_hmi_write", "operate the HMI: write a value into CODESYS's simulation (only variables on an HMI screen).", z.object({ variable: z.string(), value: z.string() }), async (a) => {
+    if (!ws.hmi) throw new Error("No HMI.");
+    return ws.hmi.write(a.variable, a.value);
   });
 
   // Clients without MCP Apps support would show app-only tools to the model; hide them there.

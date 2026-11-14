@@ -10,7 +10,8 @@ import * as z from "zod/v4";
 
 export const TOOL_NAME = "codesys";
 
-export type ActionResult = { content: { type: "text"; text: string }[]; isError?: boolean };
+export type ActionContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+export type ActionResult = { content: ActionContent[]; isError?: boolean };
 
 export interface ActionConfig<S extends z.ZodObject = z.ZodObject> {
   description: string;
@@ -92,7 +93,7 @@ function batchAction(actions: Map<string, Action>): Action {
       let failed = false;
       for (const [i, s] of steps.entries()) {
         const r = await s.action.run(s.args);
-        out.push(`[${i + 1}/${steps.length}] ${s.name}${r.isError ? " FAILED" : ""}:\n${r.content.map((c) => c.text).join("\n")}`);
+        out.push(`[${i + 1}/${steps.length}] ${s.name}${r.isError ? " FAILED" : ""}:\n${r.content.map((c) => (c.type === "text" ? c.text : "(an image: call this action on its own to see it)")).join("\n")}`);
         failed ||= !!r.isError;
         if (r.isError && !continueOnError) {
           if (i + 1 < steps.length) out.push(`Stopped: the remaining ${steps.length - i - 1} step(s) were not run.`);

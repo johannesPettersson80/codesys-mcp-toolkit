@@ -1,4 +1,6 @@
 /** The CODESYS actions (ST only), all behind the one model-facing tool. See actions.ts. */
+import { HmiService } from "./hmi/service.js";
+import { registerHmiActions } from "./hmi/tools.js";
 import { copyFile } from "node:fs/promises";
 import { registerActionTool, type Action, type RegisterAction } from "./actions.js";
 import { getUiCapability } from "@modelcontextprotocol/ext-apps/server";
@@ -40,7 +42,9 @@ export interface AppContext {
   /** Whether the user has paused Claude in the panel. */
   driver?: Driver;
   /** The browser viewer (the panel in a normal browser window). */
-  viewer?: { url: string; open(force?: boolean): boolean };
+  viewer?: { url: string; open(force?: boolean, target?: string): boolean };
+  /** HMI screens of the open project. */
+  hmi?: HmiService;
   /** Attach mode: adopts the project already open in the user's window (set by registerTools). */
   adoptProject?: () => Promise<void>;
   /** The server log. */
@@ -924,6 +928,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       return f.errors ? f.text : undefined;
     },
   });
+
+  if (ctx.hmi) registerHmiActions(reg, ctx, ctx.hmi, (fn) => run(ctx, fn));
 
   registerActionTool(server, actions);
 }

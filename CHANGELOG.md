@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- HMI screens: Claude designs live operator screens for the program
+  (`hmi_save_screen`): a process diagram with tanks, pumps, fans, valves and
+  animated pipes, plus gauges, values with sparklines, bars, status lights,
+  buttons, switches, setpoints, trends and alarms, bound to PLC variables, in a
+  dark or light theme. `hmi_screenshot` returns the screen as an image so the
+  model can check and polish its layout. `open_hmi` opens it in the browser
+  (127.0.0.1 with a token), live while the simulation runs; buttons, switches
+  and setpoints write to the simulation only. Screens are stored next to the
+  project as `<project>.hmi.json`.
+- `hmi_export_codesys`: the same screen as a native CODESYS visualization,
+  with cards, gradients, SVG pump, fan and valve symbols in an embedded image
+  pool, live values, bars, tank levels, colour states, buttons, switches,
+  setpoints and alarm rows; a generated program scales values for bars and
+  levels. Built through CODESYS's visualization scripting and its element
+  creators. Returns a picture of the visualization. Checked on SP21.
+- HMI pipes connect to named ports on tanks, pumps, fans, valves and junctions
+  and are routed with right angles, so they meet the symbols exactly in the
+  browser and in CODESYS.
+- Actions can return images.
 - `--show-window` opens every object the model creates or writes in its editor
   tab, so the CODESYS window shows the code as it is written, and, while the
   simulation runs, its live values. CODESYS's scripting API has no call for

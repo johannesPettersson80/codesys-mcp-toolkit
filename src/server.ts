@@ -3,6 +3,7 @@ import { EXTENSION_ID } from "@modelcontextprotocol/ext-apps/server";
 import { currentCodesysSim } from "./codesys/simulation.js";
 import { registerTools, revertObject, versionLine, type AppContext } from "./tools.js";
 import { registerPanel } from "./panel.js";
+import { HmiService } from "./hmi/service.js";
 
 export const VERSION = "2.2.0";
 
@@ -21,8 +22,10 @@ export function createServer(ctx: AppContext): McpServer {
   // A host treats an extension the server doesn't advertise as unsupported, and then runs
   // open_sim_panel as a plain text tool and never fetches the card's page.
   const server = new McpServer({ name: "codesys-mcp-toolkit", version: VERSION }, { instructions: INSTRUCTIONS, capabilities: { extensions: { [EXTENSION_ID]: {} } } });
+  ctx.hmi ??= new HmiService(ctx);
   registerTools(server, ctx);
   registerPanel(server, {
+    hmi: ctx.hmi,
     cache: ctx.cache,
     changes: ctx.changes,
     project: () => ctx.project?.path,

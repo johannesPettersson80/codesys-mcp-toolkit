@@ -53,7 +53,7 @@ DIALOG_GRACE_S = 10.0
 
 # With the window shown (--show-window), these ops open the object they wrote in an editor.
 UI = {"on": False}
-FOLLOW_OPS = ("object.write", "object.create")
+FOLLOW_OPS = ("object.write", "object.create", "visu.build")
 
 
 def follow_in_editor(ops_mod, result):
@@ -254,6 +254,7 @@ def main(ui=False):
     import scriptengine as se
     import mcp_ops
     import mcp_sim  # noqa: F401 (adds its operations to mcp_ops.OPS)
+    import mcp_visu  # noqa: F401 (adds the visualization operations)
     prompts = setup_prompts(se)
     log(prompts)
     if not hasattr(se, "FAKE"):
@@ -299,6 +300,7 @@ def main_attach():
     import scriptengine as se
     import mcp_ops
     import mcp_sim  # noqa: F401 (adds its operations to mcp_ops.OPS)
+    import mcp_visu  # noqa: F401 (adds the visualization operations)
     prompts = setup_prompts(se)
     log(prompts)
     old = getattr(__builtin__, "_mcp_attach_timer", None)
