@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-11-14
+
 ### Added
 - `breakpoint_on_change`: a data breakpoint that halts the simulation right
   after a variable is written, optionally only when a condition holds.
@@ -16,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PLC_PRG.fbCount <- PLC_PRG`).
 - Checked in the SP22 simulation: the call stack, step into, over and out, a
   data breakpoint with and without a condition, and the watch list.
-
 - SFC with branches: `create_graphical` takes `sfc.chart`, with alternative
   and parallel branches and jumps; `read_objects` describes a branched SFC as
   such a chart, so it can be edited and sent back. Checked in the SP22
