@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-11-14
+
 ### Added
 - Recipes: `create_recipes` generates ST for setpoint recipes (a struct, the
   recipes in a RETAIN array, a program that applies a recipe or stores the
