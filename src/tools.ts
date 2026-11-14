@@ -7,12 +7,15 @@ import { registerGraphicalActions } from "./codesys/graphical.js";
 import { registerDebugActions } from "./codesys/debug.js";
 import { registerSimTestAction } from "./codesys/simtest.js";
 import { registerDeviceActions } from "./codesys/device-tools.js";
-import { registerAlarmActions } from "./codesys/alarm-tools.js";
-import { copyFile } from "node:fs/promises";
+import { condition, listAlarms, registerAlarmActions } from "./codesys/alarm-tools.js";
+import { projectReport } from "./codesys/report.js";
+import { screenVariables } from "./hmi/spec.js";
+import { reportProgress } from "./progress.js";
+import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { registerActionTool, type Action, type RegisterAction } from "./actions.js";
 import { getUiCapability } from "@modelcontextprotocol/ext-apps/server";
-import { existsSync } from "node:fs";
-import { isAbsolute, join, resolve as resolvePath } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { BridgeError, type CodesysBridge } from "./bridge/bridge.js";
@@ -760,6 +763,124 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       run(ctx, async () => {
         const r = await b.call<{ devices: DeviceInfo[] }>("devices.list", { io: io ?? true }, { timeoutMs: 180_000 });
         return describeDevices(r.devices);
+      }),
+  );
+
+  reg(
+    "project_report",
+    {
+      description:
+        "Write a handover report of the project as Markdown next to it (or at path): summary, tasks, I/O list, device-tree mappings, CODESYS alarms, HMI pages, libraries, devices and program structure, ending with a commissioning checklist built from this project (each I/O point, alarm, HMI page and task to verify on the real machine). Read-only towards CODESYS. Returns the summary and the file path.",
+      inputSchema: z.object({ path: z.string().optional().describe("Where to write it (default: <project>.report.md next to the project)") }),
+    },
+    async ({ path }) =>
+      run(ctx, async () => {
+        if (!ctx.project) throw new Error("No project is open.");
+        reportProgress("reading the project");
+        const info = await b.call<ProjectInfo>("project.info", {}, { timeoutMs: 30_000 });
+        const nodes = await exportNodes();
+        const tasks = (await b.call<{ tasks: (OutlineTask & TaskInfo)[] }>("tasks.list")).tasks;
+        reportProgress("reading devices and I/O mappings");
+        const devices = (await b.call<{ devices: DeviceInfo[] }>("devices.list", { io: true }, { timeoutMs: 180_000 }).catch(() => ({ devices: [] as DeviceInfo[] }))).devices;
+        const libraries = (await b.call<{ libraries: { name: string; effective_resolution?: string }[] }>("libraries.list").catch(() => ({ libraries: [] }))).libraries;
+        reportProgress("reading alarms");
+        const alarms = await listAlarms(ctx).catch(() => []);
+        const screens = ctx.hmi?.screens() ?? [];
+        const compile = cache?.compile;
+        const md = projectReport({
+          project: info.path,
+          application: info.application,
+          compiler: info.compiler_version,
+          generated: new Date().toISOString().slice(0, 16).replace("T", " "),
+          nodes,
+          outline: buildOutline(nodes, tasks),
+          tasks,
+          io: ioList(nodes),
+          mapped: devices.flatMap((d) => (d.io_csv ? parseIoMappingCsv(d.io_csv) : [])).filter((c) => c.variable),
+          devices: describeDevices(devices.map((d) => ({ ...d, io_csv: undefined }))),
+          libraries: libraries.map((l) => ({ name: l.name, ...(l.effective_resolution ? { resolution: l.effective_resolution } : {}) })),
+          alarms,
+          hmi: screens.map((s) => ({ name: s.name, title: s.title, widgets: s.widgets.length, variables: screenVariables(s).length })),
+          ...(compile ? { compile: { errors: compile.messages.filter((m) => /error/i.test(m.severity)).length, warnings: compile.messages.filter((m) => /warn/i.test(m.severity)).length } } : {}),
+        });
+        const file = path ? absPath(ctx, path) : info.path.replace(/\.project$/i, "") + ".report.md";
+        await writeFile(file, md, "utf8");
+        const summary = md.split("\n## ")[1]?.replace(/^Summary\n+/, "") ?? "";
+        return `Wrote ${file} (${md.split("\n").length} lines, ${md.split("\n").filter((l) => l.startsWith("- [ ]")).length} checklist items).\n${summary.trim()}`;
+      }),
+  );
+
+  reg(
+    "export_sources",
+    {
+      description:
+        "Export the project as plain text files for version control (git) and review: one .st file per POU, method, property, action, DUT, GVL and interface (declaration, then implementation), in folders like the project tree; ladder, FBD and SFC bodies as PLCopenXML (.xml); project.txt with tasks, libraries, devices and alarms; and the HMI screens. A CODESYS project file is binary, so this is what makes changes diffable. Exporting again updates the folder and removes files of deleted objects (only files an earlier export wrote).",
+      inputSchema: z.object({ dir: z.string().optional().describe("Folder to export to (default: <project>_src next to the project)") }),
+    },
+    async ({ dir }) =>
+      run(ctx, async () => {
+        if (!ctx.project) throw new Error("No project is open.");
+        const info = await b.call<ProjectInfo>("project.info", {}, { timeoutMs: 30_000 });
+        reportProgress("exporting the objects");
+        const nodes = await exportNodes();
+        const root = dir ? absPath(ctx, dir) : `${info.path.replace(/\.project$/i, "")}_src`;
+        const files = new Map<string, string>();
+        const safe = (s: string) => s.replace(/[<>:"\\|?*]/g, "_");
+        const KINDS = new Set(["pou", "method", "property", "accessor", "action", "dut", "gvl", "interface", "interface_method"]);
+        const nl = (s: string) => s.replace(/\r\n/g, "\n").trimEnd();
+        for (const n of nodes) {
+          if (!KINDS.has(n.kind)) continue;
+          const rel = n.path.split("/").map(safe).join("/");
+          const text = [n.declaration ? nl(n.declaration) : "", n.implementation && n.st !== false ? nl(n.implementation) : ""].filter(Boolean).join("\n\n");
+          if (text) files.set(`${rel}.st`, `${text}\n`);
+          if (n.st === false && n.xml) files.set(`${rel}.xml`, `${nl(n.xml)}\n`);
+        }
+        reportProgress("tasks, libraries, devices and alarms");
+        const tasks = (await b.call<{ tasks: TaskInfo[] }>("tasks.list")).tasks;
+        const libraries = (await b.call<{ libraries: { name: string; effective_resolution?: string }[] }>("libraries.list").catch(() => ({ libraries: [] }))).libraries;
+        const devices = (await b.call<{ devices: DeviceInfo[] }>("devices.list", { io: false }, { timeoutMs: 180_000 }).catch(() => ({ devices: [] as DeviceInfo[] }))).devices;
+        const alarms = await listAlarms(ctx).catch(() => []);
+        files.set(
+          "project.txt",
+          [
+            `Project: ${info.path.replace(/\\/g, "/").split("/").pop()}`,
+            `Application: ${info.application ?? "?"}${info.compiler_version ? `\nCompiler: ${info.compiler_version}` : ""}`,
+            "",
+            "[Tasks]",
+            ...tasks.map(describeTask),
+            "",
+            "[Libraries]",
+            ...libraries.map((l) => `${l.name}${l.effective_resolution ? ` -> ${l.effective_resolution}` : ""}`),
+            "",
+            "[Devices]",
+            describeDevices(devices),
+            "",
+            "[Alarms]",
+            ...alarms.flatMap((g) => g.alarms.map((a) => `${g.name}/${a.id} [${a.cls}] ${a.text} :: ${condition(a)}`)),
+            "",
+          ].join("\n"),
+        );
+        const hmiFile = ctx.hmi?.file();
+        if (hmiFile && existsSync(hmiFile)) files.set("hmi.json", readFileSync(hmiFile, "utf8"));
+        // Write, then remove what an earlier export wrote and this one didn't.
+        const MANIFEST = ".codesys-export.json";
+        const manifestPath = join(root, MANIFEST);
+        const before: string[] = existsSync(manifestPath) ? ((JSON.parse(readFileSync(manifestPath, "utf8")) as { files?: string[] }).files ?? []) : [];
+        let changed = 0;
+        for (const [rel, text] of files) {
+          const p = join(root, rel);
+          await mkdir(dirname(p), { recursive: true });
+          if (!existsSync(p) || readFileSync(p, "utf8") !== text) {
+            await writeFile(p, text, "utf8");
+            changed++;
+          }
+        }
+        const gone = before.filter((f) => !files.has(f) && !f.includes("..") && existsSync(join(root, f)));
+        for (const f of gone) await rm(join(root, f));
+        await writeFile(manifestPath, `${JSON.stringify({ project: info.path, exported: new Date().toISOString(), files: [...files.keys()].sort() }, null, 2)}\n`, "utf8");
+        const st = [...files.keys()].filter((f) => f.endsWith(".st")).length;
+        const xml = [...files.keys()].filter((f) => f.endsWith(".xml")).length;
+        return `Exported to ${root}: ${st} .st file(s)${xml ? `, ${xml} graphical body(ies) as .xml` : ""}, project.txt${files.has("hmi.json") ? ", hmi.json" : ""}. ${changed} file(s) written or changed${gone.length ? `, ${gone.length} removed (deleted objects)` : ""}; the rest were unchanged. Commit the folder to see each change as a text diff.`;
       }),
   );
 

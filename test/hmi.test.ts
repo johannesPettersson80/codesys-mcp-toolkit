@@ -1,5 +1,6 @@
 /** HMI screens: spec, renderer, store, actions and the panel's live tools (fake CODESYS). */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
@@ -260,6 +261,35 @@ describe("HMI actions over MCP (fake CODESYS)", () => {
     expect((await call("hmi_delete_screen", { screen: "Plant" })).text).toMatch(/Deleted/);
     expect((await call("hmi_delete_symbol", { name: "centrifuge" })).text).toMatch(/Deleted symbol 'centrifuge'/);
   }, 90_000);
+
+  it("exports the project as text files, updates them, and removes files of deleted objects", async () => {
+    const dir = join(tempDir(), "src");
+    const first = await call("export_sources", { dir });
+    expect(first.isError).toBe(false);
+    expect(first.text).toMatch(/Exported to .*: \d+ \.st file\(s\), 1 graphical body\(ies\) as \.xml, project\.txt(, hmi\.json)?\. \d+ file\(s\) written or changed/);
+    expect(readdirSync(dir).some((f) => f.endsWith(".xml"))).toBe(true);
+    expect(readFileSync(join(dir, "PLC_PRG.st"), "utf8")).toMatch(/^PROGRAM PLC_PRG/);
+    expect(readFileSync(join(dir, "project.txt"), "utf8")).toMatch(/\[Tasks\][\s\S]*\[Libraries\]/);
+    expect((await call("export_sources", { dir })).text).toMatch(/ 0 file\(s\) written or changed;/);
+    // A file an earlier export wrote for an object that no longer exists goes; other files stay.
+    const manifest = JSON.parse(readFileSync(join(dir, ".codesys-export.json"), "utf8")) as { files: string[] };
+    writeFileSync(join(dir, "FB_Gone.st"), "FUNCTION_BLOCK FB_Gone\n");
+    writeFileSync(join(dir, "notes.md"), "mine\n");
+    writeFileSync(join(dir, ".codesys-export.json"), JSON.stringify({ files: [...manifest.files, "FB_Gone.st"] }));
+    expect((await call("export_sources", { dir })).text).toMatch(/1 removed \(deleted objects\)/);
+    expect(existsSync(join(dir, "FB_Gone.st"))).toBe(false);
+    expect(existsSync(join(dir, "notes.md"))).toBe(true);
+  });
+
+  it("writes a project report with a commissioning checklist", async () => {
+    const file = join(tempDir(), "report.md");
+    const r = await call("project_report", { path: file });
+    expect(r.isError).toBe(false);
+    expect(r.text).toMatch(/Wrote .*report\.md \(\d+ lines, \d+ checklist items\)/);
+    const md = readFileSync(file, "utf8");
+    expect(md).toMatch(/## Summary[\s\S]*## Tasks[\s\S]*## Commissioning checklist/);
+    expect(md).toMatch(/- \[ \] Safety functions/);
+  });
 
   it("needs the simulation for alarm states and acknowledging", async () => {
     for (const a of ["alarm_status", "alarm_acknowledge"]) {

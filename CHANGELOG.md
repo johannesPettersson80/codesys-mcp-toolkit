@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exported: a cleared alarm stays in the list until it's acknowledged, with an
   ACK button that acknowledges it in CODESYS's alarm manager (simulation
   only); the header counts these too.
+- `project_report`: a Markdown handover report next to the project (summary,
+  tasks, I/O list, device-tree mappings, CODESYS alarms, HMI pages,
+  libraries, devices, program structure) ending with a commissioning
+  checklist built from the project: each task, I/O point, mapped channel,
+  alarm, HMI page and persistent variable list to verify on the machine.
+- `export_sources`: the project as plain text for git and review, one `.st`
+  file per object in folders like the project tree, ladder/FBD/SFC bodies as
+  PLCopenXML, `project.txt` (tasks, libraries, devices, alarms) and the HMI
+  screens. Exporting again only rewrites changed files and removes files of
+  deleted objects (only files an earlier export wrote).
 - MCP progress: long actions send progress notifications (the steps of an HMI
   export, the steps of a batch, and a heartbeat every 10 s), so clients that
   reset their timeout on progress don't give up on a long export.
