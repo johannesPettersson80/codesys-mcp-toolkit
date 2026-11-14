@@ -79,6 +79,8 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, n
   };
   const onClick = (e: MouseEvent) => {
     const t = e.target as HTMLElement;
+    const ack = t.closest<HTMLElement>("[data-ack]");
+    if (ack) return send(`@ack:${ack.dataset.ack}`, "TRUE");
     const nav = t.closest<HTMLElement>("[data-nav]");
     if (nav) return navigate?.(nav.dataset.nav!);
     const open = t.closest<Element>("[data-open]");
@@ -177,11 +179,22 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, n
       case "fault":
         el.classList.toggle("fault", truthy(val(b.v)));
         break;
-      case "alarm":
-        el.classList.toggle("active", truthy(val(b.v)));
+      case "alarm": {
+        // With the HMI exported to CODESYS, the alarm manager's state comes as "@alarm:<variable>".
+        const st = last[`@alarm:${b.v}`];
+        const on = truthy(val(b.v));
+        const open = on || st === "active" || st === "acknowledged" || st === "waiting" || st === "unacknowledged";
+        el.classList.toggle("active", open);
+        el.classList.toggle("cleared", open && !on && st !== undefined);
+        el.classList.toggle("acked", st === "acknowledged");
+        el.classList.toggle("can-ack", st === "active" || st === "waiting" || st === "unacknowledged");
+        const lbl = el.querySelector<HTMLElement>(".al-st");
+        if (lbl) lbl.textContent = st === "waiting" ? "cleared · confirm" : st === "unacknowledged" ? "cleared · acknowledge" : st === "acknowledged" ? "acknowledged" : "";
         break;
+      }
       case "count": {
-        const n = b.vars.filter((v) => truthy(val(v))).length;
+        const open = (v: string) => truthy(val(v)) || ["waiting", "unacknowledged"].includes(last[`@alarm:${v}`] ?? "");
+        const n = b.vars.filter(open).length;
         el.classList.toggle("on", n > 0);
         const num = el.querySelector(".n");
         if (num) num.textContent = String(n);

@@ -94,6 +94,63 @@ def op_alarms_configure(args):
     return {"group": name, "alarms": made, "classes": sorted(classes.keys()), "saved": c.save_if(args)}
 
 
+def _texts(c, cfg, name):
+    """id -> message of the group's text list (documented text-list scripting)."""
+    out = {}
+    for ch in cfg.get_children(True):
+        if name_of(ch).lower() == name.lower() and hasattr(ch, "rows"):
+            try:
+                for r in ch.rows:
+                    out[to_text(r.id)] = to_text(r.defaulttext)
+            except Exception:
+                pass
+    return out
+
+
+def op_alarms_list(args):
+    """The Alarm Configuration: groups, their alarms (in the order the PLC numbers them), classes and messages."""
+    c = Ctx()
+    mgr = _object_mgr()
+    h = c.proj.handle
+    cfg = _child(c, "Alarm Configuration")
+    if cfg is None:
+        return {"groups": []}
+    try:
+        group_type = _alarm_type("AlarmGroupObject")
+    except OpError:
+        group_type = None
+    groups = []
+    for ch in cfg.get_children(True):
+        try:
+            o = mgr.GetObjectToRead(h, ch.guid).Object
+        except Exception:
+            continue
+        if not hasattr(o, "AddAlarm") and (group_type is None or not group_type.IsInstanceOfType(o)):
+            continue
+        name = name_of(ch)
+        texts = _texts(c, cfg, name)
+        alarms = []
+        for a in list(o.Alarms or []):
+            ob = a.ObservationType
+            aid = to_text(a.ID)
+            cls = ""
+            try:
+                cls = to_text(a.FullAlarmClassName or "")
+            except Exception:
+                pass
+            alarms.append({
+                "id": aid,
+                "kind": ob.GetType().Name.replace("Observation", "").lower() if ob is not None else "",
+                "expression": to_text(getattr(ob, "Expression", "") or ""),
+                "comparison": to_text(getattr(ob, "Comparison", "") or ""),
+                "compare_to": to_text(getattr(ob, "ExpressionToCompare", "") or ""),
+                "cls": cls.split(".")[-1],
+                "text": texts.get(aid, ""),
+            })
+        groups.append({"name": name, "alarms": alarms})
+    return {"groups": groups}
+
+
 def op_visu_users(args):
     """Visualization user groups (no users: their passwords are the engineer's to set)."""
     import System
@@ -132,3 +189,4 @@ def op_visu_users(args):
 
 mcp_ops.OPS["alarms.configure"] = mcp_sim._locked(op_alarms_configure)
 mcp_ops.OPS["visu.users"] = mcp_sim._locked(op_visu_users)
+mcp_ops.OPS["alarms.list"] = op_alarms_list

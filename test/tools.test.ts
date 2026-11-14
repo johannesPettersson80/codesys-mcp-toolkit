@@ -34,6 +34,9 @@ describe("MCP tools over the real watcher", () => {
     expect([...actions].sort()).toEqual(
       [
         "add_library",
+        "alarm_acknowledge",
+        "alarm_list",
+        "alarm_status",
         "add_device",
         "batch",
         "breakpoint_clear",

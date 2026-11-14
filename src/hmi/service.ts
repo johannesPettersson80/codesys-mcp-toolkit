@@ -8,7 +8,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { alarmPath, alarmState } from "../codesys/alarm-tools.js";
 import { currentCodesysSim } from "../codesys/simulation.js";
+
+/** The alarm group hmi_export_codesys puts the HMI's alarms in. */
+export const HMI_ALARM_GROUP = "AG_HMI";
 import type { AppContext } from "../tools.js";
 import { canvasOf, HMI_CSS, symbolMarkup, type PageContext } from "./render.js";
 import { allAlarms, screenSchema, screenVariables, type Screen } from "./spec.js";
@@ -141,13 +145,24 @@ export class HmiService {
     const hit = this.cache.get(screen.name);
     if (hit && Date.now() - hit.at < 200) return hit;
     if (this.reading) await this.reading.catch(() => undefined);
-    const names = [...new Set([...screenVariables(screen), ...allAlarms(this.screens()).map((x) => x.active)])];
+    const alarms = allAlarms(this.screens());
+    // After hmi_export_codesys these are CODESYS alarms (group AG_HMI, in this order): read their state too.
+    const statePaths = alarms.map((_, k) => `${alarmPath(HMI_ALARM_GROUP, k)}.m_eState`);
+    const names = [...new Set([...screenVariables(screen), ...alarms.map((x) => x.active), ...statePaths])];
     if (!names.length) return { values: {}, errors: {} };
     const p = this.ctx.bridge.call<{ values: Values; errors?: Record<string, string> }>("sim.read", { names }, { timeoutMs: 5_000 });
     this.reading = p;
     try {
       const r = await p;
-      const out = { at: Date.now(), values: r.values ?? {}, errors: r.errors ?? {} };
+      const values: Values = { ...(r.values ?? {}) };
+      const errors = { ...(r.errors ?? {}) };
+      alarms.forEach((a, k) => {
+        const raw = values[statePaths[k]!];
+        delete values[statePaths[k]!];
+        delete errors[statePaths[k]!];
+        if (raw !== undefined) values[`@alarm:${a.active}`] = alarmState(raw);
+      });
+      const out = { at: Date.now(), values, errors };
       this.cache.set(screen.name, out);
       return out;
     } finally {
@@ -158,6 +173,14 @@ export class HmiService {
   /** A write from the HMI page: only into CODESYS's own simulation. */
   async write(variable: string, value: string): Promise<string> {
     if (!currentCodesysSim(this.ctx)) throw new Error("The simulation isn't running: start it to operate the screen.");
+    if (variable.startsWith("@ack:")) {
+      // Acknowledge an HMI alarm in CODESYS's alarm manager (the HMI must have been exported).
+      const k = allAlarms(this.screens()).findIndex((a) => a.active === variable.slice(5));
+      if (k < 0) throw new Error(`${variable.slice(5)} is not an alarm on any HMI screen.`);
+      await this.ctx.bridge.call("sim.write", { values: { [`${alarmPath(HMI_ALARM_GROUP, k)}.m_xToAcknowledge`]: "TRUE" } }, { timeoutMs: 5_000 });
+      this.cache.clear();
+      return `acknowledged ${variable.slice(5)}`;
+    }
     const known = this.screens().some((s) => screenVariables(s).includes(variable));
     if (!known) throw new Error(`${variable} is not on any HMI screen.`);
     await this.ctx.bridge.call("sim.write", { values: { [variable]: value } }, { timeoutMs: 5_000 });

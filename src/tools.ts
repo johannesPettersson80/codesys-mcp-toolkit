@@ -7,6 +7,7 @@ import { registerGraphicalActions } from "./codesys/graphical.js";
 import { registerDebugActions } from "./codesys/debug.js";
 import { registerSimTestAction } from "./codesys/simtest.js";
 import { registerDeviceActions } from "./codesys/device-tools.js";
+import { registerAlarmActions } from "./codesys/alarm-tools.js";
 import { copyFile } from "node:fs/promises";
 import { registerActionTool, type Action, type RegisterAction } from "./actions.js";
 import { getUiCapability } from "@modelcontextprotocol/ext-apps/server";
@@ -943,6 +944,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   registerDebugActions(reg, ctx, (fn) => run(ctx, fn));
   registerSimTestAction(reg, ctx, (fn) => run(ctx, fn));
   registerDeviceActions(reg, ctx, (fn) => run(ctx, fn));
+  registerAlarmActions(reg, ctx, (fn) => run(ctx, fn));
   if (ctx.hmi) registerHmiActions(reg, ctx, ctx.hmi, (fn) => run(ctx, fn));
 
   registerActionTool(server, actions);

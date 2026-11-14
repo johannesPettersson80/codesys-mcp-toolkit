@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the library, `hmi_delete_symbol` removes one. The SVG is checked against a
   short list of elements and attributes; scripts, styles, links and external
   images are refused.
+- CODESYS alarms in the simulation: `alarm_list` (groups, alarms, classes,
+  messages and conditions of the Alarm Configuration), `alarm_status` (each
+  alarm's state from CODESYS's alarm manager: normal, pending, active, active
+  acknowledged, cleared and waiting for confirmation or acknowledgement) and
+  `alarm_acknowledge`. Lets Claude test alarms: raise the condition, check
+  it's active, clear it, acknowledge, check it's normal. Checked live on SP21.
+- The browser HMI's alarm rows follow CODESYS's alarm states once the HMI is
+  exported: a cleared alarm stays in the list until it's acknowledged, with an
+  ACK button that acknowledges it in CODESYS's alarm manager (simulation
+  only); the header counts these too.
 - MCP progress: long actions send progress notifications (the steps of an HMI
   export, the steps of a batch, and a heartbeat every 10 s), so clients that
   reset their timeout on progress don't give up on a long export.

@@ -167,7 +167,7 @@ function widget(w: Widget, box: { w: number; h: number }, bind: Bind, id: (p: st
       return `<div class="tr-legend">${legend}</div><svg class="trend" viewBox="0 0 600 200" preserveAspectRatio="none" ${bind({ kind: "trend", series: w.series.map((s) => s.value), min: w.min, max: w.max, seconds: w.seconds })}><g class="tr-grid">${grid}</g>${lines}</svg><div class="tr-axis"><span>−${w.seconds} s</span><span class="tr-range"><span class="tr-min"></span> – <span class="tr-max"></span></span><span>now</span></div>`;
     }
     case "alarms":
-      return `<ul class="alarms">${w.items.map((i) => `<li class="al sev-${i.severity}" ${bind({ kind: "alarm", v: i.active })}><span class="al-badge">${i.severity === "info" ? "INFO" : i.severity === "warning" ? "WARN" : "ALARM"}</span><span class="al-text">${esc(i.text)}</span></li>`).join("")}<li class="al-none">No active alarms</li></ul>`;
+      return `<ul class="alarms">${w.items.map((i) => `<li class="al sev-${i.severity}" ${bind({ kind: "alarm", v: i.active })}><span class="al-badge">${i.severity === "info" ? "INFO" : i.severity === "warning" ? "WARN" : "ALARM"}</span><span class="al-text">${esc(i.text)}</span><span class="al-st"></span><button class="al-ack" data-ack="${esc(i.active)}">ACK</button></li>`).join("")}<li class="al-none">No active alarms</li></ul>`;
     case "text":
       return `<div class="txt">${esc(w.text).replace(/\n/g, "<br>")}</div>`;
     case "process": {
@@ -332,7 +332,12 @@ export const HMI_CSS = String.raw`
 .alarms{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px;overflow:hidden}
 .al{display:none;align-items:center;gap:9px;padding:8px 10px;border-radius:10px;font-size:12.5px;line-height:1.25;background:color-mix(in srgb,var(--c) 12%,transparent);border:1px solid color-mix(in srgb,var(--c) 35%,transparent)}
 .al.active{display:flex}.sev-alarm{--c:var(--alarm)}.sev-warning{--c:var(--warn)}.sev-info{--c:var(--accent)}
-.sev-alarm.active{animation:blink 1.2s infinite}
+.sev-alarm.active:not(.cleared):not(.acked){animation:blink 1.2s infinite}
+.al-text{flex:1}.al-st{font-size:10.5px;font-weight:650;color:var(--c);letter-spacing:.03em;white-space:nowrap}
+.al.cleared{background:transparent;border-style:dashed}.al.cleared .al-badge{background:transparent;color:var(--c);box-shadow:inset 0 0 0 1px var(--c)}
+.al.acked .al-badge{opacity:.6}
+.al-ack{display:none;border:1px solid var(--c);background:color-mix(in srgb,var(--c) 18%,transparent);color:var(--fg);font:700 10.5px/1 inherit;letter-spacing:.06em;padding:5px 9px;border-radius:7px;cursor:pointer}.al-ack:hover{background:color-mix(in srgb,var(--c) 35%,transparent)}
+.al.can-ack .al-ack{display:inline-block}
 .al-badge{font-size:10px;font-weight:800;letter-spacing:.08em;padding:3px 7px;border-radius:6px;background:var(--c);color:#fff}
 .al-none{display:flex;align-items:center;gap:9px;color:var(--ok);font-size:14px}.al-none::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok)}
 .alarms.has .al-none{display:none}

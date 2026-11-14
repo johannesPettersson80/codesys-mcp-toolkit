@@ -261,6 +261,16 @@ describe("HMI actions over MCP (fake CODESYS)", () => {
     expect((await call("hmi_delete_symbol", { name: "centrifuge" })).text).toMatch(/Deleted symbol 'centrifuge'/);
   }, 90_000);
 
+  it("needs the simulation for alarm states and acknowledging", async () => {
+    for (const a of ["alarm_status", "alarm_acknowledge"]) {
+      const r = await call(a);
+      expect(r.isError, a).toBe(true);
+      expect(r.text, a).toMatch(/simulation isn't running/);
+    }
+    const w = await panel("ui_hmi_write", { variable: "@ack:PLC_PRG.xFault", value: "TRUE" });
+    expect(w).toMatchObject({ ok: false, message: expect.stringMatching(/simulation isn't running/) });
+  });
+
   it("says when this CODESYS can't build visualizations", async () => {
     const r = await call("hmi_export_codesys", { screen: "Overview" });
     expect(r.isError).toBe(true);
