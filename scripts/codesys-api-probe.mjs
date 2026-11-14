@@ -1,5 +1,5 @@
 // Record the scripting API a CODESYS install offers, to compare service packs
-// (docs/sp22-plan.md, step 1). Offline only: it opens a copy of a project
+// (results: docs/codesys-api-sp21-sp22.md). Offline only: it opens a copy of a project
 // without saving and never goes online.
 //
 //   npm run build

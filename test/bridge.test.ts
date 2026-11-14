@@ -193,6 +193,37 @@ describe("--show-window (CODESYS with its window)", () => {
     expect(logs.join("\n")).not.toMatch(/killing CODESYS/);
   });
 
+  it("opens written and created objects in an editor, only with the window shown", async () => {
+    const watcherLog = (root: string) => {
+      const dir = readdirSync(root).map((d) => join(root, d)).find((d) => existsSync(join(d, "watcher.log")));
+      return dir ? readFileSync(join(dir, "watcher.log"), "utf8") : "";
+    };
+    const shown = tempDir("cmcp-sessions-");
+    bridge = fakeBridge({ noUI: false, sessionRoot: shown });
+    await bridge.call("project.open", { path: fakeProjectFile() });
+    await bridge.call("object.write", { path: "PLC_PRG", implementation: "x := 1;" });
+    await bridge.call("object.create", { kind: "function_block", name: "FB_Follow" });
+    await bridge.call("object.create", { kind: "folder", name: "Utils" });
+    const pid = bridge.health().pid!;
+    await bridge.stop();
+    try {
+      process.kill(pid);
+    } catch {
+      /* already gone */
+    }
+    const log = watcherLog(shown);
+    expect(log).toMatch(/editor fake: PLC_PRG/);
+    expect(log).toMatch(/editor fake: FB_Follow/);
+    expect(log).not.toMatch(/Utils/);
+
+    const headless = tempDir("cmcp-sessions-");
+    bridge = fakeBridge({ sessionRoot: headless });
+    await bridge.call("project.open", { path: fakeProjectFile() });
+    await bridge.call("object.write", { path: "PLC_PRG", implementation: "x := 2;" });
+    await bridge.stop();
+    expect(watcherLog(headless)).not.toMatch(/editor/);
+  }, 30_000);
+
   it("still closes a window that never got ready", async () => {
     const logs: string[] = [];
     bridge = fakeBridge({ noUI: false, args: () => ["-c", "import time; time.sleep(30)"], startupTimeoutMs: 1_000, log: (m) => logs.push(m) });

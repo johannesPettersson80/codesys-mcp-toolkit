@@ -28,6 +28,8 @@ Thumbs.db
 
 # Local-only material
 _v1-local/
+# Claude Code local settings (launch.json, worktrees)
+.claude/
 # CODESYS scripting API reference (CODESYS Group documentation, not redistributable)
 docs/script_documentation.txt
 # Test/runtime scratch

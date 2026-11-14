@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `--show-window` opens every object the model creates or writes in its editor
+  tab, so the CODESYS window shows the code as it is written, and, while the
+  simulation runs, its live values. CODESYS's scripting API has no call for
+  this, so it uses CODESYS's own frame (checked on SP21 and SP22); where that
+  isn't available, nothing opens and the call works as before.
+
 ## [2.2.0] - 2026-11-14
 
 ### Added

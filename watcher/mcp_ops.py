@@ -1097,7 +1097,7 @@ def _reflect_api(path):
 def op_api_probe(args):
     """The scripting API this CODESYS offers: member names of the main objects, the
     enums the watcher relies on, version-like values, and the object type GUIDs of
-    the open project with their kinds. For comparing service packs (docs/sp22-plan.md)."""
+    the open project with their kinds. For comparing service packs (docs/codesys-api-sp21-sp22.md)."""
     c = Ctx(require_project=False)
     objs = {"se": se, "system": _safe(lambda: se.system), "projects": _safe(lambda: se.projects), "project": c.proj, "application": c.app}
     samples = {}

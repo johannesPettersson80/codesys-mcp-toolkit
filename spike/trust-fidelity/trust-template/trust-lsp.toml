@@ -1,4 +1,0 @@
-include_paths = ["src"]
-
-[project]
-vendor_profile = "codesys"

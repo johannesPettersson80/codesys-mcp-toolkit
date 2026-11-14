@@ -5,7 +5,8 @@
 # (with --show-window: no --noUI and CODESYS_MCP_UI=1. The same blocking loop runs: CODESYS
 # applies script_prompt_handling only while a script runs, so a timer that runs requests after
 # the script returned would show every prompt as a dialog. system.delay() serves the window's
-# message loop, so the window keeps painting while the loop waits.)
+# message loop, so the window keeps painting while the loop waits. Objects that requests
+# write or create open in an editor tab there; see mcp_ui.py.)
 # Environment (inherited from the server):
 #   CODESYS_MCP_DIR         session folder (requests/, results/, heartbeat.json, ready.json, watcher.log)
 #   CODESYS_MCP_SCRIPTS     folder holding this file and its modules
@@ -49,6 +50,24 @@ STATE = {"count": 0, "last_beat": 0.0, "busy_since": None, "op": None}
 
 # A dialog must stay up this long before the server is told, so brief windows don't count.
 DIALOG_GRACE_S = 10.0
+
+# With the window shown (--show-window), these ops open the object they wrote in an editor.
+UI = {"on": False}
+FOLLOW_OPS = ("object.write", "object.create")
+
+
+def follow_in_editor(ops_mod, result):
+    """Opens the object a request wrote in its editor, so the window shows the code."""
+    path = (result or {}).get("path")
+    if not path or (result or {}).get("kind") == "folder":
+        return
+    try:
+        import scriptengine as se
+        import mcp_ui
+        obj = ops_mod.Ctx().resolve(path)
+        log("editor %s: %s" % (mcp_ui.open_editor(se, obj), path))
+    except BaseException as e:
+        log("editor not opened for %s: %s" % (path, to_text(e)))
 
 
 def log(msg):
@@ -208,6 +227,8 @@ def handle(ops_mod, fname):
         else:
             try:
                 res = {"id": rid, "ok": True, "result": fn(args)}
+                if UI["on"] and op in FOLLOW_OPS:
+                    follow_in_editor(ops_mod, res["result"])
             except ops_mod.OpError as e:
                 res = {"id": rid, "ok": False, "error": {"code": e.code, "message": to_text(e.message)}}
             except BaseException as e:  # IronPython: KeyboardInterrupt is not an Exception
@@ -225,6 +246,7 @@ def handle(ops_mod, fname):
 
 
 def main(ui=False):
+    UI["on"] = ui
     for d in (REQ_DIR, RES_DIR):
         if not os.path.isdir(d):
             os.makedirs(d)

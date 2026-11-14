@@ -1,9 +1,0 @@
-PROGRAM P
-VAR
-    n : INT;
-    r : REFERENCE TO INT;
-    b : BOOL;
-END_VAR
-r REF= n;
-b := __ISVALIDREF(r);
-END_PROGRAM

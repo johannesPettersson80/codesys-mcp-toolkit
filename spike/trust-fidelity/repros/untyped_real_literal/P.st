@@ -1,6 +1,0 @@
-PROGRAM P
-VAR
-    n : INT;
-END_VAR
-n := REAL_TO_INT(2.5);
-END_PROGRAM

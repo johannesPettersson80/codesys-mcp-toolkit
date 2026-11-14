@@ -134,7 +134,10 @@ Cline、Trae、通义灵码、Cursor、Claude Desktop 等使用 `mcpServers` 配
 - **浏览器中的工作区。** 在其他客户端中，让模型“打开 CODESYS 工作区”（`open_workspace`），
   同样的界面会在浏览器中打开，只监听本机 127.0.0.1，并带有访问令牌。浏览器不会自动打开。
 - **CODESYS 窗口。** 启动参数加上 `--show-window`，CODESYS 会以正常窗口运行，而不是在后台
-  无界面运行，可以看到模型创建的对象出现在项目树中。工具包不会自动关闭这个窗口。
+  无界面运行。模型创建或修改的每个对象都会在编辑器标签页中打开，可以直接看到新写的代码；
+  仿真运行时，打开的编辑器会显示变量的实时值。工具包不会自动关闭这个窗口。
+
+![使用 --show-window 启动的 CODESYS：模型刚创建的 FB_Blink 已在编辑器中打开](docs/images/codesys-window.png)
 
 ![OpenCode 会话结束后在浏览器中打开的工作区：PLC_PRG 的改动，以及每个对象的接受和还原按钮](docs/images/workspace-review.png)
 

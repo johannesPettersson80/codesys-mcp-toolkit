@@ -228,10 +228,19 @@ itself.
 ### Watch it in the CODESYS window
 
 By default CODESYS runs headless. With `--show-window` the server starts it with
-its normal window, so you can see the project take shape (objects appear in the
-tree as the model creates them) in any MCP client.
+its normal window, so you can watch the work in any MCP client: every object the
+model creates or writes opens in its editor tab, with the new code in it.
 
-![CODESYS started with --show-window, after an OpenCode session created PumpDemo with FB_Pump](docs/images/codesys-window.png)
+![CODESYS started with --show-window: the model just created FB_Blink, and it opened in its editor](docs/images/codesys-window.png)
+
+While the simulation runs, the open editors show live values, as in CODESYS's own
+online mode:
+
+![The same window during the simulation: PLC_PRG shows xEnable and xOn as TRUE](docs/images/codesys-window-sim.png)
+
+CODESYS's scripting API has no call for opening an editor, so the toolkit uses
+CODESYS's own (undocumented) frame for it, checked on SP21 and SP22. If a CODESYS
+version doesn't have it, nothing opens and everything else works as before.
 
 While the server is connected, the window is for watching: the toolkit's script
 keeps running in it (that is what lets it answer CODESYS's prompts, such as a
