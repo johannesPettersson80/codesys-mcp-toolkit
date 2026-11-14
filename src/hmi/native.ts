@@ -6,7 +6,7 @@
  */
 import { darkTextOn } from "./color.js";
 import { canvasOf, tileBox } from "./render.js";
-import { routed } from "./route.js";
+import { routed, bottomTaken, itemKey } from "./route.js";
 import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
 import { screenVariables, USER_GROUPS } from "./spec.js";
 import { BUILTIN_SYMBOLS, findSymbol, symbolPicture, symbolSize, type SymbolColors, type SymbolLib } from "./symbols.js";
@@ -560,15 +560,17 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         const sy = box.h / 100;
         const X = (x: number) => box.x + x * sx;
         const Y = (y: number) => box.y + y * sy;
+        const under = bottomTaken(w.items, lib);
         const items = routed(w.items, box.h / box.w, lib).sort((a, b2) => (a.type === "pipe" ? -1 : 0) - (b2.type === "pipe" ? -1 : 0));
-        for (const it of items) processItem(it, X, Y, sx);
+        for (const it of items) processItem(it, X, Y, sx, under);
         break;
       }
     }
   }
 
-  function processItem(it: ProcessItem, X: (x: number) => number, Y: (y: number) => number, sx: number) {
-    const label = (cx: number, y: number, t?: string) => t && els.push(text(cx - 60, y, 120, 18, t, [SEMI, 8.5], p.muted, "HCENTER"));
+  function processItem(it: ProcessItem, X: (x: number) => number, Y: (y: number) => number, sx: number, under: Set<string> = new Set()) {
+    // A pipe leaving through the bottom runs where the label would be: the label goes to its right.
+    const label = (cx: number, y: number, t?: string) => t && els.push(under.has((itemKey(it) ?? "").toLowerCase()) ? text(cx + 6, y, 120, 18, t, [SEMI, 8.5], p.muted, "LEFT") : text(cx - 60, y, 120, 18, t, [SEMI, 8.5], p.muted, "HCENTER"));
     switch (it.type) {
       case "symbol": {
         const f = findSymbol(lib, it.symbol);
@@ -590,7 +592,9 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         if (it.fault) expr = `SEL(${it.fault}, ${expr}, '${pic("fault")}')`;
         els.push({ kind: "image", x: r(cx - wpx / 2), y: r(cy - hpx / 2), w: wpx, h: hpx, props: { "Static ID": pic("off"), ...(it.on || it.fault ? { "Bitmap ID variable.Bitmap ID": expr } : {}) } });
         if (it.faceplate) els.push({ kind: "rect", x: r(cx - wpx / 2), y: r(cy - hpx / 2), w: wpx, h: hpx, fill: null, frame: null, dialog: { name: dialogFor(it.label ?? name, it.faceplate, it), x: r(cx + wpx / 2 + 10), y: r(cy - 60) } });
-        label(cx, cy + hpx / 2 + 2, it.label);
+        // Something below it (a pipe, or the machine a motor drives): the label goes beside it.
+        if (it.label && under.has((itemKey(it) ?? "").toLowerCase())) els.push(text(cx + wpx / 2 + 6, cy - 9, 120, 18, it.label, [SEMI, 8.5], p.muted, "LEFT"));
+        else label(cx, cy + hpx / 2 + 2, it.label);
         break;
       }
       case "pipe": {

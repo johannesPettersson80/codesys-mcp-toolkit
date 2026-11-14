@@ -19,6 +19,31 @@ export interface Port {
 
 const keyOf = (p: ProcessItem): string | undefined => ("id" in p && p.id) || ("label" in p && p.label) || undefined;
 
+/**
+ * Items (lower-case name) with something below them where the label would go: a pipe at a
+ * port facing down (a tank's or pump's bottom, a symbol's port that faces down after its
+ * rotation), or a motor's shaft pointing down at the machine it drives. Their label goes
+ * beside it instead.
+ */
+export function bottomTaken(items: ProcessItem[], lib: SymbolLib = BUILTIN_SYMBOLS): Set<string> {
+  const used = new Set<string>();
+  for (const p of items) if (p.type === "pipe") for (const e of [p.from, p.to]) if (typeof e === "string") used.add(e.toLowerCase());
+  const out = new Set<string>();
+  for (const p of items) {
+    const key = keyOf(p)?.toLowerCase();
+    if (!key) continue;
+    if (used.has(`${key}.bottom`)) out.add(key);
+    if (p.type !== "symbol") continue;
+    const f = findSymbol(lib, p.symbol);
+    if (!f) continue;
+    for (const [name, port] of Object.entries(symbolPorts(f[1], p, 1))) if (port.dir === "d" && (used.has(`${key}.${name}`) || name === "shaft")) out.add(key);
+  }
+  return out;
+}
+
+/** The name an item is connected by (its id, or its label). */
+export const itemKey = (p: ProcessItem): string | undefined => keyOf(p);
+
 /** The ports of a symbol (keyed by name), for a diagram of the given aspect. */
 export function portsOf(p: ProcessItem, aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): Record<string, Port> {
   switch (p.type) {
@@ -187,6 +212,88 @@ export function routed(items: ProcessItem[], aspect: number, lib: SymbolLib = BU
   return items.map((p) => (p.type === "pipe" ? { ...p, points: routePipe(p, items, aspect, lib), from: undefined, to: undefined, via: undefined } : p));
 }
 
+/**
+ * Does the diagram make sense as a process? Equipment that no pipe reaches, an inlet
+ * without an outlet, a heat exchanger with one circuit, tanks nothing flows into or out
+ * of, instruments and sensors away from any line or tank, a motor whose shaft touches
+ * nothing, pipes that stop in mid-diagram. Warnings: the screen still saves.
+ */
+export function connectionWarnings(items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): string[] {
+  const out: string[] = [];
+  const ends = new Map<string, { port: string; dir: "from" | "to" }[]>();
+  const edge = (e: Pt) => e[0] <= 5 || e[0] >= 95 || e[1] <= 5 || e[1] >= 95;
+  items.forEach((p, i) => {
+    if (p.type !== "pipe") return;
+    for (const [e, dir] of [[p.from, "from"], [p.to, "to"]] as const) {
+      if (typeof e === "string") {
+        const [n, port] = e.split(".") as [string, string];
+        ends.set(n.toLowerCase(), [...(ends.get(n.toLowerCase()) ?? []), { port, dir }]);
+      } else if (Array.isArray(e) && !edge(e as Pt)) out.push(`pipe ${i + 1} ${dir === "from" ? "starts" : "ends"} at [${e[0]}, ${e[1]}], in the middle of the diagram: connect it to a port, a junction, or the diagram's edge (where a line enters or leaves).`);
+    }
+  });
+  const tanks = items.flatMap((p) => (p.type === "tank" ? [p] : []));
+  const onTank = (x: number, y: number, m = 3) => tanks.some((t) => x >= t.x - m && x <= t.x + t.w + m && y >= t.y - m / aspect && y <= t.y + t.h + m / aspect);
+  // Distances in x units (y scaled by the diagram's aspect).
+  const lines = items.flatMap((p) => (p.type === "pipe" ? [routePipe(p, items, aspect, lib)] : []));
+  const nearLine = (x: number, y: number, m: number) =>
+    lines.some((pts) =>
+      pts.slice(1).some((b, k) => {
+        const a = pts[k]!;
+        const [ax, ay, bx, by, px, py] = [a[0], a[1] * aspect, b[0], b[1] * aspect, x, y * aspect];
+        const dx = bx - ax, dy = by - ay;
+        const t = dx || dy ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy))) : 0;
+        return Math.hypot(px - (ax + t * dx), py - (ay + t * dy)) <= m;
+      }),
+    );
+  // Boxes of driven equipment, for a motor's shaft.
+  const machines = items.flatMap((p) => {
+    if (p.type === "pump" || p.type === "fan") return [{ x0: p.x - p.size / 2, y0: p.y - p.size / 2 / aspect, x1: p.x + p.size / 2, y1: p.y + p.size / 2 / aspect }];
+    if (p.type !== "symbol") return [];
+    const f = findSymbol(lib, p.symbol);
+    return f && f[0] !== "motor" ? [symbolBox(f[1], p, aspect)] : [];
+  });
+  items.forEach((p, i) => {
+    const key = keyOf(p);
+    const name = key ?? `${p.type === "symbol" ? p.symbol : p.type} ${i + 1}`;
+    const e = key ? (ends.get(key.toLowerCase()) ?? []) : [];
+    const used = new Set(e.map((x) => x.port));
+    const pair = (a: string, b: string, what: string) => {
+      if (used.has(a) && !used.has(b)) out.push(`${name} has a pipe at ${a} but none at ${b}: ${what}`);
+      if (used.has(b) && !used.has(a)) out.push(`${name} has a pipe at ${b} but none at ${a}: ${what}`);
+    };
+    if (p.type === "tank") {
+      if (!e.some((x) => x.dir === "to")) out.push(`tank ${name}: nothing flows in (no pipe with to: '${name}.<port>'). Where does the product come from?`);
+      if (!e.some((x) => x.dir === "from")) out.push(`tank ${name}: nothing flows out (no pipe with from: '${name}.<port>'). Where does the product go?`);
+    } else if (p.type === "pump" || p.type === "fan" || p.type === "valve") {
+      if (!key) out.push(`${p.type} ${i + 1} has no label or id, so no pipe can connect to it.`);
+      else if (!e.length) out.push(`${p.type} ${name} isn't connected: no pipe goes to it.`);
+      else pair("in", "out", "what goes in must come out.");
+    } else if (p.type === "junction") {
+      if (e.length < 2) out.push(`junction ${name} joins ${e.length} pipe(s): a tee joins at least two.`);
+    } else if (p.type === "sensor") {
+      if (!nearLine(p.x, p.y, 9) && !onTank(p.x, p.y, 9)) out.push(`sensor ${name} isn't next to a pipe or tank: put it on the line or vessel it measures.`);
+    } else if (p.type === "symbol") {
+      const f = findSymbol(lib, p.symbol);
+      if (!f) return;
+      const [sym, def] = f;
+      const ports = Object.keys(def.ports);
+      if (sym === "mixer" || sym === "level_switch") {
+        if (!onTank(p.x, p.y)) out.push(`${sym} ${name} isn't on a tank: an agitator or a level switch is mounted on the vessel it serves.`);
+      } else if (ports.includes("shaft")) {
+        const at = symbolPorts(def, p, aspect).shaft!.at;
+        if (!machines.some((b) => at[0] >= b.x0 - 2 && at[0] <= b.x1 + 2 && at[1] >= b.y0 - 2 / aspect && at[1] <= b.y1 + 2 / aspect)) out.push(`${sym} ${name} drives nothing: put its shaft against the machine it drives.`);
+      } else if (!ports.length) {
+        return; // a picture without ports (a custom symbol can be decoration)
+      } else if (!key) out.push(`${sym} ${i + 1} has no label or id, so no pipe can connect to it.`);
+      else if (!e.length) out.push(sym === "pressure_switch" ? `pressure_switch ${name} isn't connected: run a short pipe from its bottom to the line it measures (a junction on that pipe).` : `${sym} ${name} isn't connected: no pipe goes to it (ports: ${ports.join(", ")}).`);
+      else if (sym === "heat_exchanger") {
+        if (!(used.has("in") && used.has("out") && used.has("top") && used.has("bottom"))) out.push(`heat exchanger ${name} needs both circuits: the product in and out (in, out) and the heating or cooling medium in and out (top, bottom).`);
+      } else if (ports.includes("in") && ports.includes("out")) pair("in", "out", "what goes in must come out.");
+    }
+  });
+  return out;
+}
+
 /** Symbols that overlap each other or leave the diagram, as warnings (the screen still saves). */
 export function overlapWarnings(items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): string[] {
   type Box = { name: string; x0: number; y0: number; x1: number; y1: number };
@@ -200,7 +307,8 @@ export function overlapWarnings(items: ProcessItem[], aspect: number, lib: Symbo
     } else if (p.type === "symbol") {
       const f = findSymbol(lib, p.symbol);
       // Mounted symbols (agitator, level switch) are meant to sit on a tank: no overlap warning for them.
-      if (f && !["mixer", "level_switch"].includes(f[0])) boxes.push({ name: `${p.symbol} ${keyOf(p) ?? i + 1}`, ...symbolBox(f[1], p, aspect) });
+      // A motor touches the machine it drives.
+      if (f && !["mixer", "level_switch", "motor"].includes(f[0])) boxes.push({ name: `${p.symbol} ${keyOf(p) ?? i + 1}`, ...symbolBox(f[1], p, aspect) });
     } else if (p.type === "sensor") boxes.push({ name, x0: p.x - 7, y0: p.y - 2.2 / aspect, x1: p.x + 7, y1: p.y + 2.2 / aspect });
   });
   const out: string[] = [];

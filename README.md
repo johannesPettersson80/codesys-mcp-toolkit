@@ -215,7 +215,14 @@ bound to your PLC variables.
 
 ![The standard process symbols in their on, off and fault colours, and a decanter centrifuge drawn as the project's own SVG symbol](docs/images/hmi-symbols.png)
 
-![A heat treatment line built from the symbols: tank with level switch, pump, filter, heat exchanger fed by a compressor, control valve, a second tank with an agitator, a motor-driven centrifuge and a conveyor](docs/images/hmi-process.png)
+![A heat treatment line built from the symbols: feed into tank T-201 with a high level switch, pump P-201 with a pressure switch on its outlet, filter F-201, heat exchanger E-201 heated by steam through control valve TCV-201 (opening 46 %) with the condensate returned, outlet temperature TT-201 on the line, tank T-202 with an agitator, pump P-202 feeding centrifuge C-202 driven by motor M-202, and the product out to filling](docs/images/hmi-process.png)
+
+When a screen is saved, the toolkit also checks that the diagram is a
+process: it reports equipment no pipe reaches, an inlet without an outlet, a
+heat exchanger with one circuit connected, tanks nothing flows into or out of,
+instruments and sensors away from any line or vessel, a motor whose shaft
+touches nothing, and pipes that end in mid-diagram, so Claude fixes them
+before you look.
 
 ![The same heat treatment line in the high-contrast theme: black background, white outlines, cyan flow and green running symbols](docs/images/hmi-contrast.png)
 

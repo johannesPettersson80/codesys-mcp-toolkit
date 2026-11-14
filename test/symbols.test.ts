@@ -96,9 +96,11 @@ describe("symbols on a diagram", () => {
 
   it("know the project's own symbols, and warn when symbols overlap", () => {
     const own = { centrifuge: symbolSchema.parse({ svg: `<circle cx="50" cy="50" r="40" fill="var(--state)"/>`, ports: { in: { x: 10, y: 50, dir: "left" } } }) };
-    const w = items([{ type: "symbol", symbol: "centrifuge", label: "C-1", x: 30, y: 50, size: 20 }, { type: "symbol", symbol: "motor", x: 38, y: 50, size: 12 }, { type: "pipe", from: [0, 50], to: "C-1.in" }]);
+    const w = items([{ type: "symbol", symbol: "centrifuge", label: "C-1", x: 30, y: 50, size: 20 }, { type: "symbol", symbol: "filter", x: 38, y: 50, size: 12 }, { type: "symbol", symbol: "motor", x: 20, y: 50, size: 12 }, { type: "pipe", from: [0, 50], to: "C-1.in" }]);
     expect(routeProblems(w.items, { ...BUILTIN_SYMBOLS, ...own })).toEqual([]);
-    expect(overlapWarnings(w.items, 0.5, { ...BUILTIN_SYMBOLS, ...own }).join(" ")).toMatch(/centrifuge C-1 overlaps motor/);
+    expect(overlapWarnings(w.items, 0.5, { ...BUILTIN_SYMBOLS, ...own }).join(" ")).toMatch(/centrifuge C-1 overlaps filter/);
+    // A motor touches the machine it drives: no overlap warning for it.
+    expect(overlapWarnings(w.items, 0.5, { ...BUILTIN_SYMBOLS, ...own }).join(" ")).not.toMatch(/motor/);
   });
 
   const screen = screenSchema.parse({

@@ -15,7 +15,7 @@ import { findBrowser, hmiScript, previewValues, screenshot, staticPage, symbolSh
 import { BUILTIN_SYMBOLS, importSvg, svgProblems, symbolSchema, type SymbolDef } from "./symbols.js";
 import { nativePlan } from "./native.js";
 import { canvasOf, tileBox } from "./render.js";
-import { overlapWarnings } from "./route.js";
+import { connectionWarnings, overlapWarnings } from "./route.js";
 import { TEMPLATES } from "./templates.js";
 import { allAlarms, layoutProblems, screenSchema, screenTexts, screenVariables, translateScreen } from "./spec.js";
 
@@ -31,6 +31,7 @@ Connect pipes to ports, never by guessing points: {type: 'pipe', from: 'T-101.ri
 Variables are full instance paths: 'PLC_PRG.fbPump.xRunning', 'GVL.rLevel'. bands colour a value by range: [{from: 0, tone: 'accent'}, {from: 90, tone: 'alarm'}]. Tones: accent, ok, warn, alarm, neutral.
 Look: theme 'dark' (default), 'light' or 'contrast' (black and white, strong colours, no glow: bright light, poor eyesight), per page; accent: '#e30613' puts the company colour on highlights, flow and the current page (text on it turns black or white to stay readable). Pipes with flow show moving dashes, in the browser and in CODESYS.
 access: {min: 'Maintenance'} on a tile lets only that group and up operate it in CODESYS (after Login; lower groups and nobody logged in see it greyed out, or not at all with below: 'hide'). Groups: Operator, Maintenance, Admin.
+Make the diagram a process: every piece of equipment on a pipe (in and out), tanks fed and emptied, a heat exchanger with both circuits (product in/out, heating medium top/bottom), instruments on the line or vessel they measure (a pressure switch through a short pipe to a junction), a motor's shaft against the machine it drives, line ends at the diagram's edge with a label (Feed, Steam, To filling); hmi_save_screen lists what doesn't fit.
 Good screens: the process diagram large on the left (about 8x5), key numbers and status on the right, controls and trends along the bottom; titles short; tag names on symbols (P-101, T-101).`;
 
 export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: HmiService, run: (fn: () => Promise<string>) => Promise<ActionResult>): void {
@@ -54,8 +55,12 @@ export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: Hm
         const b = tileBox(screen, w.at);
         return overlapWarnings(w.items, (b.h - 46) / (b.w - 32), lib);
       });
-      const warn0 = looks.length ? `
-Layout: ${looks.join(" ")}` : "";
+      const flow = screen.widgets.flatMap((w) => {
+        if (w.type !== "process") return [];
+        const b = tileBox(screen, w.at);
+        return connectionWarnings(w.items, (b.h - 46) / (b.w - 32), lib);
+      });
+      const warn0 = (looks.length ? `\nLayout: ${looks.join(" ")}` : "") + (flow.length ? `\nProcess (check these: a diagram should show how the product flows):\n- ${flow.join("\n- ")}` : "");
       const warn = warn0 + (unknown.length ? `\nCheck these: no object named ${unknown.map((u) => `'${u}'`).join(", ")} in the project (the first part of a variable path must be a program or GVL).` : "");
       return text(`${r.replaced ? "Replaced" : "Saved"} screen '${screen.name}' (${screen.widgets.length} widgets, ${vars.length} variables) in ${r.file}.${warn}\nCall hmi_screenshot to see it.`);
     },

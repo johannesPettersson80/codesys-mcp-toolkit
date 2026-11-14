@@ -8,7 +8,7 @@ import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { ProjectCache } from "../src/codesys/cache.js";
 import { renderScreen } from "../src/hmi/render.js";
 import { accessRights, GAUGE_STEPS, nativePlan, onColor, paletteFor, type NativeElement } from "../src/hmi/native.js";
-import { overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
+import { bottomTaken, connectionWarnings, overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
 import { TEMPLATES } from "../src/hmi/templates.js";
 import { canvasOf } from "../src/hmi/render.js";
 import type { ProcessItem } from "../src/hmi/spec.js";
@@ -113,6 +113,66 @@ describe("HMI structure", () => {
     const w = overlapWarnings(items, 0.5);
     expect(w).toContain("tank T-1 overlaps pump P-1.");
     expect(w).toContain("pump P-2 reaches outside the diagram (0..100).");
+  });
+});
+
+describe("process checks: is the diagram a process?", () => {
+  const P = (items: unknown[]) => items as ProcessItem[];
+  it("reports floating equipment, missing inlets and outlets, a one-circuit heat exchanger and stray instruments", () => {
+    const w = connectionWarnings(
+      P([
+        { type: "tank", x: 5, y: 20, w: 10, h: 50, level: "a", label: "T-1" },
+        { type: "pump", x: 30, y: 80, size: 8, running: "b", label: "P-1" },
+        { type: "symbol", symbol: "heat_exchanger", x: 50, y: 80, size: 10, label: "E-1" },
+        { type: "symbol", symbol: "motor", x: 70, y: 20, size: 6, label: "M-1" },
+        { type: "symbol", symbol: "pressure_switch", x: 40, y: 40, size: 5, label: "PS-1" },
+        { type: "symbol", symbol: "level_switch", x: 80, y: 50, size: 5, label: "LS-1" },
+        { type: "sensor", x: 85, y: 10, value: "c", label: "TT-1" },
+        { type: "pipe", from: "T-1.right", to: "P-1.in" },
+        { type: "pipe", from: "P-1.out", to: "E-1.in" },
+        { type: "pipe", from: "E-1.out", to: [60, 50] },
+      ]),
+      0.5,
+    );
+    const all = w.join("\n");
+    expect(all).toContain("tank T-1: nothing flows in");
+    expect(all).not.toContain("tank T-1: nothing flows out");
+    expect(all).toContain("heat exchanger E-1 needs both circuits");
+    expect(all).toContain("motor M-1 drives nothing");
+    expect(all).toContain("pressure_switch PS-1 isn't connected: run a short pipe from its bottom");
+    expect(all).toContain("level_switch LS-1 isn't on a tank");
+    expect(all).toContain("sensor TT-1 isn't next to a pipe or tank");
+    expect(all).toContain("pipe 10 ends at [60, 50], in the middle of the diagram");
+    expect(all).not.toContain("P-1");
+  });
+
+  it("is quiet for a connected line, and the built-in templates pass", () => {
+    const ok = P([
+      { type: "tank", x: 5, y: 20, w: 10, h: 50, level: "a", label: "T-1" },
+      { type: "symbol", symbol: "level_switch", x: 10, y: 25, size: 4, label: "LS-1" },
+      { type: "pump", x: 30, y: 80, size: 8, running: "b", label: "P-1" },
+      { type: "symbol", symbol: "motor", x: 30, y: 68, size: 6, rotate: 90, label: "M-1" },
+      { type: "sensor", x: 45, y: 74, value: "c", label: "PT-1" },
+      { type: "pipe", from: [0, 25], to: "T-1.left-high" },
+      { type: "pipe", from: "T-1.right", to: "P-1.in" },
+      { type: "pipe", from: "P-1.out", to: [100, 80] },
+    ]);
+    expect(connectionWarnings(ok, 0.5)).toEqual([]);
+    for (const t of Object.values(TEMPLATES)) {
+      const s = screenSchema.parse((t as { screen?: unknown }).screen ?? t);
+      for (const w of s.widgets) if (w.type === "process") expect(connectionWarnings(w.items, 0.5)).toEqual([]);
+    }
+  });
+
+  it("moves a label aside when a pipe or a motor's shaft runs below the item", () => {
+    const items = P([
+      { type: "tank", x: 5, y: 20, w: 10, h: 50, level: "a", label: "T-1" },
+      { type: "pump", x: 30, y: 90, size: 6, running: "b", label: "P-1" },
+      { type: "symbol", symbol: "motor", x: 60, y: 40, size: 6, rotate: 90, label: "M-1" },
+      { type: "symbol", symbol: "motor", x: 80, y: 40, size: 6, label: "M-2" },
+      { type: "pipe", from: "T-1.bottom", to: "P-1.in" },
+    ]);
+    expect([...bottomTaken(items)].sort()).toEqual(["m-1", "t-1"]);
   });
 });
 

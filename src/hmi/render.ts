@@ -6,7 +6,7 @@
  * applies values through CSS variables and classes, so animations keep running.
  */
 import { darkTextOn } from "./color.js";
-import { routed } from "./route.js";
+import { routed, bottomTaken, itemKey } from "./route.js";
 import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
 import { BUILTIN_SYMBOLS, findSymbol, scopeIds, symbolBox, symbolSize, type SymbolDef, type SymbolLib } from "./symbols.js";
 
@@ -188,8 +188,9 @@ function widget(w: Widget, box: { w: number; h: number }, bind: Bind, id: (p: st
       const vw = 100;
       const vh = r1((100 * Math.max(60, bodyH)) / Math.max(60, box.w - 24));
       const sy = vh / 100;
+      const under = bottomTaken(w.items, lib);
       const items = routed(w.items, sy, lib).sort((a, b) => (a.type === "pipe" ? -1 : 0) - (b.type === "pipe" ? -1 : 0));
-      return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id, face, lib)).join("")}</svg>`;
+      return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id, face, lib, under)).join("")}</svg>`;
     }
   }
 }
@@ -214,9 +215,11 @@ export function symbolMarkup(name: string, d: SymbolDef, size: number, rotate = 
   return `<g${rotate ? ` transform="rotate(${rotate})"` : ""}><svg x="${r1(-w / 2)}" y="${r1(-h / 2)}" width="${r1(w)}" height="${r1(h)}" viewBox="0 0 ${d.viewBox[0]} ${d.viewBox[1]}" overflow="visible">${scopeIds(d.svg, `sym-${name}`)}</svg></g>`;
 }
 
-function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => string, face: Face, lib: SymbolLib): string {
+function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => string, face: Face, lib: SymbolLib, under: Set<string> = new Set()): string {
   const Y = (y: number) => r1(y * sy);
-  const label = (x: number, y: number, t?: string) => (t ? `<text class="p-label" x="${r1(x)}" y="${Y(y)}">${esc(t)}</text>` : "");
+  // A pipe leaving through the bottom runs where the label would be: the label goes to its right.
+  const aside = under.has((itemKey(p) ?? "").toLowerCase());
+  const label = (x: number, y: number, t?: string) => (t ? (aside ? `<text class="p-label left" x="${r1(x + 1.4)}" y="${Y(y)}">${esc(t)}</text>` : `<text class="p-label" x="${r1(x)}" y="${Y(y)}">${esc(t)}</text>`) : "");
   switch (p.type) {
     case "symbol": {
       const f = findSymbol(lib, p.symbol);
@@ -224,7 +227,7 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
       const [name, d] = f;
       const box = symbolBox(d, p, sy);
       const click = p.faceplate ? `class="clickable" ${face(p.label ?? name, p.faceplate, { running: p.on, fault: p.fault })}` : "";
-      return `<g ${p.fault ? bind({ kind: "fault", v: p.fault }) : ""} ${click}><g class="sym sym-${esc(name)}" ${p.on ? bind({ kind: "on", v: p.on }) : ""}><g transform="translate(${r1(p.x)} ${Y(p.y)})">${symbolMarkup(name, d, p.size, p.rotate ?? 0)}</g></g>${label(p.x, box.y1 + 2.6 / sy, p.label)}</g>`;
+      return `<g ${p.fault ? bind({ kind: "fault", v: p.fault }) : ""} ${click}><g class="sym sym-${esc(name)}" ${p.on ? bind({ kind: "on", v: p.on }) : ""}><g transform="translate(${r1(p.x)} ${Y(p.y)})">${symbolMarkup(name, d, p.size, p.rotate ?? 0)}</g></g>${aside && p.label ? `<text class="p-label left" x="${r1(box.x1 + 1)}" y="${r1(p.y * sy + 0.6)}">${esc(p.label)}</text>` : label(p.x, box.y1 + 2.6 / sy, p.label)}</g>`;
     }
     case "pipe": {
       const d = (p.points ?? []).map(([x, y], i) => `${i ? "L" : "M"}${r1(x)} ${Y(y)}`).join(" ");

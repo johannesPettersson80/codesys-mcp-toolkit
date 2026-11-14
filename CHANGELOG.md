@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Process check on `hmi_save_screen`: it reports equipment no pipe reaches,
+  an inlet without an outlet, a heat exchanger with one circuit connected,
+  tanks nothing flows into or out of, instruments and sensors away from any
+  line or vessel, a motor whose shaft touches nothing, and pipes that end in
+  mid-diagram. The screen still saves; Claude gets the list to fix.
+
+### Changed
+- A label moves beside its symbol or tank when a pipe or a motor's shaft runs
+  below it, instead of being crossed by it (browser and CODESYS).
+- The heat treatment example in the README is now a real process: feed,
+  steam heating through a control valve with condensate return, the outlet
+  temperature on the line, and a pump feeding a motor-driven centrifuge.
+
 ## [2.10.0] - 2026-11-14
 
 ### Added
