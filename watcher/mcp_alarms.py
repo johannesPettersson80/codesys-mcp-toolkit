@@ -9,7 +9,7 @@ import mcp_ops
 import mcp_sim
 from mcp_ops import Ctx, OpError, name_of
 from mcp_compat import to_text
-from mcp_visu import _Modify, _find_type, _object_mgr
+from mcp_visu import ALARM_CLASS_TYPE, _Modify, _find_child_deep, _find_type, _object_mgr, _type_of
 
 
 class _Ref(object):
@@ -30,10 +30,8 @@ def _alarm_type(n):
 
 
 def _child(c, name, under=None):
-    for ch in (under or c.app).get_children(True):
-        if name_of(ch).lower() == name.lower():
-            return ch
-    return None
+    """By type for CODESYS's own objects (their names follow CODESYS's language), else by name."""
+    return _find_child_deep(c, name, under)
 
 
 def op_alarms_configure(args):
@@ -64,6 +62,13 @@ def op_alarms_configure(args):
         o = _child(c, cls, cfg)
         if o is not None:
             classes[cls] = mgr.GetObjectToRead(h, o.guid).Object
+    if len(classes) < 3:
+        # A CODESYS in another language names the default classes in it: they come in the
+        # order Error, Warning, Info.
+        others = [ch for ch in cfg.get_children(True) if _type_of(ch) == ALARM_CLASS_TYPE]
+        for cls, ch in zip(("Error", "Warning", "Info"), others):
+            if cls not in classes:
+                classes[cls] = mgr.GetObjectToRead(h, ch.guid).Object
     if not classes:
         raise OpError("codesys_error", "The Alarm Configuration has no alarm classes.")
     op_type = _alarm_type("DigitalObservation").GetProperty("Comparison").PropertyType

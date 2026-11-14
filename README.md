@@ -137,7 +137,9 @@ own services inside the IDE: `get_signature`, `find_references`,
 `--show-window`.
 They are **experimental**: checked on CODESYS V3.5 SP21 and SP22 as noted in
 the [changelog](CHANGELOG.md). On another version they may report that the
-feature isn't available, or not work.
+feature isn't available, or not work. They don't depend on CODESYS's
+language: the native HMI export was checked with a German and a Chinese user
+interface too.
 
 Claude writes Structured Text, and creates ladder (LD), FBD, CFC and SFC
 programs and function blocks with `create_graphical` from a simple description

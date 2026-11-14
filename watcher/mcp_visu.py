@@ -182,6 +182,54 @@ def _simple_creator(el):
     return cr
 
 
+def _localized_path(e, path):
+    """The property path as this CODESYS's language names it. set_property takes the labels
+    of the property view; most also resolve in English whatever the language, but not the
+    input configuration (Tap, Toggle) in a German CODESYS. The tree's node ids are the same
+    in every language: walk them (an id is the English segment, or it with a type prefix
+    such as pVariable or bTapFalse) and return the node's own, translated, path. Some group
+    ids are translated as well (Input configuration is 'Eingabekonfiguration' in German, its
+    Tap and Toggle are not): such a group is found by the child the path names next."""
+    try:
+        node = e.ReadOnlyElement.GetPropertyRootNode()
+    except Exception:
+        return None
+
+    def match(n, seg):
+        key = seg.replace(" ", "").lower()
+        for i in range(n.ChildCount):
+            ch = n.GetChild(i)
+            nid = to_text(ch.Id).replace(" ", "").lower()
+            if nid == key or nid[1:] == key or nid.split(".")[-1] == key:
+                return ch
+        return None
+
+    segs = path.split(".")
+    for k, seg in enumerate(segs):
+        found = match(node, seg)
+        if found is None and k + 1 < len(segs):
+            for i in range(node.ChildCount):
+                ch = node.GetChild(i)
+                if match(ch, segs[k + 1]) is not None:
+                    found = ch
+                    break
+        if found is None:
+            return None
+        node = found
+    return to_text(node.Path)
+
+
+def _set_prop(e, path, value):
+    """set_property with the English path, or the translated one when CODESYS runs in another language."""
+    try:
+        e.set_property(path, value)
+    except Exception:
+        local = _localized_path(e, path)
+        if not local or local == path:
+            raise
+        e.set_property(local, value)
+
+
 def _add_created(proj, visu, cr, name):
     elem = cr.CreateVisualElement(name)
     with _Modify(proj, visu) as vo:
@@ -298,7 +346,7 @@ def op_visu_build(args):
                 continue
             for pair in el.get("pairs") or []:
                 try:
-                    e.set_property(pair[0], _value(pair[1]))
+                    _set_prop(e, pair[0], _value(pair[1]))
                 except Exception as ex:
                     warnings.append("%s %s: %s" % (label, pair[0], to_text(ex)[:120]))
             if el.get("access"):
@@ -320,7 +368,7 @@ def op_visu_build(args):
             access.append((eid, el["access"]))
         for path, v in (el.get("props") or {}).items():
             try:
-                e.set_property(path, _value(v))
+                _set_prop(e, path, _value(v))
             except Exception as ex:
                 if len(warnings) < 40:
                     warnings.append("%s %s: %s" % (label, path, to_text(ex)))
@@ -390,7 +438,7 @@ def op_visu_build(args):
 
 def _visu_groups(c):
     """name (lower case) -> id of the visualization user groups."""
-    vmg = _find_child(c, "Visualization Manager")
+    vmg = _find_child_deep(c, "Visualization Manager")
     if vmg is None:
         return {}
     vm = _object_mgr().GetObjectToRead(c.proj.handle, vmg.guid).Object
@@ -510,8 +558,33 @@ def _get(o, name):
         return None
 
 
-def _find_child_deep(c, name):
-    for ch in c.app.get_children(True):
+# Objects CODESYS names in its own language (a German CODESYS makes a "Visualisierungsmanager"):
+# found by their type, which is the same in every language, and by name only as a fallback.
+TYPE_GUIDS = {
+    "Visualization Manager": "4d3fdb8f-ab50-4c35-9d3a-d4bb9bb9a628",
+    "TargetVisu": "bc63f5fa-d286-4786-994e-7b27e4f97bd5",
+    "WebVisu": "0fdbf158-1ae0-47d9-9269-cd84be308e9d",
+    "Alarm Configuration": "c0a56ce5-14a3-4757-ac56-3eab44c974b3",
+}
+ALARM_CLASS_TYPE = "b8b46f61-c7c1-4259-87e4-26fe674798f9"
+
+
+def _type_of(ch):
+    try:
+        return to_text(ch.type).strip("{}").lower()
+    except Exception:
+        return ""
+
+
+def _find_child_deep(c, name, under=None):
+    root = under if under is not None else c.app
+    want = TYPE_GUIDS.get(name)
+    kids = list(root.get_children(True))
+    if want:
+        for ch in kids:
+            if _type_of(ch) == want:
+                return ch
+    for ch in kids:
         if name_of(ch).lower() == name.lower():
             return ch
     return None

@@ -270,7 +270,8 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 有些操作超出了 CODESYS 脚本 API 文档的范围，使用 IDE 内部的 CODESYS 服务：`get_signature`、
 `find_references`、`rename_symbol`、`trace_setup`、`trace_record`、调试操作、`hmi_export_codesys`
 （包括报警和用户组）、报警操作以及 `--show-window`。它们属于**实验性功能**：已在 CODESYS V3.5 SP21 和 SP22 上
-验证（见[更新日志](CHANGELOG.md)），在其他版本上可能提示功能不可用，或无法正常工作。
+验证（见[更新日志](CHANGELOG.md)），在其他版本上可能提示功能不可用，或无法正常工作。它们不依赖 CODESYS 的界面语言：
+原生 HMI 导出也在德文和中文界面下验证过。
 
 Claude 编写结构化文本，并可用 `create_graphical` 根据梯级、网络或步骤的简单描述创建梯形图（LD）、
 FBD、CFC 和 SFC 程序及功能块，由 CODESYS 绘制。SFC 可以包含选择分支、并行分支和跳转。读取 LD、FBD、CFC

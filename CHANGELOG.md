@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- CODESYS in another language: the native HMI export set the button and
+  switch inputs (Input configuration) by their English names, which a German
+  CODESYS doesn't know, so its buttons did nothing. The watcher now finds a
+  property through the property tree's language-independent ids, and CODESYS's
+  own objects (Visualization Manager, TargetVisu, WebVisu, Alarm
+  Configuration, alarm classes) by their type instead of their English name.
+  Checked on SP21 with a German and a Chinese user interface (`--culture`):
+  every property applied, the alarms work, 0 compile errors.
+
 ## [2.9.0] - 2026-11-14
 
 ### Added

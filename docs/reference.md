@@ -109,6 +109,7 @@ action that can't work there says so instead of failing halfway.
 | `breakpoint_on_change`, `watch` | not checked | yes | not checked |
 | `find_library`, `pin_library` | not checked | yes | not checked |
 | HMI themes, native pipe flow, access rights per tile | yes | not checked | not checked |
+| Native HMI export with CODESYS in German or Chinese | yes | not checked | not checked |
 | `find_device`, `add_device`, `device_parameters`, `configure_device` | yes | yes | not checked |
 | `project_report`, `export_sources` | yes | yes | not checked |
 
