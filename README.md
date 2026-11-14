@@ -122,7 +122,7 @@ operation. [The reference](docs/reference.md) describes each one.
 | **Simulation** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` `codesys_sim_test` |
 | **Trace** | `trace_setup` `trace_record` |
 | **Debug** | `breakpoint_set` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` |
-| **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` |
+| **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` `hmi_translate` |
 | **Alarms** | `alarm_list` `alarm_status` `alarm_acknowledge` |
 | **Handover** | `project_report` `export_sources` |
 | **Helpers** | `batch` `wait` `help` `open_workspace` `show_in_codesys` |

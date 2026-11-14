@@ -36,7 +36,7 @@ function toneFor(x: number | undefined, bands?: { from: number; tone: string }[]
 /** Value history per variable, kept across page changes so trends don't restart. */
 const history = new Map<string, { t: number; v: number }[]>();
 
-export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, navigate?: (page: string) => void): LiveScreen {
+export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, navigate?: (page: string) => void, onLang?: (lang: string) => void): LiveScreen {
   // Show a write at once, so a second click builds on it before the next poll.
   const write: Write = (variable, value) => {
     send(variable, value);
@@ -79,6 +79,8 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, n
   };
   const onClick = (e: MouseEvent) => {
     const t = e.target as HTMLElement;
+    const lang = t.closest<HTMLElement>("[data-lang]");
+    if (lang) return onLang?.(lang.dataset.lang ?? "");
     const ack = t.closest<HTMLElement>("[data-ack]");
     if (ack) return send(`@ack:${ack.dataset.ack}`, "TRUE");
     const nav = t.closest<HTMLElement>("[data-nav]");

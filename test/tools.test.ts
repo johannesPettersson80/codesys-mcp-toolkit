@@ -84,6 +84,7 @@ describe("MCP tools over the real watcher", () => {
         "hmi_save_screen",
         "hmi_save_symbol",
         "hmi_symbols",
+        "hmi_translate",
         "hmi_screenshot",
         "hmi_template",
         "list_libraries",

@@ -248,7 +248,7 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 | **调试** | `breakpoint_set` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` |
 | **报警** | `alarm_list` `alarm_status` `alarm_acknowledge` |
 | **交接** | `project_report` `export_sources` |
-| **HMI 画面** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` |
+| **HMI 画面** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` `hmi_translate` |
 | **辅助** | `batch` `wait` `help` `open_workspace` `show_in_codesys` |
 
 `batch` 可以在一次调用中执行最多 50 个操作，比逐个调用快得多。

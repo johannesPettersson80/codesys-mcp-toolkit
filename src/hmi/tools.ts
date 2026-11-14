@@ -15,7 +15,7 @@ import { nativePlan } from "./native.js";
 import { canvasOf, tileBox } from "./render.js";
 import { overlapWarnings } from "./route.js";
 import { TEMPLATES } from "./templates.js";
-import { allAlarms, layoutProblems, screenSchema, screenVariables } from "./spec.js";
+import { allAlarms, layoutProblems, screenSchema, screenTexts, screenVariables, translateScreen } from "./spec.js";
 
 const text = (t: string, isError = false): ActionResult => ({ content: [{ type: "text", text: t }], ...(isError ? { isError } : {}) });
 
@@ -64,10 +64,14 @@ Layout: ${looks.join(" ")}` : "";
       inputSchema: z.object({
         screen: z.string().optional().describe("Screen name (default: the first)"),
         values: z.record(z.string(), z.string()).optional().describe("Values to show instead, e.g. { 'PLC_PRG.rLevel': '72.5', 'PLC_PRG.xRun': 'TRUE' }"),
+        language: z.string().optional().describe("Show it translated (a language from hmi_translate)"),
       }),
     },
-    async ({ screen: name, values }) => {
-      const s = hmi.screen(name);
+    async ({ screen: name, values, language }) => {
+      const s0 = hmi.screen(name);
+      const map = language ? hmi.translations()[language] : undefined;
+      if (language && !map) return text(`No translations for '${language}'. Languages: ${Object.keys(hmi.translations()).join(", ") || "none"} (add one with hmi_translate).`, true);
+      const s = s0 && map ? translateScreen(s0, map) : s0;
       if (!s) return text(name ? `No screen named '${name}'. Screens: ${hmi.screens().map((x) => x.name).join(", ") || "none"}.` : "This project has no HMI screens yet: create one with hmi_save_screen.", true);
       const script = hmiScript();
       if (!script) return text("The HMI page isn't built. Run npm run build.", true);
@@ -84,7 +88,9 @@ Layout: ${looks.join(" ")}` : "";
       }
       if (!values && !Object.keys(shown).length) shown = previewValues(s) as Record<string, string>;
       try {
-        const png = await screenshot(staticPage(s, shown, hmi.sim(), script, hmi.page()), undefined, canvasOf(s));
+        const page = hmi.page();
+        const shownPage = map ? { ...page, lang: language, pages: page.pages?.map((p) => ({ ...p, title: map[p.title] ?? p.title })) } : page;
+        const png = await screenshot(staticPage(s, shown, hmi.sim(), script, shownPage), undefined, canvasOf(s));
         return { content: [{ type: "image", data: png.toString("base64"), mimeType: "image/png" }, { type: "text", text: `Screen '${s.name}' (${s.size}) with ${source}.` }] };
       } catch (e) {
         return text(`Screenshot failed: ${(e as Error).message}`, true);
@@ -143,6 +149,36 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
   );
 
   reg(
+    "hmi_translate",
+    {
+      description:
+        "Translate the HMI into another language: texts maps each text as written on the screens (titles, labels, button captions, alarm messages) to its translation. Merges with what the language has (replace: true starts it over; an empty translation removes one). Returns the texts still untranslated. The browser HMI gets language buttons in its header; hmi_export_codesys puts the alarm messages' translations in CODESYS's alarm text list (the native pages stay in the base language for now). Call without texts to get the list to translate.",
+      inputSchema: z.object({
+        language: z.string().regex(/^[a-z]{2}(-[A-Za-z]{2,4})?$/).describe("Language code, e.g. 'de', 'sv', 'zh'"),
+        texts: z.record(z.string(), z.string()).optional(),
+        replace: z.boolean().optional(),
+      }),
+    },
+    async ({ language, texts, replace }) => {
+      if (!ctx.project) return text("No project is open: open or create one first.", true);
+      const all = screenTexts(hmi.screens());
+      if (!all.length) return text("This project has no HMI screens to translate.", true);
+      const known = new Set(all);
+      const unknown = Object.keys(texts ?? {}).filter((k) => !known.has(k));
+      const n = texts ? hmi.setTranslations(language, texts, !!replace) : Object.keys(hmi.translations()[language] ?? {}).length;
+      const map = hmi.translations()[language] ?? {};
+      const missing = all.filter((t) => !map[t]);
+      return text(
+        [
+          texts ? `Saved ${n} translation(s) for '${language}'.` : `'${language}' has ${n} translation(s).`,
+          unknown.length ? `Not on any screen (kept anyway, check the spelling): ${unknown.slice(0, 10).map((u) => JSON.stringify(u)).join(", ")}` : "",
+          missing.length ? `Still untranslated (${missing.length}): ${JSON.stringify(missing)}` : `Every text on the screens has a '${language}' translation. hmi_screenshot with language: '${language}' shows it.`,
+        ].filter(Boolean).join("\n"),
+      );
+    },
+  );
+
+  reg(
     "hmi_symbols",
     {
       description: "The process-diagram symbols you can place ({type: 'symbol', symbol: '<name>'}): the standard ones and the project's own, as a picture in their off, on and fault colours with their ports, and as a list.",
@@ -188,6 +224,7 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
         const warnings: string[] = [];
         const builtNames: string[] = [];
         let first: { visu: string; w: number; h: number } | undefined;
+        const translations = hmi.translations();
         // The pages' alarms as CODESYS alarms first (timestamps and acknowledge in the PLC):
         // the alarm rows then follow their states.
         const alarms = allAlarms(all);
@@ -206,7 +243,7 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
         // The first page is built last, so a CODESYS window ends up showing the start page.
         for (const [k, s] of [...targets].reverse().entries()) {
           reportProgress(`page ${k + 1}/${targets.length}: Visu_${s.name}`);
-          const plan = nativePlan(s, pages, hmi.symbols(), alarmIndex);
+          const plan = nativePlan(s, pages, hmi.symbols(), alarmIndex, Object.keys(translations));
           const images = plan.images.map((img) => {
             const path = join(dir, `${img.id}.svg`);
             writeFileSync(path, img.svg, "utf8");
@@ -238,6 +275,18 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
             } catch {
               /* try the next task */
             }
+          }
+        }
+        // Alarm message translations into the alarm group's text list (CODESYS's alarm tables and
+        // storage use them). The pages themselves don't switch language natively yet.
+        if (Object.keys(translations).length && alarmIndex) {
+          reportProgress("alarm message translations");
+          try {
+            const r = await b.call<{ languages: string[]; rows: number; added: number; errors: string[] }>("textlists.translate", { translations, alarm_group: "AG_HMI", global: false, save: false }, { timeoutMs: 120_000 });
+            notes.push(`Alarm messages translated into ${r.languages.join(", ")} in CODESYS's alarm text list (${r.rows}). The native pages show the base language; the browser HMI switches languages.`);
+            warnings.push(...r.errors.map((e) => `translation ${e}`));
+          } catch (e) {
+            warnings.push(`translations: ${(e as Error).message}`);
           }
         }
         // User groups for the Login button; users and passwords are the engineer's to add.

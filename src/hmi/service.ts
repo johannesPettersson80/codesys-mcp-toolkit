@@ -25,6 +25,8 @@ interface HmiFile {
   screens: Screen[];
   /** The project's own symbols (hmi_save_symbol). */
   symbols?: SymbolLib;
+  /** Translations per language code: original text -> translated text (hmi_translate). */
+  translations?: Record<string, Record<string, string>>;
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -60,7 +62,12 @@ export class HmiService {
   private store(data: HmiFile): string {
     const f = this.file();
     if (!f) throw new Error("No project is open. Open or create a project first; screens are stored next to it.");
-    const out: HmiFile = { version: 1, screens: data.screens, ...(data.symbols && Object.keys(data.symbols).length ? { symbols: data.symbols } : {}) };
+    const out: HmiFile = {
+      version: 1,
+      screens: data.screens,
+      ...(data.symbols && Object.keys(data.symbols).length ? { symbols: data.symbols } : {}),
+      ...(data.translations && Object.keys(data.translations).length ? { translations: data.translations } : {}),
+    };
     writeFileSync(f, `${JSON.stringify(out, null, 2)}\n`, "utf8");
     return f;
   }
@@ -93,6 +100,21 @@ export class HmiService {
     const replaced = name in symbols;
     symbols[name] = def;
     return { file: this.store({ ...data, screens: data.screens ?? [], symbols }), replaced };
+  }
+
+  translations(): Record<string, Record<string, string>> {
+    return this.read().translations ?? {};
+  }
+
+  /** Adds (or with replace, sets) one language's translations; returns how many it holds now. */
+  setTranslations(language: string, texts: Record<string, string>, replace = false): number {
+    const data = this.read();
+    const all = { ...(data.translations ?? {}) };
+    all[language] = { ...(replace ? {} : all[language] ?? {}), ...texts };
+    for (const k of Object.keys(all[language]!)) if (!all[language]![k]) delete all[language]![k];
+    if (!Object.keys(all[language]!).length) delete all[language];
+    this.store({ ...data, screens: data.screens ?? [], translations: all });
+    return Object.keys(all[language] ?? {}).length;
   }
 
   removeSymbol(name: string): boolean {
@@ -131,7 +153,13 @@ export class HmiService {
   page(): PageContext {
     const all = this.screens();
     const symbols = this.symbols();
-    return { pages: all.map((x) => ({ name: x.name, title: x.title })), alarms: allAlarms(all), ...(Object.keys(symbols).length ? { symbols } : {}) };
+    const translations = this.translations();
+    return {
+      pages: all.map((x) => ({ name: x.name, title: x.title })),
+      alarms: allAlarms(all),
+      ...(Object.keys(symbols).length ? { symbols } : {}),
+      ...(Object.keys(translations).length ? { languages: Object.keys(translations) } : {}),
+    };
   }
 
   sim(): { state?: string } {

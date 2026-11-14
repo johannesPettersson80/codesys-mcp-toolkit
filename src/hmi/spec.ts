@@ -212,4 +212,33 @@ export function layoutProblems(s: Screen, lib: SymbolLib = BUILTIN_SYMBOLS): str
   return out;
 }
 
+/** Keys whose values are texts the operator reads (not variables, names or ids). */
+const TEXT_KEYS = new Set(["title", "subtitle", "label", "text"]);
+
+/** Every distinct text on the screens an operator reads, for translation. */
+export function screenTexts(screens: Screen[]): string[] {
+  const out = new Set<string>();
+  const walk = (o: unknown) => {
+    if (Array.isArray(o)) o.forEach(walk);
+    else if (o && typeof o === "object")
+      for (const [k, v] of Object.entries(o)) {
+        if (TEXT_KEYS.has(k) && typeof v === "string" && /[A-Za-zÀ-￿]/.test(v)) out.add(v);
+        else walk(v);
+      }
+  };
+  walk(screens);
+  return [...out];
+}
+
+/** The screen with its texts translated (texts without a translation stay as they are). */
+export function translateScreen<T>(screen: T, map: Record<string, string> | undefined): T {
+  if (!map || !Object.keys(map).length) return screen;
+  const walk = (o: unknown): unknown => {
+    if (Array.isArray(o)) return o.map(walk);
+    if (o && typeof o === "object") return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, TEXT_KEYS.has(k) && typeof v === "string" ? (map[v] ?? v) : walk(v)]));
+    return o;
+  };
+  return walk(screen) as T;
+}
+
 export { plcValue } from "./value.js";

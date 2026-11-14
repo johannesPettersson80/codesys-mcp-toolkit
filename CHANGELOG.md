@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Languages: `hmi_translate` stores translations of the HMI's texts per
+  language and lists what is still untranslated; the browser HMI gets language
+  buttons in its header and switches live (checked on SP21); `hmi_screenshot`
+  takes `language`. The export puts the alarm messages' translations into
+  CODESYS's alarm text list. Native pages don't switch language yet.
 - `codesys_status` reports which optional features this CODESYS offers
   (visualization, signatures, cross-references, debugging, trace, alarms, user
   groups, device repository, FloatingPointUtils) and what a missing one affects.

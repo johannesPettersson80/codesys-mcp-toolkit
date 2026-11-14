@@ -5,7 +5,7 @@
  *   server's local viewer endpoint and writes button presses back.
  */
 import { canvasOf, HMI_CSS, renderScreen, type PageContext } from "../../src/hmi/render.js";
-import type { Screen } from "../../src/hmi/spec.js";
+import { translateScreen, type Screen } from "../../src/hmi/spec.js";
 import { mountLive, seedHistory, type LiveScreen, type Values } from "./hmi-live.js";
 
 declare global {
@@ -32,11 +32,20 @@ function css(text: string) {
 
 let current: Screen | undefined;
 
-function mount(stage: HTMLElement, screen: Screen, write: (v: string, value: string) => void, page: PageContext = {}, navigate?: (p: string) => void): LiveScreen {
+function mount(stage: HTMLElement, screen: Screen, write: (v: string, value: string) => void, page: PageContext = {}, navigate?: (p: string) => void, onLang?: (l: string) => void): LiveScreen {
   const r = renderScreen(screen, page);
   stage.innerHTML = r.html;
   current = screen;
-  return mountLive(stage.firstElementChild as HTMLElement, r.bindings, write, navigate);
+  return mountLive(stage.firstElementChild as HTMLElement, r.bindings, write, navigate, onLang);
+}
+
+const LANG_KEY = "cmcp-hmi-lang";
+function storedLang(): string {
+  try {
+    return new URLSearchParams(location.search).get("lang") ?? localStorage.getItem(LANG_KEY) ?? "";
+  } catch {
+    return "";
+  }
 }
 
 function fit(stage: HTMLElement, fixed: boolean) {
@@ -72,16 +81,18 @@ async function live(stage: HTMLElement) {
     banner.textContent = msg ?? "";
   };
   let screenKey = "";
+  let lang = storedLang();
   let screen: LiveScreen | undefined;
   const write = (variable: string, value: string) => void call("ui_hmi_write", { variable, value }).then((r) => show(r.ok === false ? String(r.message) : undefined), (e: Error) => show(e.message));
   for (;;) {
     try {
-      const r = (await call("get_hmi", { screen: name })) as { screens: { name: string; title: string }[]; screen?: Screen; values?: Values; sim?: { state?: string }; alarms?: { active: string }[]; symbols?: PageContext["symbols"] };
+      const r = (await call("get_hmi", { screen: name })) as { screens: { name: string; title: string }[]; screen?: Screen; values?: Values; sim?: { state?: string }; alarms?: { active: string }[]; symbols?: PageContext["symbols"]; translations?: Record<string, Record<string, string>> };
+      const map = lang ? r.translations?.[lang] : undefined;
       show(r.screen ? undefined : "No HMI screens in this project yet: ask Claude to make one.");
       tabs.innerHTML = "";
       void (r.screens.length > 1 ? r.screens.map((s) => `<button data-s="${s.name}" class="${s.name === r.screen?.name ? "cur" : ""}">${s.title.replace(/[<&]/g, "")}</button>`).join("") : "");
       if (r.screen) {
-        const key = JSON.stringify([r.screen, r.screens, r.alarms, r.symbols]);
+        const key = JSON.stringify([r.screen, r.screens, r.alarms, r.symbols, lang, map]);
         if (key !== screenKey) {
           screen?.destroy();
           const go = (p: string) => {
@@ -89,7 +100,18 @@ async function live(stage: HTMLElement) {
             history.replaceState(null, "", `?t=${encodeURIComponent(token)}&s=${encodeURIComponent(p)}`);
             screenKey = "";
           };
-          screen = mount(stage, r.screen, write, { pages: r.screens, alarms: r.alarms, symbols: r.symbols }, go);
+          const setLang = (l: string) => {
+            lang = l;
+            try {
+              localStorage.setItem(LANG_KEY, l);
+            } catch {
+              /* a private window: the choice lasts until reload */
+            }
+            screenKey = "";
+          };
+          const languages = Object.keys(r.translations ?? {});
+          const pages = r.screens.map((p) => ({ ...p, title: map?.[p.title] ?? p.title }));
+          screen = mount(stage, translateScreen(r.screen, map), write, { pages, alarms: r.alarms, symbols: r.symbols, ...(languages.length ? { languages, ...(map ? { lang } : {}) } : {}) }, go, setLang);
           screenKey = key;
           document.title = r.screen.title;
           fit(stage, false);

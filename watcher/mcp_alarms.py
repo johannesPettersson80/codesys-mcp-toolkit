@@ -151,6 +151,47 @@ def op_alarms_list(args):
     return {"groups": groups}
 
 
+def op_textlists_translate(args):
+    """Translations into CODESYS's text lists (documented text-list scripting): the
+    GlobalTextList, where a visualization looks up its static texts by the text itself,
+    and the HMI's alarm group list (alarm messages, matched by their default text)."""
+    c = Ctx()
+    out = {"languages": [], "rows": 0, "added": 0, "errors": []}
+    lists = []
+    names = (["GlobalTextList"] if args.get("global", True) else []) + ([args["alarm_group"]] if args.get("alarm_group") else [])
+    for name in names:
+        for tl in c.proj.find(name, True):
+            if hasattr(tl, "rows"):
+                lists.append((name, tl))
+                break
+    for lang, texts in (args.get("translations") or {}).items():
+        out["languages"].append(lang)
+        for name, tl in lists:
+            try:
+                tl.addlanguage(lang)
+            except Exception:
+                pass  # it has the language already
+            rows = {}
+            for r in tl.rows:
+                rows[to_text(r.defaulttext)] = r
+            for text, tr in texts.items():
+                try:
+                    r = rows.get(text)
+                    if r is None:
+                        if name != "GlobalTextList":
+                            continue
+                        r = tl.rows.add(text, text)
+                        rows[text] = r
+                        out["added"] += 1
+                    r.setlanguagetext(lang, tr)
+                    out["rows"] += 1
+                except Exception as e:
+                    if len(out["errors"]) < 8:
+                        out["errors"].append("%s/%s: %s" % (name, text[:30], to_text(e)[:120]))
+    out["saved"] = c.save_if(args)
+    return out
+
+
 def op_visu_users(args):
     """Visualization user groups (no users: their passwords are the engineer's to set)."""
     import System
@@ -190,3 +231,4 @@ def op_visu_users(args):
 mcp_ops.OPS["alarms.configure"] = mcp_sim._locked(op_alarms_configure)
 mcp_ops.OPS["visu.users"] = mcp_sim._locked(op_visu_users)
 mcp_ops.OPS["alarms.list"] = op_alarms_list
+mcp_ops.OPS["textlists.translate"] = mcp_sim._locked(op_textlists_translate)

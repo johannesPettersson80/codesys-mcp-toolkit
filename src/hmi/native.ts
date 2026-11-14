@@ -176,7 +176,7 @@ ${on ? `<circle cx="50" cy="50" r="46" fill="none" stroke="${ring}" stroke-width
  * alarmIndex: each HMI alarm's position in the CODESYS alarm group AG_HMI (when the export put
  * them there); those rows then follow CODESYS's alarm states and can be acknowledged.
  */
-export function nativePlan(screen: Screen, pages: { name: string; title: string }[] = [], custom: SymbolLib = {}, alarmIndex?: Record<string, number>): NativePlan {
+export function nativePlan(screen: Screen, pages: { name: string; title: string }[] = [], custom: SymbolLib = {}, alarmIndex?: Record<string, number>, languages: string[] = []): NativePlan {
   const p = PALETTES[screen.theme];
   const lib: SymbolLib = { ...BUILTIN_SYMBOLS, ...custom };
   const dark = screen.theme === "dark";
@@ -229,6 +229,9 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
   if (screen.subtitle) els.push(text(24, 34, 760, 20, screen.subtitle, [FONT, 9.5], 0xffa5b4fc));
   const navCount = pages.length > 1 ? pages.length : 0;
   const loginX = cv.w - 24 - navCount * 140 - 96;
+  // No language buttons yet: checked on SP21, VisuElems.VisuFctChangeLanguage runs, but
+  // CODESYS doesn't look up texts set by script in the GlobalTextList, so nothing changed.
+  void languages;
   els.push({ kind: "round", name: "Login", x: r(loginX), y: 13, w: 84, h: 34, text: "Login", font: [SEMI, 10], color: p.headerText, fill: p.header[1], frame: 0x55ffffff, radius: 10, login: true });
   if (pages.length > 1) {
     const bw = 132, gap = 8;

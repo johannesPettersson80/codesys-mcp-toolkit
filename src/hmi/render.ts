@@ -25,6 +25,10 @@ export interface PageContext {
   alarms?: { active: string }[];
   /** The project's own symbols (hmi_save_symbol), besides the standard ones. */
   symbols?: SymbolLib;
+  /** Languages with translations (the screens' own texts are the base language). */
+  languages?: string[];
+  /** The language shown (undefined: the base language). */
+  lang?: string;
 }
 
 export type Binding =
@@ -87,7 +91,7 @@ export function renderScreen(screen: Screen, page: PageContext = {}): Rendered {
 <div class="glow"></div>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">${DEFS}</svg>
 <header class="h-bar"><div class="h-titles"><div class="h-title">${esc(screen.title)}</div>${screen.subtitle ? `<div class="h-sub">${esc(screen.subtitle)}</div>` : ""}</div>
-${nav}<div class="h-right">${badge}<div class="h-sim" data-sim><span class="dot"></span><span class="lbl">Offline</span></div><div class="h-clock" data-clock>--:--:--</div></div></header>
+${nav}<div class="h-right">${page.languages?.length ? `<div class="h-langs"><button class="h-lang${page.lang ? "" : " cur"}" data-lang="">EN</button>${page.languages.map((l) => `<button class="h-lang${page.lang === l ? " cur" : ""}" data-lang="${esc(l)}">${esc(l.toUpperCase())}</button>`).join("")}</div>` : ""}${badge}<div class="h-sim" data-sim><span class="dot"></span><span class="lbl">Offline</span></div><div class="h-clock" data-clock>--:--:--</div></div></header>
 ${tiles.join("\n")}
 ${faces.join("\n")}
 </div>`;
@@ -279,6 +283,8 @@ export const HMI_CSS = String.raw`
 .h-nav{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:4px;padding:4px;border-radius:12px;background:var(--tile);border:1px solid var(--tile-bd)}
 .h-page{border:0;border-radius:9px;padding:8px 16px;background:transparent;color:var(--muted);font:600 13px/1 inherit;cursor:pointer;letter-spacing:.02em}
 .h-page:hover{color:var(--fg)}.h-page.cur{background:var(--accent);color:#04121f}
+.h-langs{display:flex;gap:2px;padding:3px;border-radius:10px;background:var(--tile);border:1px solid var(--tile-bd)}
+.h-lang{border:0;border-radius:7px;padding:5px 8px;background:transparent;color:var(--muted);font:700 11px/1 inherit;letter-spacing:.06em;cursor:pointer}.h-lang.cur{background:var(--accent);color:#04121f}
 .h-alarm{display:flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;border:1px solid var(--tile-bd);background:var(--tile);font-size:12px;font-weight:700;color:var(--muted)}
 .h-alarm .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}.h-alarm.on{color:#fff;background:color-mix(in srgb,var(--alarm) 75%,transparent);border-color:var(--alarm);animation:blink 1.2s infinite}.h-alarm.on .dot{background:#fff}
 .clickable{cursor:pointer}.clickable:hover .pump-ring,.clickable:hover .valve-body{filter:drop-shadow(0 0 1.5px var(--accent))}

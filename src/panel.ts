@@ -273,7 +273,7 @@ export function registerPanel(server: McpServer, ws: PanelDeps = { project: () =
         const s = hmi?.screen(screen) ?? all[0];
         const live = s && hmi ? await hmi.values(s).catch(() => ({ values: {}, errors: {} })) : { values: {}, errors: {} };
         const page = hmi?.page();
-        return json({ screens: all.map((x) => ({ name: x.name, title: x.title })), ...(s ? { screen: s } : {}), values: live.values, sim: hmi?.sim() ?? {}, alarms: page?.alarms ?? [], ...(page?.symbols ? { symbols: page.symbols } : {}) });
+        return json({ screens: all.map((x) => ({ name: x.name, title: x.title })), ...(s ? { screen: s } : {}), values: live.values, sim: hmi?.sim() ?? {}, alarms: page?.alarms ?? [], ...(page?.symbols ? { symbols: page.symbols } : {}), ...(page?.languages ? { translations: hmi!.translations() } : {}) });
       },
     ),
   );
