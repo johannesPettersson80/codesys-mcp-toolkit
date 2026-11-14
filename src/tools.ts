@@ -126,6 +126,29 @@ export interface ProjectInfo {
   compiler_version?: string;
 }
 
+/** What each optional feature enables, for codesys_status. */
+const CAPABILITY_USES: Record<string, string> = {
+  visualization: "hmi_export_codesys",
+  signatures: "get_signature",
+  cross_references: "find_references, rename_symbol",
+  debugging: "breakpoints and stepping",
+  trace: "trace_setup, trace_record",
+  alarms: "CODESYS alarms (export, alarm_status)",
+  visu_users: "the HMI's user groups and Login",
+  device_repository: "find_device, add_device",
+  library_manager: "library search and add_library by title",
+  editor_window: "show_in_codesys and editors following the work (--show-window)",
+  floating_point_utils: "compiling visualizations",
+};
+
+/** "Features: ... Not available: x (what it affects)." */
+export function describeCapabilities(c: Record<string, boolean | null>): string {
+  const have = Object.keys(c).filter((k) => c[k] === true);
+  // The window is a mode (--show-window), not something this CODESYS lacks.
+  const missing = Object.keys(c).filter((k) => c[k] === false && k !== "editor_window");
+  return `Features: ${have.map((k) => k.replace(/_/g, " ")).join(", ") || "none"}.${missing.length ? ` Not available here: ${missing.map((k) => `${k.replace(/_/g, " ")} (${CAPABILITY_USES[k] ?? "-"})`).join("; ")}.` : ""}`;
+}
+
 /** " Compiler 3.5.21.0. Defines: FAST, MODE." plus a note when CODESYS is newer than the project. */
 export function describeBuildSettings(r: ProjectInfo, codesysLabel?: string): string {
   const out: string[] = [];
@@ -279,6 +302,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   };
   const savedNote = (r: { saved?: boolean }) => (r.saved ? " Project saved." : ctx.autosave ? "" : " (not saved; call save_project)");
 
+  let caps: { restarts: number; list: Record<string, boolean | null> } | undefined;
   reg(
     "codesys_status",
     {
@@ -294,6 +318,12 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       ];
       if (h.heartbeat) lines.push(`Watcher: ${h.heartbeat.state}${h.heartbeat.op ? ` (${h.heartbeat.op})` : ""}, heartbeat ${Math.round(h.heartbeat.ageMs / 1000)}s ago`);
       if (h.lastError) lines.push(`Last error: ${h.lastError}`);
+      // What this CODESYS offers (asked once per CODESYS session, and only while the watcher is idle).
+      if (h.verdict === "healthy" && h.heartbeat?.state === "idle" && caps?.restarts !== h.restarts) {
+        const r = await b.call<{ capabilities: Record<string, boolean | null> }>("capabilities", {}, { timeoutMs: 15_000 }).catch(() => undefined);
+        if (r) caps = { restarts: h.restarts, list: r.capabilities };
+      }
+      if (caps) lines.push(describeCapabilities(caps.list));
       lines.push(ctx.project ? `Project (last opened): ${ctx.project.path}, application ${ctx.project.application ?? "none"}.${describeBuildSettings(ctx.project, ctx.codesys?.label)}` : "Project: none opened in this session");
       if (h.sessionDir) lines.push(`Session folder: ${h.sessionDir}`);
       return text(lines.join("\n"));
@@ -842,7 +872,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
           const rel = n.path.split("/").map(safe).join("/");
           const text = [n.declaration ? nl(n.declaration) : "", n.implementation && n.st !== false ? nl(n.implementation) : ""].filter(Boolean).join("\n\n");
           if (text) files.set(`${rel}.st`, `${text}\n`);
-          if (n.st === false && n.xml) files.set(`${rel}.xml`, `${nl(n.xml)}\n`);
+          // The export stamps the time into the XML header: leave it out, or every export is a change.
+          if (n.st === false && n.xml) files.set(`${rel}.xml`, `${nl(n.xml).replace(/\s(?:creationDateTime|modificationDateTime)="[^"]*"/g, "")}\n`);
         }
         reportProgress("tasks, libraries, devices and alarms");
         const tasks = (await b.call<{ tasks: TaskInfo[] }>("tasks.list")).tasks;

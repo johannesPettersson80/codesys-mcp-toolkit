@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `codesys_status` reports which optional features this CODESYS offers
+  (visualization, signatures, cross-references, debugging, trace, alarms, user
+  groups, device repository, FloatingPointUtils) and what a missing one affects.
+- A table of what was checked on CODESYS SP21, SP22 and Machine Expert
+  (docs/reference.md), and live tests for the features beyond plain ST.
+
+### Fixed
+- `export_sources` rewrote graphical bodies on every export because of the
+  time stamp in their XML header; it now leaves them out, so only real
+  changes show in git.
+
 ## [2.6.0] - 2026-11-14
 
 ### Added

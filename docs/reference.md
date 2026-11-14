@@ -4,6 +4,7 @@ The full detail behind the [README](../README.md): every action, how paths and
 checks work, the simulation's behaviour and the live panel.
 
 - [Actions](#actions)
+- [Checked versions](#checked-versions)
 - [Object paths](#object-paths)
 - [Structured Text only](#structured-text-only)
 - [Declaration checks](#declaration-checks)
@@ -76,6 +77,32 @@ panel to one tool.
 Long actions send MCP progress notifications (`notifications/progress`) when the client asks for them with a progress token: the steps of an HMI export or a batch, and a heartbeat every 10 s.
 
 The simulation actions are listed under [CODESYS simulation](#codesys-simulation).
+
+## Checked versions
+
+What we checked live, in CODESYS's own simulation (never on a controller).
+`codesys_status` reports which optional features the CODESYS you run has, so an
+action that can't work there says so instead of failing halfway.
+
+| Feature | V3.5 SP21 | V3.5 SP22 Patch 4 | Machine Expert |
+| --- | --- | --- | --- |
+| ST: read, write, create, compile, simulation, sim tests | yes | yes | not rechecked for 2.x |
+| `--show-window`, editors following the work | yes | yes | not checked |
+| `show_in_codesys` | yes | not checked | not checked |
+| Browser HMI (`open_hmi`), symbols, alarm ACK | yes | yes | not checked |
+| Native HMI export (`hmi_export_codesys`): pages, symbols, gauges, faceplates | yes | needs FloatingPointUtils (missing on our SP22) | not checked |
+| CODESYS alarms: export, `alarm_status`, `alarm_acknowledge` | yes | not checked | not checked |
+| `get_signature`, `find_references` | yes | yes | not checked |
+| `rename_symbol` | not checked | yes | not checked |
+| `create_graphical` (LD, FBD, SFC) | yes | yes | not checked |
+| Reading LD, FBD, SFC as a description, `replace` | yes | yes | not checked |
+| `trace_setup`, `trace_record` | yes (probe) | yes | not checked |
+| Debugging (breakpoints, stepping) | yes (probe) | yes | not checked |
+| `find_device`, `add_device`, `device_parameters`, `configure_device` | yes | yes | not checked |
+| `project_report`, `export_sources` | yes | yes | not checked |
+
+"Probe" means the CODESYS calls were checked by a probe script on that version,
+not through the action itself.
 
 ## Object paths
 

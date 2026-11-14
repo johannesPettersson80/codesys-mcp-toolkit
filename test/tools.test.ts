@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createServer } from "../src/server.js";
-import type { AppContext } from "../src/tools.js";
+import { describeCapabilities, type AppContext } from "../src/tools.js";
 import { fakeBridge, fakeProjectFile, tempDir, viaCodesys } from "./helpers.js";
 
 let client: Client;
@@ -277,6 +277,13 @@ describe("MCP tools over the real watcher", () => {
     const r = await call("codesys_status");
     expect(r.text).toMatch(/Bridge: ready \/ healthy/);
     expect(r.text).toMatch(/Project \(last opened\): .*Sample\.project/);
+    // The watcher's capability check (the fake engine has few of CODESYS's optional services).
+    expect(r.text).toMatch(/Features: .*\. Not available here: .*visualization \(hmi_export_codesys\)/);
+  });
+
+  it("describes what a missing feature affects", () => {
+    expect(describeCapabilities({ visualization: true, trace: false, floating_point_utils: null })).toBe("Features: visualization. Not available here: trace (trace_setup, trace_record).");
+    expect(describeCapabilities({ signatures: true })).toBe("Features: signatures.");
   });
 
   it("persists saved changes across close + reopen", async () => {

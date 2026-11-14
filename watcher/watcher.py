@@ -260,6 +260,7 @@ def main(ui=False):
     import mcp_debug  # noqa: F401 (adds breakpoints and stepping)
     import mcp_devices  # noqa: F401 (adds device search and add)
     import mcp_alarms  # noqa: F401 (adds alarm management and visu user groups)
+    import mcp_caps  # noqa: F401 (adds the capability check)
     prompts = setup_prompts(se)
     log(prompts)
     if not hasattr(se, "FAKE"):
@@ -311,6 +312,7 @@ def main_attach():
     import mcp_debug  # noqa: F401 (adds breakpoints and stepping)
     import mcp_devices  # noqa: F401 (adds device search and add)
     import mcp_alarms  # noqa: F401 (adds alarm management and visu user groups)
+    import mcp_caps  # noqa: F401 (adds the capability check)
     prompts = setup_prompts(se)
     log(prompts)
     old = getattr(__builtin__, "_mcp_attach_timer", None)
