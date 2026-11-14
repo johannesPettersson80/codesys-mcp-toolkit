@@ -109,20 +109,25 @@ operation. [The reference](docs/reference.md) describes each one.
 | --- | --- |
 | **Projects** | `open_project` `create_project` `save_project` `close_project` `codesys_status` |
 | **Read code** | `get_project_tree` `read_objects` `search_code` `get_outline` |
-| **Change code** | `write_object` `create_object` `delete_object` `rename_object` |
+| **Change code** | `write_object` `create_object` `create_graphical` `delete_object` `rename_object` |
 | **Build** | `compile` |
-| **Libraries** | `list_libraries` `add_library` `remove_library` `get_library_api` |
-| **Tasks and I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` |
+| **Libraries** | `list_libraries` `add_library` `remove_library` `get_library_api` `get_signature` |
+| **Navigate code** | `find_references` `rename_symbol` |
+| **Tasks and I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` `find_device` `add_device` |
 | **Change tracking** | `checkpoint` `get_changes` `revert_object` |
-| **Simulation** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` |
-| **HMI screens** | `hmi_save_screen` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` |
+| **Simulation** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` `codesys_sim_test` |
+| **Trace** | `trace_setup` `trace_record` |
+| **Debug** | `breakpoint_set` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` |
+| **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` |
 | **Helpers** | `batch` `wait` `help` `open_workspace` |
 
 `batch` runs up to 50 actions in one call, which is much faster than separate
 calls.
 
-Version 2 edits Structured Text only. Objects with graphical bodies (SFC, CFC,
-LD, FBD) appear in the tree and can be read as PLCopenXML, but not edited.
+Claude writes Structured Text, and creates ladder (LD), FBD and SFC programs
+and function blocks with `create_graphical` from a simple description of rungs,
+networks or steps; CODESYS draws them. Existing graphical bodies can be read as
+PLCopenXML but not edited in place yet. CFC isn't supported.
 
 ## Live panel
 
@@ -154,6 +159,12 @@ bound to your PLC variables.
 
 ![An HMI screen Claude designed for a pump station: the process diagram, tank level gauge, status lights, flow, a trend, pump buttons, mode switch, setpoint and alarms](docs/images/hmi-screen.png)
 
+- **A whole HMI, not one screen.** Pages (overview, unit, alarms, trends,
+  settings) share a header that links to every page and counts the active
+  alarms of all pages. `hmi_template` gives Claude a good layout for each kind
+  of page to adapt. Panels: 1280x720, 1920x1080, 1024x768 or 800x480.
+- **Faceplates.** Clicking a pump, fan or valve opens its popup: mode switch,
+  Start/Stop or Open/Close, Reset, live values and a setpoint.
 - **Pipes connect themselves.** Tanks, pumps, fans, valves and junctions have
   named ports (`T-101.right`, `P-101.in`, `V-102.out`). Claude says what a pipe
   connects, and the toolkit routes it with right angles to meet each symbol

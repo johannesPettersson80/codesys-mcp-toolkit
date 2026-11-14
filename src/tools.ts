@@ -1,6 +1,12 @@
 /** The CODESYS actions (ST only), all behind the one model-facing tool. See actions.ts. */
 import { HmiService } from "./hmi/service.js";
 import { registerHmiActions } from "./hmi/tools.js";
+import { registerLangActions, registerRenameAction } from "./codesys/lang.js";
+import { registerTraceActions } from "./codesys/trace.js";
+import { registerGraphicalActions } from "./codesys/graphical.js";
+import { registerDebugActions } from "./codesys/debug.js";
+import { registerSimTestAction } from "./codesys/simtest.js";
+import { registerDeviceActions } from "./codesys/device-tools.js";
 import { copyFile } from "node:fs/promises";
 import { registerActionTool, type Action, type RegisterAction } from "./actions.js";
 import { getUiCapability } from "@modelcontextprotocol/ext-apps/server";
@@ -98,6 +104,7 @@ const CREATE_TO_NODE: Record<CreateKind, { kind: TreeNode["kind"]; sub?: string 
   interface: { kind: "interface" },
   dut: { kind: "dut" },
   gvl: { kind: "gvl" },
+  persistent_vars: { kind: "gvl" },
   folder: { kind: "folder" },
 };
 
@@ -469,7 +476,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         "Create an ST object. kind: program | function_block | function (needs returnType) | method (under a POU or interface) | property (needs returnType) | action | interface | dut (dutType struct|enum|union|alias) | gvl | folder. Optionally set its declaration/implementation in the same call.",
       inputSchema: z.object({
         parent: pathArg.optional().describe("Parent object path (default: the application). Methods/properties/actions go under their POU."),
-        kind: z.enum(["program", "function_block", "function", "method", "property", "action", "interface", "dut", "gvl", "folder"]),
+        kind: z.enum(["program", "function_block", "function", "method", "property", "action", "interface", "dut", "gvl", "persistent_vars", "folder"]),
         name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "must be an IEC identifier"),
         returnType: z.string().optional(),
         dutType: z.enum(["struct", "enum", "union", "alias"]).optional(),
@@ -929,6 +936,13 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     },
   });
 
+  registerLangActions(reg, ctx, (fn) => run(ctx, fn));
+  registerRenameAction(reg, ctx, (fn) => run(ctx, fn));
+  registerTraceActions(reg, ctx, (fn) => run(ctx, fn));
+  registerGraphicalActions(reg, ctx, (fn) => run(ctx, fn));
+  registerDebugActions(reg, ctx, (fn) => run(ctx, fn));
+  registerSimTestAction(reg, ctx, (fn) => run(ctx, fn));
+  registerDeviceActions(reg, ctx, (fn) => run(ctx, fn));
   if (ctx.hmi) registerHmiActions(reg, ctx, ctx.hmi, (fn) => run(ctx, fn));
 
   registerActionTool(server, actions);

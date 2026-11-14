@@ -33,7 +33,10 @@ function toneFor(x: number | undefined, bands?: { from: number; tone: string }[]
   return t;
 }
 
-export function mountLive(root: HTMLElement, bindings: Binding[], send: Write): LiveScreen {
+/** Value history per variable, kept across page changes so trends don't restart. */
+const history = new Map<string, { t: number; v: number }[]>();
+
+export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, navigate?: (page: string) => void): LiveScreen {
   // Show a write at once, so a second click builds on it before the next poll.
   const write: Write = (variable, value) => {
     send(variable, value);
@@ -45,7 +48,6 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write): 
     els.set(i, [...(els.get(i) ?? []), el]);
   });
   let last: Values = {};
-  const history = new Map<string, { t: number; v: number }[]>();
   const now = () => Date.now();
 
   const val = (v: string) => plcValue(last[v]);
@@ -76,7 +78,19 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write): 
     write(sp.dataset.var!, String(Number(c.toFixed(6))));
   };
   const onClick = (e: MouseEvent) => {
-    const b = (e.target as HTMLElement).closest<HTMLElement>(".sp-btn");
+    const t = e.target as HTMLElement;
+    const nav = t.closest<HTMLElement>("[data-nav]");
+    if (nav) return navigate?.(nav.dataset.nav!);
+    const open = t.closest<Element>("[data-open]");
+    if (open) {
+      root.querySelector<HTMLElement>(`#${open.getAttribute("data-open")}`)?.removeAttribute("hidden");
+      return;
+    }
+    if (t.closest("[data-close]") || t.classList.contains("fp")) {
+      t.closest<HTMLElement>(".fp")?.setAttribute("hidden", "");
+      return;
+    }
+    const b = t.closest<HTMLElement>(".sp-btn");
     if (!b) return;
     const sp = b.closest<HTMLElement>(".sp")!;
     const cur = num(val(sp.dataset.var!)) ?? Number(sp.dataset.min);
@@ -163,6 +177,15 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write): 
       case "alarm":
         el.classList.toggle("active", truthy(val(b.v)));
         break;
+      case "count": {
+        const n = b.vars.filter((v) => truthy(val(v))).length;
+        el.classList.toggle("on", n > 0);
+        const num = el.querySelector(".n");
+        if (num) num.textContent = String(n);
+        const lbl = el.querySelector(".lbl");
+        if (lbl) lbl.textContent = n === 1 ? "alarm" : "alarms";
+        break;
+      }
       case "level": {
         const n = num(val(b.v));
         const p = n === undefined ? 0 : Math.min(1, Math.max(0, (n - b.min) / (b.max - b.min || 1)));

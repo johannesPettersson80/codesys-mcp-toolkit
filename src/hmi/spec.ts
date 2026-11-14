@@ -21,6 +21,19 @@ const at = z
 const base = { at, title: z.string().optional().describe("Tile title") };
 
 const id = z.string().optional().describe("Name pipes connect to (default: the label, e.g. 'P-101')");
+const faceplate = z
+  .object({
+    title: z.string().optional(),
+    auto: v.optional().describe("BOOL: automatic mode (a switch)"),
+    start: v.optional().describe("BOOL tapped by a Start button"),
+    stop: v.optional().describe("BOOL tapped by a Stop button"),
+    open: v.optional().describe("BOOL tapped by an Open button (valves)"),
+    close: v.optional().describe("BOOL tapped by a Close button (valves)"),
+    reset: v.optional().describe("BOOL tapped by a Reset button"),
+    values: z.array(z.object({ label: z.string(), value: v, unit: z.string().optional(), decimals: z.number().int().optional() })).max(6).optional(),
+    setpoint: z.object({ label: z.string().optional(), variable: v, min: num, max: num, step: num.optional(), unit: z.string().optional() }).optional(),
+  })
+  .describe("A popup opened by clicking the symbol: mode switch, Start/Stop or Open/Close, Reset, values and a setpoint");
 const end = z
   .union([z.string().regex(/^[^.]+\.[a-z-]+$/), z.tuple([num, num])])
   .describe("A port 'P-101.out' (see the ports of each symbol) or a point [x, y] at the diagram's edge");
@@ -28,9 +41,9 @@ const end = z
 /** Things placed on a process (mimic) diagram, in a 0..100 x 0..100 box scaled to the tile. */
 const processItem = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tank"), id, x: num, y: num, w: num, h: num, level: v, max: num.default(100), unit: z.string().optional(), label: z.string().optional(), bands: z.array(band).optional() }),
-  z.object({ type: z.literal("pump"), id, x: num, y: num, size: num.default(12), running: v, fault: v.optional(), label: z.string().optional() }),
-  z.object({ type: z.literal("fan"), id, x: num, y: num, size: num.default(12), running: v, label: z.string().optional() }),
-  z.object({ type: z.literal("valve"), id, x: num, y: num, size: num.default(8), open: v, vertical: z.boolean().optional(), label: z.string().optional() }),
+  z.object({ type: z.literal("pump"), id, x: num, y: num, size: num.default(12), running: v, fault: v.optional(), label: z.string().optional(), faceplate: faceplate.optional() }),
+  z.object({ type: z.literal("fan"), id, x: num, y: num, size: num.default(12), running: v, label: z.string().optional(), faceplate: faceplate.optional() }),
+  z.object({ type: z.literal("valve"), id, x: num, y: num, size: num.default(8), open: v, vertical: z.boolean().optional(), label: z.string().optional(), faceplate: faceplate.optional() }),
   z.object({ type: z.literal("junction"), id: z.string(), x: num, y: num }).describe("A tee or bend that several pipes meet at"),
   z
     .object({
@@ -86,6 +99,7 @@ export const screenSchema = z.object({
   title: z.string().describe("Shown in the header"),
   subtitle: z.string().optional(),
   theme: z.enum(["dark", "light"]).default("dark"),
+  size: z.enum(["1280x720", "1920x1080", "1024x768", "800x480"]).default("1280x720").describe("Panel resolution; use the same on every page"),
   grid: z.tuple([z.number().int().min(2).max(24), z.number().int().min(2).max(16)]).default([12, 8]).describe("[columns, rows]"),
   widgets: z.array(widgetSchema).min(1),
 });
@@ -93,7 +107,17 @@ export const screenSchema = z.object({
 export type Widget = z.infer<typeof widgetSchema>;
 export type ProcessItem = z.infer<typeof processItem>;
 export type Screen = z.infer<typeof screenSchema>;
+/** A screen as written, with defaults left out. */
+export type ScreenInput = z.input<typeof screenSchema>;
 export type Tone = z.infer<typeof tone>;
+export type Faceplate = z.infer<typeof faceplate>;
+
+/** Every alarm on any screen, for the header's alarm count. */
+export function allAlarms(screens: Screen[]): { active: string; text: string; severity: string }[] {
+  const seen = new Map<string, { active: string; text: string; severity: string }>();
+  for (const s of screens) for (const w of s.widgets) if (w.type === "alarms") for (const a of w.items) seen.set(a.active, a);
+  return [...seen.values()];
+}
 
 /** Every PLC variable a screen reads or writes. */
 export function screenVariables(s: Screen): string[] {
@@ -124,6 +148,11 @@ export function screenVariables(s: Screen): string[] {
         break;
       case "process":
         for (const p of w.items) {
+          if ("faceplate" in p && p.faceplate) {
+            const f = p.faceplate;
+            [f.auto, f.start, f.stop, f.open, f.close, f.reset, f.setpoint?.variable].forEach(add);
+            f.values?.forEach((x) => add(x.value));
+          }
           if (p.type === "tank") add(p.level);
           else if (p.type === "pump") (add(p.running), add(p.fault));
           else if (p.type === "fan") add(p.running);

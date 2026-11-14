@@ -6,9 +6,23 @@
  * applies values through CSS variables and classes, so animations keep running.
  */
 import { routed } from "./route.js";
-import type { ProcessItem, Screen, Tone, Widget } from "./spec.js";
+import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
 
 export const CANVAS = { w: 1280, h: 720, header: 76, pad: 20, gap: 14 } as const;
+
+/** The canvas of a screen's panel size. */
+export function canvasOf(screen: { size?: string }): { w: number; h: number; header: number; pad: number; gap: number } {
+  const [w, h] = (screen.size ?? "1280x720").split("x").map(Number) as [number, number];
+  if (h <= 480) return { w, h, header: 54, pad: 12, gap: 9 };
+  if (h >= 1080) return { w, h, header: 96, pad: 28, gap: 18 };
+  return { w, h, header: 76, pad: 20, gap: 14 };
+}
+
+/** What a page shows besides its own tiles: the other pages, and the alarms of the whole HMI. */
+export interface PageContext {
+  pages?: { name: string; title: string }[];
+  alarms?: { active: string }[];
+}
 
 export type Binding =
   | { kind: "text"; v: string; decimals?: number; unit?: string; bands?: { from: number; tone: Tone }[] }
@@ -18,7 +32,8 @@ export type Binding =
   | { kind: "trend"; series: string[]; min?: number; max?: number; seconds: number }
   | { kind: "spark"; v: string }
   | { kind: "setpoint"; v: string; decimals: number }
-  | { kind: "alarm"; v: string };
+  | { kind: "alarm"; v: string }
+  | { kind: "count"; vars: string[] };
 
 export interface Rendered {
   html: string;
@@ -34,43 +49,72 @@ export const SERIES_COLORS = ["#38bdf8", "#a78bfa", "#fbbf24", "#34d399", "#f472
 /** The pixel box of a tile on the canvas. */
 export function tileBox(screen: Screen, at: [number, number, number, number]) {
   const [cols, rows] = screen.grid;
-  const { w, h, header, pad, gap } = CANVAS;
+  const { w, h, header, pad, gap } = canvasOf(screen);
   const cw = (w - 2 * pad - (cols - 1) * gap) / cols;
   const ch = (h - header - pad - (rows - 1) * gap) / rows;
   const [c, r, wd, ht] = at;
   return { x: pad + (c - 1) * (cw + gap), y: header + (r - 1) * (ch + gap), w: wd * cw + (wd - 1) * gap, h: ht * ch + (ht - 1) * gap };
 }
 
-export function renderScreen(screen: Screen): Rendered {
+export function renderScreen(screen: Screen, page: PageContext = {}): Rendered {
   const bindings: Binding[] = [];
   const bind = (b: Binding) => `data-b="${bindings.push(b) - 1}"`;
   let uid = 0;
   const id = (p: string) => `${p}${++uid}`;
+  const faces: string[] = [];
+  const face: Face = (title, f, extra) => {
+    const k = `fp-${faces.length + 1}`;
+    faces.push(faceplateHtml(k, title, f, extra, bind));
+    return `data-open="${k}"`;
+  };
+  const cv = canvasOf(screen);
 
   const tiles = screen.widgets.map((wg) => {
     const box = tileBox(screen, wg.at);
-    const inner = widget(wg, box, bind, id);
+    const inner = widget(wg, box, bind, id, face);
     const title = wg.title ? `<div class="t-title">${esc(wg.title)}</div>` : "";
     return `<section class="tile t-${wg.type}${wg.title ? "" : " untitled"}${box.h < 110 ? " compact" : ""}" style="left:${r1(box.x)}px;top:${r1(box.y)}px;width:${r1(box.w)}px;height:${r1(box.h)}px">${title}<div class="t-body">${inner}</div></section>`;
   });
 
-  const html = `<div class="hmi theme-${screen.theme}" style="width:${CANVAS.w}px;height:${CANVAS.h}px">
+  const nav = (page.pages?.length ?? 0) > 1 ? `<nav class="h-nav">${page.pages!.map((p) => `<button class="h-page${p.name === screen.name ? " cur" : ""}" data-nav="${esc(p.name)}">${esc(p.title)}</button>`).join("")}</nav>` : "";
+  const alarmVars = (page.alarms ?? []).map((a) => a.active);
+  const badge = alarmVars.length ? `<div class="h-alarm" ${bind({ kind: "count", vars: alarmVars })}><span class="dot"></span><span class="n">0</span><span class="lbl">alarms</span></div>` : "";
+  const html = `<div class="hmi theme-${screen.theme}${cv.h <= 480 ? " small" : cv.h >= 1080 ? " large" : ""}" style="width:${cv.w}px;height:${cv.h}px;--hdr:${cv.header}px">
 <div class="glow"></div>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">${DEFS}</svg>
 <header class="h-bar"><div class="h-titles"><div class="h-title">${esc(screen.title)}</div>${screen.subtitle ? `<div class="h-sub">${esc(screen.subtitle)}</div>` : ""}</div>
-<div class="h-right"><div class="h-sim" data-sim><span class="dot"></span><span class="lbl">Offline</span></div><div class="h-clock" data-clock>--:--:--</div></div></header>
+${nav}<div class="h-right">${badge}<div class="h-sim" data-sim><span class="dot"></span><span class="lbl">Offline</span></div><div class="h-clock" data-clock>--:--:--</div></div></header>
 ${tiles.join("\n")}
+${faces.join("\n")}
 </div>`;
   return { html, bindings, css: HMI_CSS };
 }
 
 type Bind = (b: Binding) => string;
+type Face = (title: string, f: Faceplate, extra: { running?: string; fault?: string; open?: string }) => string;
+
+function faceplateHtml(k: string, title: string, f: Faceplate, extra: { running?: string; fault?: string; open?: string }, bind: Bind): string {
+  const status = [
+    extra.running ? `<span class="led tone-ok" ${bind({ kind: "on", v: extra.running })}><span class="led-dot"></span>Running</span>` : "",
+    extra.open ? `<span class="led tone-ok" ${bind({ kind: "on", v: extra.open })}><span class="led-dot"></span>Open</span>` : "",
+    extra.fault ? `<span class="led tone-alarm" ${bind({ kind: "on", v: extra.fault })}><span class="led-dot"></span>Fault</span>` : "",
+  ].join("");
+  const mode = f.auto ? `<label class="sw" data-act="toggle" data-var="${esc(f.auto)}" ${bind({ kind: "on", v: f.auto })}><span class="sw-track"><span class="sw-knob"></span></span><span class="sw-lbl">Automatic</span><span class="sw-state"><span class="s-on">AUTO</span><span class="s-off">MANUAL</span></span></label>` : "";
+  const btn = (label: string, v: string | undefined, tone: string) => (v ? `<button class="btn tone-${tone}" data-act="tap" data-var="${esc(v)}" ${bind({ kind: "on", v })}>${label}</button>` : "");
+  const buttons = [btn("Start", f.start, "ok"), btn("Stop", f.stop, "alarm"), btn("Open", f.open, "ok"), btn("Close", f.close, "alarm"), btn("Reset", f.reset, "warn")].join("");
+  const values = (f.values ?? []).map((x) => `<div class="fp-row"><span>${esc(x.label)}</span><b ${bind({ kind: "text", v: x.value, decimals: x.decimals, unit: x.unit })}>–</b></div>`).join("");
+  const sp = f.setpoint;
+  const setpoint = sp
+    ? `<div class="fp-sp"><div class="fp-row"><span>${esc(sp.label ?? "Setpoint")}</span></div><div class="sp" data-var="${esc(sp.variable)}" data-min="${sp.min}" data-max="${sp.max}" data-step="${sp.step ?? 1}" ${bind({ kind: "setpoint", v: sp.variable, decimals: 1 })}><div class="sp-row"><button class="sp-btn" data-step="-1">−</button><div class="sp-val"><span class="sp-num" ${bind({ kind: "text", v: sp.variable, decimals: 1 })}>–</span><span class="sp-unit">${esc(sp.unit ?? "")}</span></div><button class="sp-btn" data-step="1">+</button></div><input class="sp-range" type="range" min="${sp.min}" max="${sp.max}" step="${sp.step ?? 1}"></div></div>`
+    : "";
+  return `<div class="fp" id="${k}" hidden><div class="fp-card"><div class="fp-head"><div class="fp-title">${esc(f.title ?? title)}</div><button class="fp-x" data-close>×</button></div>${status ? `<div class="fp-status">${status}</div>` : ""}${mode}${buttons ? `<div class="btns fp-btns">${buttons}</div>` : ""}${values}${setpoint}</div></div>`;
+}
 
 function toneOf(t: Tone | undefined): string {
   return t ?? "accent";
 }
 
-function widget(w: Widget, box: { w: number; h: number }, bind: Bind, id: (p: string) => string): string {
+function widget(w: Widget, box: { w: number; h: number }, bind: Bind, id: (p: string) => string, face: Face): string {
   const bodyH = box.h - (w.title ? 44 : 20);
   switch (w.type) {
     case "value": {
@@ -102,7 +146,7 @@ function widget(w: Widget, box: { w: number; h: number }, bind: Bind, id: (p: st
       return `<ul class="status">${w.items.map((i) => `<li class="led tone-${toneOf(i.tone ?? "ok")}" ${bind({ kind: "on", v: i.on, invert: i.invert })}><span class="led-dot"></span><span>${esc(i.label)}</span></li>`).join("")}</ul>`;
     case "buttons":
       return `<div class="btns${w.items.length > 2 && box.w < 360 ? " col" : ""}">${w.items
-        .map((i) => `<button class="btn tone-${toneOf(i.tone ?? (/stop|reset|off/i.test(i.label) ? "alarm" : "accent"))}" data-act="${i.action}" data-var="${esc(i.variable)}" ${bind({ kind: "on", v: i.variable })}>${esc(i.label)}</button>`)
+        .map((i) => `<button class="btn tone-${toneOf(i.tone ?? (/stop|reset|off/i.test(i.label) ? "alarm" : "accent"))}" data-act="${i.action}" data-var="${esc(i.variable)}" ${i.action === "tap" || i.action === "toggle" ? bind({ kind: "on", v: i.variable }) : ""}>${esc(i.label)}</button>`)
         .join("")}</div>`;
     case "switch":
       return `<label class="sw" data-act="toggle" data-var="${esc(w.variable)}" ${bind({ kind: "on", v: w.variable })}><span class="sw-track"><span class="sw-knob"></span></span><span class="sw-lbl">${esc(w.label ?? "")}</span><span class="sw-state"><span class="s-on">ON</span><span class="s-off">OFF</span></span></label>`;
@@ -127,7 +171,7 @@ function widget(w: Widget, box: { w: number; h: number }, bind: Bind, id: (p: st
       const vh = r1((100 * Math.max(60, bodyH)) / Math.max(60, box.w - 24));
       const sy = vh / 100;
       const items = routed(w.items, sy).sort((a, b) => (a.type === "pipe" ? -1 : 0) - (b.type === "pipe" ? -1 : 0));
-      return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id)).join("")}</svg>`;
+      return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id, face)).join("")}</svg>`;
     }
   }
 }
@@ -146,7 +190,7 @@ const DEFS = `<defs>
 <filter id="fGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
 </defs>`;
 
-function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => string): string {
+function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => string, face: Face): string {
   const Y = (y: number) => r1(y * sy);
   const label = (x: number, y: number, t?: string) => (t ? `<text class="p-label" x="${r1(x)}" y="${Y(y)}">${esc(t)}</text>` : "");
   switch (p.type) {
@@ -170,7 +214,7 @@ ${label(x + w / 2, p.y + p.h + 2.8 / sy, p.label)}</g>`;
     case "pump": {
       const s = p.size, cx = r1(p.x), cy = Y(p.y), r = r1(s / 2);
       const blades = [0, 60, 120, 180, 240, 300].map((a) => `<path d="M0 0 Q ${r1(r * 0.3)} ${r1(-r * 0.25)} ${r1(r * 0.12)} ${r1(-r * 0.62)}" transform="rotate(${a})"/>`).join("");
-      return `<g ${p.fault ? bind({ kind: "fault", v: p.fault }) : ""}><g class="pump" ${bind({ kind: "on", v: p.running })}>
+      return `<g ${p.fault ? bind({ kind: "fault", v: p.fault }) : ""} ${p.faceplate ? `class="clickable" ${face(p.label ?? "Pump", p.faceplate, { running: p.running, fault: p.fault })}` : ""}><g class="pump" ${bind({ kind: "on", v: p.running })}>
 <circle class="pump-ring" cx="${cx}" cy="${cy}" r="${r}"/><circle class="pump-body" cx="${cx}" cy="${cy}" r="${r1(r * 0.86)}" fill="url(#gHub)"/>
 <g transform="translate(${cx} ${cy})"><g class="pump-imp">${blades}<circle r="${r1(r * 0.14)}" class="pump-hub"/></g></g>
 ${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g></g>`;
@@ -178,12 +222,12 @@ ${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g></g>`;
     case "fan": {
       const s = p.size, cx = r1(p.x), cy = Y(p.y), r = r1(s / 2);
       const blades = [0, 120, 240].map((a) => `<path d="M0 0 C ${r1(r * 0.5)} ${r1(-r * 0.2)} ${r1(r * 0.55)} ${r1(-r * 0.8)} 0 ${r1(-r * 0.86)} C ${r1(-r * 0.2)} ${r1(-r * 0.6)} ${r1(-r * 0.1)} ${r1(-r * 0.2)} 0 0Z" transform="rotate(${a})"/>`).join("");
-      return `<g class="pump fan" ${bind({ kind: "on", v: p.running })}><circle class="pump-ring" cx="${cx}" cy="${cy}" r="${r}"/><circle class="pump-body" cx="${cx}" cy="${cy}" r="${r1(r * 0.9)}" fill="url(#gHub)"/><g transform="translate(${cx} ${cy})"><g class="pump-imp">${blades}<circle r="${r1(r * 0.12)}" class="pump-hub"/></g></g>${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g>`;
+      return `<g class="pump fan${p.faceplate ? " clickable" : ""}" ${bind({ kind: "on", v: p.running })} ${p.faceplate ? face(p.label ?? "Fan", p.faceplate, { running: p.running }) : ""}><circle class="pump-ring" cx="${cx}" cy="${cy}" r="${r}"/><circle class="pump-body" cx="${cx}" cy="${cy}" r="${r1(r * 0.9)}" fill="url(#gHub)"/><g transform="translate(${cx} ${cy})"><g class="pump-imp">${blades}<circle r="${r1(r * 0.12)}" class="pump-hub"/></g></g>${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g>`;
     }
     case "valve": {
       const s = p.size, cx = r1(p.x), cy = Y(p.y), h = r1(s / 2);
       const body = `<path class="valve-body" d="M${r1(-h)} ${r1(-h * 0.7)} L${h} ${r1(h * 0.7)} L${h} ${r1(-h * 0.7)} L${r1(-h)} ${r1(h * 0.7)} Z"/><line class="valve-stem" x1="0" y1="0" x2="0" y2="${r1(-h * 1.1)}"/><rect class="valve-act" x="${r1(-h * 0.5)}" y="${r1(-h * 1.5)}" width="${h}" height="${r1(h * 0.45)}" rx="${r1(h * 0.1)}"/>`;
-      return `<g class="valve" ${bind({ kind: "on", v: p.open })}><g transform="translate(${cx} ${cy})${p.vertical ? " rotate(90)" : ""}">${body}</g>${p.label ? (p.vertical ? `<text class="p-label left" x="${r1(p.x + s * 0.75)}" y="${r1(cy + 0.6)}">${esc(p.label)}</text>` : label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)) : ""}</g>`;
+      return `<g class="valve${p.faceplate ? " clickable" : ""}" ${bind({ kind: "on", v: p.open })} ${p.faceplate ? face(p.label ?? "Valve", p.faceplate, { open: p.open }) : ""}><g transform="translate(${cx} ${cy})${p.vertical ? " rotate(90)" : ""}">${body}</g>${p.label ? (p.vertical ? `<text class="p-label left" x="${r1(p.x + s * 0.75)}" y="${r1(cy + 0.6)}">${esc(p.label)}</text>` : label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)) : ""}</g>`;
     }
     case "sensor": {
       const cx = r1(p.x), cy = Y(p.y);
@@ -206,7 +250,7 @@ export const HMI_CSS = String.raw`
 .theme-dark{--bg:radial-gradient(1200px 600px at 15% -10%,#13284a 0%,transparent 60%),radial-gradient(900px 500px at 110% 110%,#1c1640 0%,transparent 55%),#070d1a;--fg:#e6edf7;--muted:#8193ad;--tile:linear-gradient(160deg,rgba(30,41,64,.72),rgba(14,21,37,.78));--tile-bd:rgba(148,163,184,.13);--tile-sh:0 10px 30px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.05);--track:rgba(148,163,184,.16);--accent:#38bdf8;--ok:#22c55e;--warn:#f59e0b;--alarm:#ef4444;--neutral:#64748b;--shell-a:#1e293b;--shell-b:#334155;--liq-a:#38bdf8;--liq-b:#0369a1;--hub-a:#475569;--hub-b:#0f172a;--pipe:#334155;--pipe-in:#1e293b;--btn:rgba(148,163,184,.1)}
 .theme-light{--bg:radial-gradient(1000px 500px at 10% -10%,#dbeafe 0%,transparent 60%),#eef2f7;--fg:#0f172a;--muted:#64748b;--tile:linear-gradient(160deg,#ffffff,#f8fafc);--tile-bd:#e2e8f0;--tile-sh:0 6px 20px rgba(15,23,42,.06);--track:#e2e8f0;--accent:#0284c7;--ok:#16a34a;--warn:#d97706;--alarm:#dc2626;--neutral:#94a3b8;--shell-a:#cbd5e1;--shell-b:#f1f5f9;--liq-a:#38bdf8;--liq-b:#0284c7;--hub-a:#e2e8f0;--hub-b:#94a3b8;--pipe:#94a3b8;--pipe-in:#cbd5e1;--btn:#f1f5f9}
 .glow{position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(56,189,248,.06),transparent 30%)}
-.h-bar{position:absolute;left:20px;right:20px;top:0;height:76px;display:flex;align-items:center;justify-content:space-between}
+.h-bar{position:absolute;left:20px;right:20px;top:0;height:var(--hdr,76px);display:flex;align-items:center;justify-content:space-between}
 .h-title{font-size:24px;font-weight:650;letter-spacing:-.01em}
 .h-sub{font-size:13px;color:var(--muted);margin-top:2px}
 .h-right{display:flex;gap:12px;align-items:center}
@@ -214,6 +258,19 @@ export const HMI_CSS = String.raw`
 .h-sim .dot{width:8px;height:8px;border-radius:50%;background:var(--neutral)}
 .h-sim.run{color:var(--ok)}.h-sim.run .dot{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 25%,transparent);animation:pulse 1.6s infinite}
 .h-sim.stop{color:var(--warn)}.h-sim.stop .dot{background:var(--warn)}
+.h-nav{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:4px;padding:4px;border-radius:12px;background:var(--tile);border:1px solid var(--tile-bd)}
+.h-page{border:0;border-radius:9px;padding:8px 16px;background:transparent;color:var(--muted);font:600 13px/1 inherit;cursor:pointer;letter-spacing:.02em}
+.h-page:hover{color:var(--fg)}.h-page.cur{background:var(--accent);color:#04121f}
+.h-alarm{display:flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;border:1px solid var(--tile-bd);background:var(--tile);font-size:12px;font-weight:700;color:var(--muted)}
+.h-alarm .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}.h-alarm.on{color:#fff;background:color-mix(in srgb,var(--alarm) 75%,transparent);border-color:var(--alarm);animation:blink 1.2s infinite}.h-alarm.on .dot{background:#fff}
+.clickable{cursor:pointer}.clickable:hover .pump-ring,.clickable:hover .valve-body{filter:drop-shadow(0 0 1.5px var(--accent))}
+.fp{position:absolute;inset:0;background:rgba(2,6,23,.55);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:20}.fp[hidden]{display:none}
+.fp-card{width:380px;border-radius:18px;background:var(--tile);background-color:#111a2e;border:1px solid var(--tile-bd);box-shadow:0 30px 80px rgba(0,0,0,.55);padding:18px 20px;display:flex;flex-direction:column;gap:14px}
+.theme-light .fp-card{background-color:#fff}
+.fp-head{display:flex;align-items:center;justify-content:space-between}.fp-title{font-size:18px;font-weight:650}
+.fp-x{border:0;background:var(--btn);color:var(--fg);width:32px;height:32px;border-radius:10px;font-size:18px;cursor:pointer}
+.fp-status{display:flex;gap:16px}.fp-btns{height:auto}.fp-btns .btn{min-height:46px}
+.fp-row{display:flex;justify-content:space-between;font-size:14px;color:var(--muted)}.fp-row b{color:var(--fg);font-variant-numeric:tabular-nums}
 .h-clock{font-variant-numeric:tabular-nums;font-size:15px;color:var(--muted);min-width:76px;text-align:right}
 .tile{position:absolute;border-radius:16px;background:var(--tile);border:1px solid var(--tile-bd);box-shadow:var(--tile-sh);backdrop-filter:blur(8px);display:flex;flex-direction:column;padding:14px 16px 12px}
 .tile.compact{padding:8px 16px}.tile.compact .t-title{height:15px;font-size:10.5px}
@@ -253,6 +310,7 @@ export const HMI_CSS = String.raw`
 .trend{flex:1;width:100%;min-height:0}.tr-grid line{stroke:var(--track);stroke-width:1;vector-effect:non-scaling-stroke}
 .tr-line{fill:none;stroke-width:2.2;vector-effect:non-scaling-stroke;stroke-linejoin:round;filter:drop-shadow(0 0 4px rgba(56,189,248,.35))}
 .tr-axis{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);margin-top:4px}
+.t-alarms .t-body,.t-status .t-body{justify-content:flex-start}
 .alarms{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px;overflow:hidden}
 .al{display:none;align-items:center;gap:9px;padding:8px 10px;border-radius:10px;font-size:12.5px;line-height:1.25;background:color-mix(in srgb,var(--c) 12%,transparent);border:1px solid color-mix(in srgb,var(--c) 35%,transparent)}
 .al.active{display:flex}.sev-alarm{--c:var(--alarm)}.sev-warning{--c:var(--warn)}.sev-info{--c:var(--accent)}
@@ -282,5 +340,7 @@ export const HMI_CSS = String.raw`
 .plamp .pl-dot{fill:var(--track);transition:all .3s}.plamp .pl-halo{fill:none}.plamp.on .pl-dot{fill:var(--c)}.plamp.on .pl-halo{fill:color-mix(in srgb,var(--c) 30%,transparent);filter:url(#fGlow)}
 @keyframes spin{to{transform:rotate(360deg)}}@keyframes flow{to{stroke-dashoffset:-3}}@keyframes pulse{50%{opacity:.55}}@keyframes blink{50%{opacity:.45}}
 @keyframes wave{from{transform:translateX(-6%)}to{transform:translateX(0)}}
+.small .h-title{font-size:18px}.small .h-sub{display:none}.small .h-page{padding:6px 10px;font-size:11px}.small .t-title{font-size:10px}.small .tile{padding:9px 11px}
+.large .h-title{font-size:32px}.large .h-page{font-size:16px;padding:10px 20px}.large .t-title{font-size:14px}
 @media (prefers-reduced-motion:reduce){.hmi *{animation:none!important;transition:none!important}}
 `;

@@ -23,9 +23,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   setpoints and alarm rows; a generated program scales values for bars and
   levels. Built through CODESYS's visualization scripting and its element
   creators. Returns a picture of the visualization. Checked on SP21.
+- HMI projects with several pages: a shared header with links to every page and
+  the count of active alarms across all pages; page templates (`hmi_template`:
+  overview, unit, alarms, trends, settings); faceplate popups on pumps, fans
+  and valves; panel sizes 1280x720, 1920x1080, 1024x768 and 800x480; warnings
+  for overlapping symbols. Trend history survives page changes.
 - HMI pipes connect to named ports on tanks, pumps, fans, valves and junctions
   and are routed with right angles, so they meet the symbols exactly in the
   browser and in CODESYS.
+- `get_signature`: the interface of any POU or type from CODESYS's compiler,
+  including FBs in compiled libraries (TON, CTU, MC_...), with doc comments.
+- `find_references`: where a variable, POU or type is declared, read, written
+  or called, with line and column. Both checked on SP21 and SP22.
+- `trace_setup` and `trace_record`: CODESYS Trace in the simulation, returned
+  as a summary (BOOL edges and extremes with their times), a table and a
+  chart image. Checked on SP22 without a window.
+- `create_graphical`: ladder, FBD and SFC programs and function blocks from a
+  structured description, generated as PLCopenXML. Checked on SP22: a ladder
+  latch, an AND into a TON and a three-step SFC compile and behave correctly
+  in the simulation.
+- Debugging in the simulation: `breakpoint_set` (by line), `debug_status`,
+  `debug_step` (over, into, out), `debug_continue`, `breakpoint_clear`.
+  Checked on SP22 without a window.
+- `rename_symbol`: rename a variable or POU everywhere it is used, from
+  CODESYS's cross-references (works without a window; CODESYS's own
+  refactoring needs one). Checked on SP22: 0 build errors after.
+- `codesys_sim_test`: test cases in the simulation (write or force, cycles or
+  real time, expected values with comparisons and tolerances), reported as a
+  pass/fail table. Checked on SP22.
+- `find_device` and `add_device`: search CODESYS's device repository and add
+  devices to the tree. Checked on SP22: Ethernet, a Modbus TCP Client and a
+  Modbus TCP Server device compile with 0 errors.
+- `create_object` creates persistent variable lists (`persistent_vars`).
 - Actions can return images.
 - `--show-window` opens every object the model creates or writes in its editor
   tab, so the CODESYS window shows the code as it is written, and, while the

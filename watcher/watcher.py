@@ -255,6 +255,10 @@ def main(ui=False):
     import mcp_ops
     import mcp_sim  # noqa: F401 (adds its operations to mcp_ops.OPS)
     import mcp_visu  # noqa: F401 (adds the visualization operations)
+    import mcp_lang  # noqa: F401 (adds signatures and cross-references)
+    import mcp_trace  # noqa: F401 (adds trace recording; after mcp_visu)
+    import mcp_debug  # noqa: F401 (adds breakpoints and stepping)
+    import mcp_devices  # noqa: F401 (adds device search and add)
     prompts = setup_prompts(se)
     log(prompts)
     if not hasattr(se, "FAKE"):
@@ -301,6 +305,10 @@ def main_attach():
     import mcp_ops
     import mcp_sim  # noqa: F401 (adds its operations to mcp_ops.OPS)
     import mcp_visu  # noqa: F401 (adds the visualization operations)
+    import mcp_lang  # noqa: F401 (adds signatures and cross-references)
+    import mcp_trace  # noqa: F401 (adds trace recording; after mcp_visu)
+    import mcp_debug  # noqa: F401 (adds breakpoints and stepping)
+    import mcp_devices  # noqa: F401 (adds device search and add)
     prompts = setup_prompts(se)
     log(prompts)
     old = getattr(__builtin__, "_mcp_attach_timer", None)

@@ -4,7 +4,7 @@
  * embedded image pool and a small helper program that scales values for bars
  * and tank levels. The watcher builds it (watcher/mcp_visu.py).
  */
-import { tileBox, CANVAS } from "./render.js";
+import { canvasOf, tileBox } from "./render.js";
 import { routed } from "./route.js";
 import type { ProcessItem, Screen, Tone, Widget } from "./spec.js";
 import { screenVariables } from "./spec.js";
@@ -177,7 +177,8 @@ export function nativePlan(screen: Screen): NativePlan {
   });
 
   // Canvas and header.
-  els.push({ kind: "rect", name: "Header", x: 0, y: 0, w: CANVAS.w, h: 62, fill: p.header[0], frame: null, gradient: [p.header[0], p.header[1], 0] });
+  const cv = canvasOf(screen);
+  els.push({ kind: "rect", name: "Header", x: 0, y: 0, w: cv.w, h: cv.header - 14, fill: p.header[0], frame: null, gradient: [p.header[0], p.header[1], 0] });
   els.push(text(24, 8, 760, 30, screen.title, [SEMI, 17], p.headerText));
   if (screen.subtitle) els.push(text(24, 34, 760, 20, screen.subtitle, [FONT, 9.5], 0xffa5b4fc));
 

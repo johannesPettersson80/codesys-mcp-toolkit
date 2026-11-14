@@ -29,6 +29,7 @@ export type CreateKind =
   | "interface"
   | "dut"
   | "gvl"
+  | "persistent_vars"
   | "folder";
 
 export interface TreeNode {

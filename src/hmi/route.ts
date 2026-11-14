@@ -168,3 +168,25 @@ function dedupe(pts: Pt[]): Pt[] {
 export function routed(items: ProcessItem[], aspect: number): ProcessItem[] {
   return items.map((p) => (p.type === "pipe" ? { ...p, points: routePipe(p, items, aspect), from: undefined, to: undefined, via: undefined } : p));
 }
+
+/** Symbols that overlap each other or leave the diagram, as warnings (the screen still saves). */
+export function overlapWarnings(items: ProcessItem[], aspect: number): string[] {
+  type Box = { name: string; x0: number; y0: number; x1: number; y1: number };
+  const boxes: Box[] = [];
+  items.forEach((p, i) => {
+    const name = `${p.type} ${keyOf(p) ?? i + 1}`;
+    if (p.type === "tank") boxes.push({ name, x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.h });
+    else if (p.type === "pump" || p.type === "fan" || p.type === "valve") {
+      const r = p.size / 2;
+      boxes.push({ name, x0: p.x - r, y0: p.y - r / aspect, x1: p.x + r, y1: p.y + r / aspect });
+    } else if (p.type === "sensor") boxes.push({ name, x0: p.x - 7, y0: p.y - 2.2 / aspect, x1: p.x + 7, y1: p.y + 2.2 / aspect });
+  });
+  const out: string[] = [];
+  for (const b of boxes) if (b.x0 < 0 || b.y0 < 0 || b.x1 > 100 || b.y1 > 100) out.push(`${b.name} reaches outside the diagram (0..100).`);
+  for (let i = 0; i < boxes.length; i++)
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]!, b = boxes[j]!;
+      if (a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1) out.push(`${a.name} overlaps ${b.name}.`);
+    }
+  return out;
+}

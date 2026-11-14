@@ -542,6 +542,8 @@ def op_object_create(args):
         obj = parent.create_dut(name, dt)
     elif kind == "gvl":
         obj = parent.create_gvl(name)
+    elif kind == "persistent_vars":
+        obj = parent.create_persistentvars(name)
     elif kind == "folder":
         obj = parent.create_folder(name)
     else:

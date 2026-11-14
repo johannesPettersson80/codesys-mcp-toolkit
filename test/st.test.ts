@@ -55,3 +55,51 @@ describe("formatBuild", () => {
     expect(formatBuild([]).text).toMatch(/only compiles POUs reachable from a task/);
   });
 });
+
+describe("signatures", () => {
+  it("formats an FB's interface and drops the doc markup", async () => {
+    const { formatSignature, plainComment } = await import("../src/codesys/lang.js");
+    expect(plainComment("Implements a timer .. code-block:: codesys (* x *)")).toBe("Implements a timer");
+    const t = formatSignature({
+      name: "TON",
+      kind: "FunctionBlock",
+      library: "standard, 3.5.22.0 (system)",
+      comment: "Implements a timer with a turn-on delay .. image:: @(Ton)",
+      variables: [
+        { name: "IN", type: "BOOL", section: "input", comment: "Rising edge: starts delay counter" },
+        { name: "PT", type: "TIME", section: "input" },
+        { name: "Q", type: "BOOL", section: "output" },
+        { name: "M", type: "BOOL", section: "other", hidden: true },
+      ],
+    });
+    expect(t).toBe(
+      [
+        "TON (FunctionBlock, standard, 3.5.22.0 (system)): Implements a timer with a turn-on delay",
+        "VAR_INPUT",
+        "  IN : BOOL  // Rising edge: starts delay counter",
+        "  PT : TIME",
+        "VAR_OUTPUT",
+        "  Q : BOOL",
+        "Hidden (internal): M",
+      ].join("\n"),
+    );
+    expect(formatSignature({ name: "X", error: "not found" })).toBe("X: not found");
+  });
+});
+
+describe("rename from cross-references", () => {
+  it("reads CODESYS's reference locations", async () => {
+    const { parseLocation } = await import("../src/codesys/lang.js");
+    expect(parseLocation("Line 3, Column 22 (Impl)")).toEqual({ line: 3, col: 22, part: "implementation" });
+    expect(parseLocation("Line 7 (Decl)")).toEqual({ line: 7, part: "declaration" });
+    expect(parseLocation("somewhere")).toBeUndefined();
+  });
+
+  it("replaces whole identifiers at each spot, right to left on a line", async () => {
+    const { renameAt } = await import("../src/codesys/lang.js");
+    const impl = ["IF fbPump.xRunning AND NOT xRunningOld THEN", "    x := fbPump.xRunning OR fbPump.xRunning;", "END_IF"].join("\r\n");
+    const r = renameAt(impl, [{ line: 1, col: 4 }, { line: 2, col: 10 }, { line: 2, col: 29 }], "xRunning", "xIsRunning");
+    expect(r.done).toBe(3);
+    expect(r.text).toBe(["IF fbPump.xIsRunning AND NOT xRunningOld THEN", "    x := fbPump.xIsRunning OR fbPump.xIsRunning;", "END_IF"].join("\r\n"));
+  });
+});

@@ -10,8 +10,8 @@ import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { currentCodesysSim } from "../codesys/simulation.js";
 import type { AppContext } from "../tools.js";
-import { CANVAS } from "./render.js";
-import { screenSchema, screenVariables, type Screen } from "./spec.js";
+import { canvasOf, type PageContext } from "./render.js";
+import { allAlarms, screenSchema, screenVariables, type Screen } from "./spec.js";
 
 export type Values = Record<string, string | undefined>;
 
@@ -80,6 +80,12 @@ export class HmiService {
     return true;
   }
 
+  /** What every page shows besides its tiles: the page list and the HMI's alarms. */
+  page(): PageContext {
+    const all = this.screens();
+    return { pages: all.map((x) => ({ name: x.name, title: x.title })), alarms: allAlarms(all) };
+  }
+
   sim(): { state?: string } {
     const s = currentCodesysSim(this.ctx);
     return s ? { state: s.state } : {};
@@ -91,7 +97,7 @@ export class HmiService {
     const hit = this.cache.get(screen.name);
     if (hit && Date.now() - hit.at < 200) return hit;
     if (this.reading) await this.reading.catch(() => undefined);
-    const names = screenVariables(screen);
+    const names = [...new Set([...screenVariables(screen), ...allAlarms(this.screens()).map((x) => x.active)])];
     if (!names.length) return { values: {}, errors: {} };
     const p = this.ctx.bridge.call<{ values: Values; errors?: Record<string, string> }>("sim.read", { names }, { timeoutMs: 5_000 });
     this.reading = p;
@@ -127,10 +133,11 @@ export function previewValues(screen: Screen): Values {
 }
 
 /** A self-contained page that shows one screen with fixed values (for screenshots). */
-export function staticPage(screen: Screen, values: Values, sim: { state?: string }, script: string): string {
-  const data = JSON.stringify({ screen, values, sim }).replace(/</g, "\\u003c");
+export function staticPage(screen: Screen, values: Values, sim: { state?: string }, script: string, page: PageContext = {}): string {
+  const data = JSON.stringify({ screen, values, sim, page }).replace(/</g, "\\u003c");
+  const cv = canvasOf(screen);
   return `<!doctype html><html><head><meta charset="utf-8"><title>${screen.title.replace(/[<&]/g, "")}</title>
-<style>html,body{margin:0;background:#05080f}body{width:${CANVAS.w}px;height:${CANVAS.h}px;overflow:hidden}</style></head>
+<style>html,body{margin:0;background:#05080f}body{width:${cv.w}px;height:${cv.h}px;overflow:hidden}</style></head>
 <body data-page="static"><div id="stage"></div><script>window.HMI_STATIC=${data};</script><script>${script.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
 }
 
@@ -148,7 +155,7 @@ export function findBrowser(): string | undefined {
 }
 
 /** Renders a page to PNG with a headless browser; returns the PNG bytes. */
-export async function screenshot(html: string, browser = findBrowser()): Promise<Buffer> {
+export async function screenshot(html: string, browser = findBrowser(), size: { w: number; h: number } = { w: 1280, h: 720 }): Promise<Buffer> {
   if (!browser) throw new Error("No Edge or Chrome found for screenshots.");
   const dir = mkdtempSync(join(tmpdir(), "cmcp-hmi-"));
   try {
@@ -158,7 +165,7 @@ export async function screenshot(html: string, browser = findBrowser()): Promise
     await new Promise<void>((resolve, reject) => {
       execFile(
         browser,
-        ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check", `--user-data-dir=${join(dir, "profile")}`, `--window-size=${CANVAS.w},${CANVAS.h}`, "--virtual-time-budget=4000", `--screenshot=${png}`, `file:///${page.replace(/\\/g, "/")}`],
+        ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check", `--user-data-dir=${join(dir, "profile")}`, `--window-size=${size.w},${size.h}`, "--virtual-time-budget=4000", `--screenshot=${png}`, `file:///${page.replace(/\\/g, "/")}`],
         { timeout: 60_000, windowsHide: true },
         (err) => (existsSync(png) ? resolve() : reject(err ?? new Error("the browser wrote no screenshot"))),
       );

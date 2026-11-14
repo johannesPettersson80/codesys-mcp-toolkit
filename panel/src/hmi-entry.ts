@@ -4,13 +4,13 @@
  * - live (the browser page /hmi): reads screens and values from the MCP
  *   server's local viewer endpoint and writes button presses back.
  */
-import { CANVAS, HMI_CSS, renderScreen } from "../../src/hmi/render.js";
+import { canvasOf, HMI_CSS, renderScreen, type PageContext } from "../../src/hmi/render.js";
 import type { Screen } from "../../src/hmi/spec.js";
 import { mountLive, seedHistory, type LiveScreen, type Values } from "./hmi-live.js";
 
 declare global {
   interface Window {
-    HMI_STATIC?: { screen: Screen; values: Values; sim?: { state?: string } };
+    HMI_STATIC?: { screen: Screen; values: Values; sim?: { state?: string }; page?: PageContext };
   }
 }
 
@@ -30,10 +30,13 @@ function css(text: string) {
   document.head.appendChild(s);
 }
 
-function mount(stage: HTMLElement, screen: Screen, write: (v: string, value: string) => void): LiveScreen {
-  const r = renderScreen(screen);
+let current: Screen | undefined;
+
+function mount(stage: HTMLElement, screen: Screen, write: (v: string, value: string) => void, page: PageContext = {}, navigate?: (p: string) => void): LiveScreen {
+  const r = renderScreen(screen, page);
   stage.innerHTML = r.html;
-  return mountLive(stage.firstElementChild as HTMLElement, r.bindings, write);
+  current = screen;
+  return mountLive(stage.firstElementChild as HTMLElement, r.bindings, write, navigate);
 }
 
 function fit(stage: HTMLElement, fixed: boolean) {
@@ -42,7 +45,8 @@ function fit(stage: HTMLElement, fixed: boolean) {
     stage.style.top = "0";
     return;
   }
-  const s = Math.min(innerWidth / CANVAS.w, innerHeight / CANVAS.h) * 0.98;
+  const cv = canvasOf(current ?? {});
+  const s = Math.min(innerWidth / cv.w, innerHeight / cv.h) * 0.98;
   stage.style.left = "50%";
   stage.style.top = "50%";
   stage.style.transform = `translate(-50%,-50%) scale(${s})`;
@@ -72,14 +76,20 @@ async function live(stage: HTMLElement) {
   const write = (variable: string, value: string) => void call("ui_hmi_write", { variable, value }).then((r) => show(r.ok === false ? String(r.message) : undefined), (e: Error) => show(e.message));
   for (;;) {
     try {
-      const r = (await call("get_hmi", { screen: name })) as { screens: { name: string; title: string }[]; screen?: Screen; values?: Values; sim?: { state?: string } };
+      const r = (await call("get_hmi", { screen: name })) as { screens: { name: string; title: string }[]; screen?: Screen; values?: Values; sim?: { state?: string }; alarms?: { active: string }[] };
       show(r.screen ? undefined : "No HMI screens in this project yet: ask Claude to make one.");
-      tabs.innerHTML = r.screens.length > 1 ? r.screens.map((s) => `<button data-s="${s.name}" class="${s.name === r.screen?.name ? "cur" : ""}">${s.title.replace(/[<&]/g, "")}</button>`).join("") : "";
+      tabs.innerHTML = "";
+      void (r.screens.length > 1 ? r.screens.map((s) => `<button data-s="${s.name}" class="${s.name === r.screen?.name ? "cur" : ""}">${s.title.replace(/[<&]/g, "")}</button>`).join("") : "");
       if (r.screen) {
-        const key = JSON.stringify(r.screen);
+        const key = JSON.stringify([r.screen, r.screens, r.alarms]);
         if (key !== screenKey) {
           screen?.destroy();
-          screen = mount(stage, r.screen, write);
+          const go = (p: string) => {
+            name = p;
+            history.replaceState(null, "", `?t=${encodeURIComponent(token)}&s=${encodeURIComponent(p)}`);
+            screenKey = "";
+          };
+          screen = mount(stage, r.screen, write, { pages: r.screens, alarms: r.alarms }, go);
           screenKey = key;
           document.title = r.screen.title;
           fit(stage, false);
@@ -105,7 +115,7 @@ const stage = document.getElementById("stage")!;
 const data = window.HMI_STATIC;
 if (data) {
   fit(stage, true);
-  const s = mount(stage, data.screen, () => undefined);
+  const s = mount(stage, data.screen, () => undefined, data.page ?? {});
   seedHistory(s, data.values);
   s.update(data.values, data.sim);
   document.body.dataset.ready = "1";

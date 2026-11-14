@@ -10,6 +10,9 @@ import { currentCodesysSim } from "../codesys/simulation.js";
 import type { AppContext } from "../tools.js";
 import { findBrowser, hmiScript, previewValues, screenshot, staticPage, type HmiService } from "./service.js";
 import { nativePlan } from "./native.js";
+import { canvasOf, tileBox } from "./render.js";
+import { overlapWarnings } from "./route.js";
+import { TEMPLATES } from "./templates.js";
 import { layoutProblems, screenSchema, screenVariables } from "./spec.js";
 
 const text = (t: string, isError = false): ActionResult => ({ content: [{ type: "text", text: t }], ...(isError ? { isError } : {}) });
@@ -35,7 +38,14 @@ export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: Hm
       const roots = new Set(vars.map((v) => v.split(".")[0]!.toLowerCase()));
       const unknown = ctx.cache ? [...roots].filter((r) => !ctx.cache!.get(r) && !/^(gvl|io|hmi)/i.test(r)) : [];
       const r = hmi.save(screen);
-      const warn = unknown.length ? `\nCheck these: no object named ${unknown.map((u) => `'${u}'`).join(", ")} in the project (the first part of a variable path must be a program or GVL).` : "";
+      const looks = screen.widgets.flatMap((w) => {
+        if (w.type !== "process") return [];
+        const b = tileBox(screen, w.at);
+        return overlapWarnings(w.items, (b.h - 46) / (b.w - 32));
+      });
+      const warn0 = looks.length ? `
+Layout: ${looks.join(" ")}` : "";
+      const warn = warn0 + (unknown.length ? `\nCheck these: no object named ${unknown.map((u) => `'${u}'`).join(", ")} in the project (the first part of a variable path must be a program or GVL).` : "");
       return text(`${r.replaced ? "Replaced" : "Saved"} screen '${screen.name}' (${screen.widgets.length} widgets, ${vars.length} variables) in ${r.file}.${warn}\nCall hmi_screenshot to see it.`);
     },
   );
@@ -67,8 +77,8 @@ export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: Hm
       }
       if (!values && !Object.keys(shown).length) shown = previewValues(s) as Record<string, string>;
       try {
-        const png = await screenshot(staticPage(s, shown, hmi.sim(), script));
-        return { content: [{ type: "image", data: png.toString("base64"), mimeType: "image/png" }, { type: "text", text: `Screen '${s.name}' (1280x720) with ${source}.` }] };
+        const png = await screenshot(staticPage(s, shown, hmi.sim(), script, hmi.page()), undefined, canvasOf(s));
+        return { content: [{ type: "image", data: png.toString("base64"), mimeType: "image/png" }, { type: "text", text: `Screen '${s.name}' (${s.size}) with ${source}.` }] };
       } catch (e) {
         return text(`Screenshot failed: ${(e as Error).message}`, true);
       }
@@ -130,7 +140,7 @@ export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: Hm
         const png = join(dir, "visu.png");
         let image: ActionResult["content"] = [];
         try {
-          await b.call("visu.render", { name: plan.visu, path: png, width: 1280, height: 720 }, { timeoutMs: 60_000 });
+          await b.call("visu.render", { name: plan.visu, path: png, width: canvasOf(s).w, height: canvasOf(s).h }, { timeoutMs: 60_000 });
           image = [{ type: "image", data: readFileSync(png).toString("base64"), mimeType: "image/png" }];
         } catch (e) {
           notes.push(`No picture: ${(e as Error).message}`);
@@ -142,6 +152,15 @@ export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: Hm
         rmSync(dir, { recursive: true, force: true });
       }
     },
+  );
+
+  reg(
+    "hmi_template",
+    {
+      description: `Page templates for a complete HMI: ${Object.entries(TEMPLATES).map(([k, t]) => `${k} (${t.use})`).join("; ")}. Returns the template's screen description: adapt titles and replace the 'PRG.' variables with the program's, then save it with hmi_save_screen. Pages of one HMI share the header, which links to every page and counts the alarms of all pages.`,
+      inputSchema: z.object({ kind: z.enum(Object.keys(TEMPLATES) as [string, ...string[]]) }),
+    },
+    async ({ kind }) => text(`${TEMPLATES[kind]!.use}\n${JSON.stringify(TEMPLATES[kind]!.screen, null, 1)}`),
   );
 
   reg(

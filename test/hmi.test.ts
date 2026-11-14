@@ -7,7 +7,9 @@ import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { ProjectCache } from "../src/codesys/cache.js";
 import { renderScreen } from "../src/hmi/render.js";
 import { nativePlan } from "../src/hmi/native.js";
-import { portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
+import { overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
+import { TEMPLATES } from "../src/hmi/templates.js";
+import { canvasOf } from "../src/hmi/render.js";
 import type { ProcessItem } from "../src/hmi/spec.js";
 import { findBrowser } from "../src/hmi/service.js";
 import { layoutProblems, plcValue, screenSchema, screenVariables } from "../src/hmi/spec.js";
@@ -66,6 +68,50 @@ describe("HMI spec and renderer", () => {
     expect(plcValue("REAL#72.5")).toBe(72.5);
     expect(plcValue("T#1s500ms")).toBe(1500);
     expect(plcValue("'abc'")).toBe("'abc'");
+  });
+});
+
+describe("HMI structure", () => {
+  it("every page template is a valid screen with a clean layout", () => {
+    for (const [k, t] of Object.entries(TEMPLATES)) {
+      const sc = screenSchema.parse(t.screen);
+      expect(layoutProblems(sc), k).toEqual([]);
+    }
+  });
+
+  it("puts the other pages and an alarm count in the header", () => {
+    const r = renderScreen(screenSchema.parse(SCREEN), { pages: [{ name: "Overview", title: "Pump Station" }, { name: "Alarms", title: "Alarms" }], alarms: [{ active: "PLC_PRG.xHigh" }, { active: "PLC_PRG.xFault" }] });
+    expect(r.html).toMatch(/<button class="h-page cur" data-nav="Overview">Pump Station<\/button><button class="h-page" data-nav="Alarms">Alarms<\/button>/);
+    expect(r.bindings).toContainEqual({ kind: "count", vars: ["PLC_PRG.xHigh", "PLC_PRG.xFault"] });
+    expect(renderScreen(screenSchema.parse(SCREEN)).html).not.toMatch(/h-nav/); // a single page needs no navigation
+  });
+
+  it("opens a faceplate from a symbol, with its controls bound", () => {
+    const sc = screenSchema.parse(SCREEN);
+    const pump = (sc.widgets[0] as { items: Record<string, unknown>[] }).items[1]!;
+    pump.faceplate = { auto: "PLC_PRG.xAuto", start: "PLC_PRG.xStart", stop: "PLC_PRG.xStop", values: [{ label: "Flow", value: "PLC_PRG.rFlow", unit: "m³/h" }] };
+    const r = renderScreen(sc);
+    expect(r.html).toMatch(/data-open="fp-1"/);
+    expect(r.html).toMatch(/<div class="fp" id="fp-1" hidden>/);
+    expect(r.html).toMatch(/data-act="tap" data-var="PLC_PRG.xStart"/);
+    expect(screenVariables(sc)).toEqual(expect.arrayContaining(["PLC_PRG.xAuto", "PLC_PRG.rFlow"]));
+  });
+
+  it("sizes the canvas per panel", () => {
+    expect(canvasOf({ size: "800x480" })).toMatchObject({ w: 800, h: 480, header: 54 });
+    expect(canvasOf({ size: "1920x1080" })).toMatchObject({ w: 1920, h: 1080 });
+    expect(canvasOf({})).toMatchObject({ w: 1280, h: 720 });
+  });
+
+  it("warns about overlapping symbols", () => {
+    const items = [
+      { type: "tank", x: 20, y: 20, w: 20, h: 60, level: "a", max: 100, label: "T-1" },
+      { type: "pump", x: 30, y: 50, size: 10, running: "b", label: "P-1" },
+      { type: "pump", x: 98, y: 50, size: 10, running: "c", label: "P-2" },
+    ] as unknown as ProcessItem[];
+    const w = overlapWarnings(items, 0.5);
+    expect(w).toContain("tank T-1 overlaps pump P-1.");
+    expect(w).toContain("pump P-2 reaches outside the diagram (0..100).");
   });
 });
 
@@ -195,6 +241,12 @@ describe("HMI actions over MCP (fake CODESYS)", () => {
     const r = await call("hmi_export_codesys", { screen: "Overview" });
     expect(r.isError).toBe(true);
     expect(r.text).toMatch(/visualization scripting/);
+  });
+
+  it("says when the language services aren't there", async () => {
+    const r = await call("get_signature", { names: ["TON"] });
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/unavailable/);
   });
 
   it("deletes a screen", async () => {
