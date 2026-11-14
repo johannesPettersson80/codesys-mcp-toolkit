@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-11-14
+
 ### Added
 - Alarm history: `create_alarm_history` generates ST that records every state
   change of every alarm, with CODESYS's own time of the change, in a RETAIN
@@ -14,16 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   again); `alarm_history` lists the events. `hmi_export_codesys` adds it when
   the HMI has alarms, and an alarms tile with `history: N` shows the last
   events in the browser and in CODESYS. Checked in the SP21 simulation.
+- The live feature tests (`test/live/features.live.test.ts`) also cover the
+  alarm history, SFC branches, CFC, the watch list, data and line
+  breakpoints, `compare_sources` and library pinning; they pass on SP21 and
+  SP22.
 
 ### Fixed
 - `pin_library` on a managed reference kept only its namespace: the new
   reference got the library's defaults, and Standard came back
   qualified-only, so every unqualified call (TON, CONCAT) failed to compile.
   It now keeps qualified-only, optional and the other reference settings.
-- The live feature tests (`test/live/features.live.test.ts`) also cover the
-  alarm history, SFC branches, CFC, the watch list, data and line
-  breakpoints, `compare_sources` and library pinning; they pass on SP21 and
-  SP22.
 - CODESYS in another language: the native HMI export set the button and
   switch inputs (Input configuration) by their English names, which a German
   CODESYS doesn't know, so its buttons did nothing. The watcher now finds a
