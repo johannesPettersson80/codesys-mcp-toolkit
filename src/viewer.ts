@@ -133,6 +133,8 @@ export async function startViewer(ctx: AppContext, o: { port?: number; log?: (m:
       return true;
     },
     async close() {
+      // An open HMI or workspace tab keeps its connection alive; close it, or close() waits forever.
+      httpServer.closeAllConnections();
       await new Promise<void>((r) => httpServer.close(() => r()));
       await client.close().catch(() => undefined);
     },

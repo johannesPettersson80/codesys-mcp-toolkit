@@ -55,6 +55,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   devices to the tree. Checked on SP22: Ethernet, a Modbus TCP Client and a
   Modbus TCP Server device compile with 0 errors.
 - `create_object` creates persistent variable lists (`persistent_vars`).
+- `hmi_export_codesys` builds every page: page buttons in each header
+  (change shown visualization), the start page and client size of
+  TargetVisu and WebVisu, turning pumps and fans (8 frames chosen by the
+  clock), faceplates as CODESYS dialog visualizations, the pages' alarms in
+  CODESYS alarm management (an alarm group with Error/Warning/Info classes
+  and message texts), and visualization user groups with a Login button.
+  Checked on SP21: three pages and two dialogs compile with 0 errors.
+- Input actions only go on shapes: CODESYS raises an assertion dialog when
+  an image element gets one.
+- The browser viewer closes open connections when it stops, so an open HMI
+  tab no longer keeps the server from exiting. Screenshots retry once when
+  the headless browser hangs at start.
 - Actions can return images.
 - `--show-window` opens every object the model creates or writes in its editor
   tab, so the CODESYS window shows the code as it is written, and, while the

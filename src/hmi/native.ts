@@ -6,7 +6,7 @@
  */
 import { canvasOf, tileBox } from "./render.js";
 import { routed } from "./route.js";
-import type { ProcessItem, Screen, Tone, Widget } from "./spec.js";
+import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
 import { screenVariables } from "./spec.js";
 
 type Argb = number;
@@ -29,9 +29,28 @@ export interface NativeElement {
   invisible?: string;
   props?: Record<string, string | number | boolean | { argb: Argb }>;
   click?: string;
+  /** Switch the client to another visualization on click. */
+  goto?: string;
+  /** Open a dialog visualization on click. */
+  dialog?: { name: string; x?: number; y?: number };
+  /** Close this dialog on click. */
+  close_dialog?: string;
+  /** Open CODESYS's login dialog on click (visualization user management). */
+  login?: boolean;
+}
+
+export interface NativeDialog {
+  name: string;
+  size: [number, number];
+  background: Argb;
+  elements: NativeElement[];
 }
 
 export interface NativePlan {
+  /** Canvas size of the page. */
+  size: [number, number];
+  /** Faceplate dialogs opened from symbols. */
+  dialogs: NativeDialog[];
   visu: string;
   imagePool: string;
   background: Argb;
@@ -106,22 +125,25 @@ function band(bands: { from: number; tone: Tone }[] | undefined): { from: number
   return hot[0];
 }
 
+/** Pictures per turn of a running pump or fan. */
+export const FRAMES = 8;
+
 /** SVG symbols for the image pool (100x100). */
 export function symbols(p: Palette): { id: string; svg: string }[] {
   const wrap = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">${body}</svg>`;
-  const pump = (on: boolean) => {
+  const pump = (on: boolean, angle = 0) => {
     const ring = on ? hex(p.tones.ok) : hex(p.tones.neutral);
     const blades = [0, 60, 120, 180, 240, 300].map((a) => `<path d="M0 0 Q 12 -10 5 -26" transform="rotate(${a})" fill="none" stroke="${ring}" stroke-width="4.5" stroke-linecap="round"/>`).join("");
     return wrap(`<defs><radialGradient id="h" cx=".35" cy=".35" r=".8"><stop offset="0" stop-color="${hex(p.shell === 0xff1e293b ? 0xff475569 : 0xfff1f5f9)}"/><stop offset="1" stop-color="${hex(p.shell === 0xff1e293b ? 0xff0f172a : 0xffcbd5e1)}"/></radialGradient>
 <filter id="g" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="${on ? 3 : 0.01}"/></filter></defs>
 ${on ? `<circle cx="50" cy="50" r="46" fill="none" stroke="${ring}" stroke-width="6" opacity=".55" filter="url(#g)"/>` : ""}
 <circle cx="50" cy="50" r="47" fill="none" stroke="${ring}" stroke-width="5"/><circle cx="50" cy="50" r="41" fill="url(#h)"/>
-<g transform="translate(50 50)">${blades}<circle r="6" fill="${ring}"/></g>`);
+<g transform="translate(50 50) rotate(${angle})">${blades}<circle r="6" fill="${ring}"/></g>`);
   };
-  const fan = (on: boolean) => {
+  const fan = (on: boolean, angle = 0) => {
     const col = on ? hex(p.tones.ok) : hex(p.tones.neutral);
     const blades = [0, 120, 240].map((a) => `<path d="M0 0 C 18 -7 20 -30 0 -33 C -8 -24 -4 -8 0 0Z" transform="rotate(${a})" fill="${col}"/>`).join("");
-    return wrap(`<circle cx="50" cy="50" r="47" fill="none" stroke="${col}" stroke-width="5"/><circle cx="50" cy="50" r="41" fill="${hex(p.tile2)}"/><g transform="translate(50 50)">${blades}<circle r="6" fill="${hex(p.tile)}" stroke="${col}" stroke-width="2"/></g>`);
+    return wrap(`<circle cx="50" cy="50" r="47" fill="none" stroke="${col}" stroke-width="5"/><circle cx="50" cy="50" r="41" fill="${hex(p.tile2)}"/><g transform="translate(50 50) rotate(${angle})">${blades}<circle r="6" fill="${hex(p.tile)}" stroke="${col}" stroke-width="2"/></g>`);
   };
   const valve = (open: boolean) => {
     const col = open ? hex(p.tones.ok) : hex(p.tones.neutral);
@@ -133,6 +155,9 @@ ${on ? `<circle cx="50" cy="50" r="46" fill="none" stroke="${ring}" stroke-width
     { id: "pump_off", svg: pump(false) },
     { id: "fan_on", svg: fan(true) },
     { id: "fan_off", svg: fan(false) },
+    // Running frames: CODESYS can't rotate an image, so the impeller turns through 8 pictures.
+    ...Array.from({ length: FRAMES }, (_, k) => ({ id: `pump_f${k}`, svg: pump(true, (k * 60) / FRAMES) })),
+    ...Array.from({ length: FRAMES }, (_, k) => ({ id: `fan_f${k}`, svg: fan(true, (k * 120) / FRAMES) })),
     { id: "valve_open", svg: valve(true) },
     { id: "valve_closed", svg: valve(false) },
     { id: "valve_open_v", svg: valve(true).replace(/(<svg[^>]*>)([\s\S]*)(<\/svg>)/, '$1<g transform="rotate(90 50 50)">$2</g>$3') },
@@ -140,13 +165,14 @@ ${on ? `<circle cx="50" cy="50" r="46" fill="none" stroke="${ring}" stroke-width
   ];
 }
 
-export function nativePlan(screen: Screen): NativePlan {
+export function nativePlan(screen: Screen, pages: { name: string; title: string }[] = []): NativePlan {
   const p = PALETTES[screen.theme];
   const visu = `Visu_${screen.name}`;
   const pool = `IP_${screen.name}`;
   const helperName = `PRG_HMI_${screen.name}`;
   const els: NativeElement[] = [];
   const templates = symbols(p);
+  const dialogs: NativeDialog[] = [];
   const needed = new Map<string, string>();
   const decl: string[] = [];
   const impl: string[] = [];
@@ -181,6 +207,18 @@ export function nativePlan(screen: Screen): NativePlan {
   els.push({ kind: "rect", name: "Header", x: 0, y: 0, w: cv.w, h: cv.header - 14, fill: p.header[0], frame: null, gradient: [p.header[0], p.header[1], 0] });
   els.push(text(24, 8, 760, 30, screen.title, [SEMI, 17], p.headerText));
   if (screen.subtitle) els.push(text(24, 34, 760, 20, screen.subtitle, [FONT, 9.5], 0xffa5b4fc));
+  const navCount = pages.length > 1 ? pages.length : 0;
+  const loginX = cv.w - 24 - navCount * 140 - 96;
+  els.push({ kind: "round", name: "Login", x: r(loginX), y: 13, w: 84, h: 34, text: "Login", font: [SEMI, 10], color: p.headerText, fill: p.header[1], frame: 0x55ffffff, radius: 10, login: true });
+  if (pages.length > 1) {
+    const bw = 132, gap = 8;
+    let x = cv.w - 24 - pages.length * bw - (pages.length - 1) * gap;
+    for (const pg of pages) {
+      const cur = pg.name === screen.name;
+      els.push({ kind: "round", name: `Nav_${pg.name}`, x: r(x), y: 13, w: bw, h: 34, text: pg.title, font: [SEMI, 10], color: cur ? 0xff04121f : p.headerText, fill: cur ? p.tones.accent : 0x33ffffff, frame: cur ? p.tones.accent : 0x55ffffff, radius: 10, ...(cur ? {} : { goto: `Visu_${pg.name}` }) });
+      x += bw + gap;
+    }
+  }
 
   screen.widgets.forEach((wg, i) => {
     const b = tileBox(screen, wg.at);
@@ -337,7 +375,23 @@ export function nativePlan(screen: Screen): NativePlan {
         const [on, off, v] = it.type === "valve" ? [`valve_open${vert}`, `valve_closed${vert}`, it.open] : [`${it.type}_on`, `${it.type}_off`, it.running];
         // CODESYS draws an image at its own size from the box's corner, so each size gets its own SVG.
         const px = r(size);
-        els.push({ kind: "switcher", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, props: { 'Image settings.Image, if "on"': `${pool}.${image(on, px)}`, 'Image settings.Image, if  "off"': `${pool}.${image(off, px)}`, Variable: v } });
+        // Images take no clicks (CODESYS asserts on input actions there), so a faceplate opens from a clear area over the symbol.
+        const faceDialog = "faceplate" in it && it.faceplate ? { name: dialogFor(it.label ?? it.type, it.faceplate, it), x: r(cx + px / 2 + 10), y: r(cy - 60) } : undefined;
+        const face = {};
+        if (it.type === "valve") {
+          els.push({ kind: "switcher", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, props: { 'Image settings.Image, if "on"': `${pool}.${image(on, px)}`, 'Image settings.Image, if  "off"': `${pool}.${image(off, px)}`, Variable: v }, ...face });
+        } else {
+          // A turning impeller: a frame counter in the helper program picks the picture while running.
+          const frame = `iF${++n}`;
+          decl.push(`    ${frame} : INT; // ${it.label ?? it.type} frame`);
+          // From the clock, not per cycle: a steady 10 pictures a second whatever the task's interval.
+          impl.push(`IF ${v} THEN ${frame} := DINT_TO_INT((TIME_TO_DINT(TIME()) / 100) MOD ${FRAMES}); END_IF`);
+          for (let k = 0; k < FRAMES; k++) image(`${it.type}_f${k}`, px);
+          const offId = `${pool}.${image(off, px)}`;
+          const expr = `SEL(${v}, '${offId}', CONCAT('${pool}.${it.type}_f', CONCAT(INT_TO_STRING(${helperName}.${frame}), '_${px}')))`;
+          els.push({ kind: "image", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, props: { "Static ID": offId, "Bitmap ID variable.Bitmap ID": expr }, ...face });
+        }
+        if (faceDialog) els.push({ kind: "rect", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, fill: null, frame: null, dialog: faceDialog });
         if (it.type === "valve" && it.label) els.push(text(cx + size / 2 + 6, cy - 9, 120, 18, it.label, [SEMI, 8.5], p.muted));
         else label(cx, cy + size / 2 + 2, it.label);
         break;
@@ -373,8 +427,67 @@ export function nativePlan(screen: Screen): NativePlan {
     return id;
   }
 
+  /** A faceplate as a dialog visualization; returns its name. */
+  function dialogFor(title: string, f: Faceplate, sym: ProcessItem): string {
+    const name = `Dlg_${screen.name}_${title.replace(/[^A-Za-z0-9_]/g, "_")}`.slice(0, 60);
+    const W = 380;
+    const d: NativeElement[] = [];
+    let y = 0;
+    d.push({ kind: "rect", x: 0, y: 0, w: W, h: 50, fill: p.header[0], frame: null, gradient: [p.header[0], p.header[1], 0] });
+    d.push(text(18, 10, W - 90, 30, f.title ?? title, [SEMI, 13], p.headerText));
+    d.push({ kind: "round", x: W - 46, y: 10, w: 30, h: 30, text: "x", font: [SEMI, 11], color: p.headerText, fill: p.header[1], frame: null, radius: 8, close_dialog: name });
+    y = 64;
+    const lamp = (label: string, v: string, tone: Tone, x: number) => {
+      d.push({ kind: "circle", x, y: y + 4, w: 14, h: 14, fill: p.track, frame: null, props: { "Color variables.Toggle color": v, "Colors.Alarm state.Fill color": c(p.tones[tone]), "Colors.Alarm state.Frame color": c(p.tones[tone]) } });
+      d.push(text(x + 22, y, 120, 22, label, [FONT, 10], p.text));
+    };
+    const running = sym.type === "pump" || sym.type === "fan" ? sym.running : undefined;
+    const open = sym.type === "valve" ? sym.open : undefined;
+    const fault = sym.type === "pump" ? sym.fault : undefined;
+    if (running) lamp("Running", running, "ok", 18);
+    if (open) lamp("Open", open, "ok", 18);
+    if (fault) lamp("Fault", fault, "alarm", 160);
+    if (running || open || fault) y += 36;
+    if (f.auto) {
+      d.push({ kind: "round", x: 18, y, w: 58, h: 30, fill: p.track, frame: null, radius: 15, props: { "Input configuration.Toggle.Variable": f.auto, "Color variables.Toggle color": f.auto, "Colors.Alarm state.Fill color": c(p.tones.ok), "Colors.Alarm state.Frame color": c(p.tones.ok) } });
+      d.push({ kind: "circle", x: 21, y: y + 3, w: 24, h: 24, fill: 0xffffffff, frame: null, invisible: f.auto });
+      d.push({ kind: "circle", x: 49, y: y + 3, w: 24, h: 24, fill: 0xffffffff, frame: null, invisible: `NOT ${f.auto}` });
+      d.push(text(90, y, 200, 30, "Automatic", [FONT, 11], p.text));
+      y += 44;
+    }
+    const btns = [["Start", f.start, "ok"], ["Stop", f.stop, "alarm"], ["Open", f.open, "ok"], ["Close", f.close, "alarm"], ["Reset", f.reset, "warn"]].filter((b) => b[1]) as [string, string, Tone][];
+    if (btns.length) {
+      const bw = (W - 36 - (btns.length - 1) * 10) / btns.length;
+      btns.forEach(([label, v, tone], k) => {
+        const col = p.tones[tone];
+        d.push({ kind: "round", x: r(18 + k * (bw + 10)), y, w: r(bw), h: 42, text: label, font: [SEMI, 11], color: 0xffffffff, fill: col, frame: col, radius: 10, gradient: [col, darken(col, 0.18), 90], props: { "Input configuration.Tap.Variable": v, "Colors.Alarm state.Fill color": c(darken(col, 0.25)), "Colors.Alarm state.Frame color": c(darken(col, 0.25)) } });
+      });
+      y += 56;
+    }
+    for (const x of f.values ?? []) {
+      d.push(text(18, y, 200, 24, x.label, [FONT, 10], p.muted));
+      d.push(text(W - 178, y, 160, 24, `%.${x.decimals ?? 1}f${x.unit ? ` ${x.unit}` : ""}`, [SEMI, 11], p.text, "RIGHT", { props: { "Text variables.Text variable": real(x.value) } }));
+      y += 28;
+    }
+    if (f.setpoint) {
+      const sp = f.setpoint;
+      const step = sp.step ?? 1;
+      d.push(text(18, y + 4, 200, 24, sp.label ?? "Setpoint", [FONT, 10], p.muted));
+      y += 30;
+      const b = (x: number, label: string, op: string): NativeElement => ({ kind: "round", x, y, w: 40, h: 40, text: label, font: [SEMI, 14], color: p.text, fill: p.track, frame: p.border, radius: 10, click: `${sp.variable} := LIMIT(${sp.min}, ${sp.variable} ${op} ${step}, ${sp.max});` });
+      d.push(b(18, "-", "-"));
+      d.push(text(64, y, W - 128, 40, `%.1f${sp.unit ? ` ${sp.unit}` : ""}`, [SEMI, 16], p.text, "HCENTER", { props: { "Text variables.Text variable": real(sp.variable) } }));
+      d.push(b(W - 58, "+", "+"));
+      y += 52;
+    }
+    dialogs.push({ name, size: [W, y + 10], background: p.tile, elements: d });
+    return name;
+  }
+
   const vars = screenVariables(screen);
   return {
+    size: [cv.w, cv.h],
+    dialogs,
     visu,
     imagePool: pool,
     background: p.bg,

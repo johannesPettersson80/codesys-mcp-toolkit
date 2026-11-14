@@ -162,15 +162,24 @@ export async function screenshot(html: string, browser = findBrowser(), size: { 
     const page = join(dir, "screen.html");
     const png = join(dir, "screen.png");
     writeFileSync(page, html, "utf8");
-    await new Promise<void>((resolve, reject) => {
-      execFile(
-        browser,
-        ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check", `--user-data-dir=${join(dir, "profile")}`, `--window-size=${size.w},${size.h}`, "--virtual-time-budget=4000", `--screenshot=${png}`, `file:///${page.replace(/\\/g, "/")}`],
-        { timeout: 60_000, windowsHide: true },
-        (err) => (existsSync(png) ? resolve() : reject(err ?? new Error("the browser wrote no screenshot"))),
-      );
-    });
-    return readFileSync(png);
+    // A headless browser now and then hangs at start: give each try 25 s, and try twice with a fresh profile.
+    let last: unknown;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          execFile(
+            browser,
+            ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check", `--user-data-dir=${join(dir, `profile${attempt}`)}`, `--window-size=${size.w},${size.h}`, "--virtual-time-budget=4000", `--screenshot=${png}`, `file:///${page.replace(/\\/g, "/")}`],
+            { timeout: 25_000, windowsHide: true },
+            (err) => (existsSync(png) ? resolve() : reject(err ?? new Error("the browser wrote no screenshot"))),
+          );
+        });
+        return readFileSync(png);
+      } catch (e) {
+        last = e;
+      }
+    }
+    throw last instanceof Error ? last : new Error("the browser wrote no screenshot");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

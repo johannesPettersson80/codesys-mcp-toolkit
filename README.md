@@ -197,6 +197,14 @@ tank levels, colour states, buttons, switches, setpoints and alarm rows that
 appear only while active. A generated program, `PRG_HMI_<screen>`, scales
 values for the bars and levels. Claude gets a picture of the result.
 
+A multi-page HMI comes out as one visualization per page with page buttons in
+the header, the first page as the start page of TargetVisu and WebVisu at the
+panel size, pumps and fans that turn while running, faceplates as CODESYS
+dialogs, the pages' alarms in CODESYS's alarm management (Alarm Configuration,
+with timestamps and acknowledge in the PLC), and user groups (Operator,
+Maintenance, Admin) behind a Login button. Users and passwords are yours to add
+in the Visualization Manager.
+
 ![The same pump station as a native CODESYS visualization, running in CODESYS's simulation](docs/images/hmi-codesys.png)
 
 CODESYS's scripting can't create trend or meter elements, so trends show their

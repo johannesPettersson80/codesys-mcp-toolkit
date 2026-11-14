@@ -85,6 +85,6 @@ def op_trace_record(args):
 mcp_ops.OPS["trace.setup"] = mcp_sim._locked(op_trace_setup)
 mcp_ops.OPS["trace.record"] = op_trace_record
 # The visualization builder changes the project too: not while the simulation runs.
-for _op in ("visu.build",):
+for _op in ("visu.build", "visu.manager"):
     if _op in mcp_ops.OPS:
         mcp_ops.OPS[_op] = mcp_sim._locked(mcp_ops.OPS[_op])

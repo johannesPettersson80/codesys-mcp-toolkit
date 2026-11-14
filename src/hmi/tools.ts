@@ -13,7 +13,7 @@ import { nativePlan } from "./native.js";
 import { canvasOf, tileBox } from "./render.js";
 import { overlapWarnings } from "./route.js";
 import { TEMPLATES } from "./templates.js";
-import { layoutProblems, screenSchema, screenVariables } from "./spec.js";
+import { allAlarms, layoutProblems, screenSchema, screenVariables } from "./spec.js";
 
 const text = (t: string, isError = false): ActionResult => ({ content: [{ type: "text", text: t }], ...(isError ? { isError } : {}) });
 
@@ -89,42 +89,85 @@ Layout: ${looks.join(" ")}` : "";
     "hmi_export_codesys",
     {
       description:
-        "Build an HMI screen as a native CODESYS visualization in the project (Visu_<screen>), so it ships with the application: rounded cards, gradients, SVG pump, fan and valve symbols in an embedded image pool, live values, bars and tank levels, colour states, buttons, switches and setpoints. A generated program PRG_HMI_<screen> scales values for bars and levels; it is called from VISU_TASK. Returns a picture of the visualization. Trends are shown as values (CODESYS's trend element can't be created by script). Rebuilds the visualization if it exists.",
-      inputSchema: z.object({ screen: z.string().optional().describe("Screen name (default: the first)") }),
+        "Build the HMI as native CODESYS visualizations in the project, one per page (Visu_<screen>), so it ships with the application: the header links the pages, the first page is the start page of TargetVisu and WebVisu at the panel size, pumps and fans turn while running (8-frame animation), and a symbol with a faceplate opens it as a dialog (Dlg_<screen>_<tag>). Cards with gradients, SVG symbols in an embedded image pool, live values, bars and tank levels, colour states, buttons, switches, setpoints and alarm rows. A generated program PRG_HMI_<screen> per page scales values and turns the impellers; it runs in VISU_TASK. Returns a picture of the first page. Trends are shown as values. Rebuilds what exists.",
+      inputSchema: z.object({ screen: z.string().optional().describe("One page only (default: every page)") }),
     },
     async ({ screen: name }) => {
-      const s = hmi.screen(name);
-      if (!s) return text(name ? `No screen named '${name}'.` : "This project has no HMI screens yet: create one with hmi_save_screen.", true);
+      const all = hmi.screens();
+      const targets = name ? [hmi.screen(name)].filter((x): x is NonNullable<typeof x> => !!x) : all;
+      if (!targets.length) return text(name ? `No screen named '${name}'.` : "This project has no HMI screens yet: create one with hmi_save_screen.", true);
       const b = ctx.bridge;
       if (!(await b.waitReady(ctx.startWaitMs))) return text("CODESYS is still starting; try again shortly.", true);
-      const plan = nativePlan(s);
+      const pages = all.map((x) => ({ name: x.name, title: x.title }));
       const dir = mkdtempSync(join(tmpdir(), "cmcp-visu-"));
       try {
-        const images = plan.images.map((img) => {
-          const path = join(dir, `${img.id}.svg`);
-          writeFileSync(path, img.svg, "utf8");
-          return { id: img.id, path };
-        });
         const notes: string[] = [];
-        // The helper program first: the visualization refers to its variables.
-        try {
-          await b.call("object.write", { path: plan.helper.name, declaration: plan.helper.declaration, implementation: plan.helper.implementation });
-        } catch {
-          await b.call("object.create", { kind: "program", name: plan.helper.name, declaration: plan.helper.declaration, implementation: plan.helper.implementation });
-        }
-        const built = await b.call<{ name: string; elements: number; warnings: string[] }>(
-          "visu.build",
-          { name: plan.visu, replace: true, background: plan.background, elements: plan.elements, image_pool: plan.imagePool, images, save: ctx.autosave },
-          { timeoutMs: 300_000 },
-        );
-        for (const task of ["VISU_TASK", "MainTask"]) {
+        const warnings: string[] = [];
+        const builtNames: string[] = [];
+        let first: { visu: string; w: number; h: number } | undefined;
+        // The first page is built last, so a CODESYS window ends up showing the start page.
+        for (const s of [...targets].reverse()) {
+          const plan = nativePlan(s, pages);
+          const images = plan.images.map((img) => {
+            const path = join(dir, `${img.id}.svg`);
+            writeFileSync(path, img.svg, "utf8");
+            return { id: img.id, path };
+          });
+          // The helper program first: the visualization refers to its variables.
           try {
-            await b.call("task.configure", { name: task, add_calls: [plan.helper.name], save: ctx.autosave });
-            notes.push(`${plan.helper.name} runs in ${task}.`);
-            break;
+            await b.call("object.write", { path: plan.helper.name, declaration: plan.helper.declaration, implementation: plan.helper.implementation });
           } catch {
-            /* try the next task */
+            await b.call("object.create", { kind: "program", name: plan.helper.name, declaration: plan.helper.declaration, implementation: plan.helper.implementation });
           }
+          for (const d of plan.dialogs) {
+            const r = await b.call<{ warnings: string[] }>("visu.build", { name: d.name, replace: true, background: d.background, elements: d.elements, size: d.size, dialog: true, save: false }, { timeoutMs: 300_000 });
+            warnings.push(...r.warnings.map((w) => `${d.name}: ${w}`));
+            builtNames.push(d.name);
+          }
+          const built = await b.call<{ name: string; elements: number; warnings: string[] }>(
+            "visu.build",
+            { name: plan.visu, replace: true, background: plan.background, elements: plan.elements, image_pool: plan.imagePool, images, size: plan.size, save: ctx.autosave },
+            { timeoutMs: 300_000 },
+          );
+          warnings.push(...built.warnings.map((w) => `${plan.visu}: ${w}`));
+          builtNames.push(`${built.name} (${built.elements} elements)`);
+          first = { visu: plan.visu, w: plan.size[0], h: plan.size[1] };
+          for (const task of ["VISU_TASK", "MainTask"]) {
+            try {
+              await b.call("task.configure", { name: task, add_calls: [plan.helper.name], save: false });
+              break;
+            } catch {
+              /* try the next task */
+            }
+          }
+        }
+        // The pages' alarms as CODESYS alarms (timestamps, acknowledge and history in the PLC).
+        const alarms = allAlarms(all);
+        if (alarms.length) {
+          try {
+            const cls = (sev: string) => (sev === "info" ? "Info" : sev === "warning" ? "Warning" : "Error");
+            const r = await b.call<{ alarms: string[] }>("alarms.configure", { group: "AG_HMI", alarms: alarms.map((a, i) => ({ id: i + 1, kind: "digital", expression: a.active, comparison: "Equal", compare_to: "TRUE", text: a.text, cls: cls(a.severity) })), save: false }, { timeoutMs: 120_000 });
+            notes.push(`${r.alarms.length} alarm(s) in CODESYS alarm management (Alarm Configuration / AG_HMI).`);
+          } catch (e) {
+            warnings.push(`alarms: ${(e as Error).message}`);
+          }
+        }
+        // User groups for the Login button; users and passwords are the engineer's to add.
+        try {
+          await b.call("visu.users", { groups: ["Operator", "Maintenance", "Admin"], save: false }, { timeoutMs: 120_000 });
+          notes.push("User groups Operator, Maintenance and Admin; add users in the Visualization Manager (User Management) for the Login button.");
+        } catch (e) {
+          warnings.push(`user groups: ${(e as Error).message}`);
+        }
+        // Start on the first page; the clients use the panel size.
+        const startPage = `Visu_${all[0]!.name}`;
+        const cv = canvasOf(all[0]!);
+        try {
+          const m = await b.call<{ updated: string[]; warnings: string[] }>("visu.manager", { start: startPage, width: cv.w, height: cv.h, save: ctx.autosave });
+          notes.push(`Start page ${startPage} at ${cv.w}x${cv.h} in ${m.updated.join(", ") || "no client"}.`);
+          warnings.push(...m.warnings);
+        } catch (e) {
+          warnings.push(`visualization manager: ${(e as Error).message}`);
         }
         const build = await b.call<{ messages: { severity: string; text: string; object?: string }[] }>("build", {}, { timeoutMs: 900_000 });
         const errors = build.messages.filter((m) => /error/i.test(m.severity));
@@ -136,16 +179,18 @@ Layout: ${looks.join(" ")}` : "";
               : `The build has ${errors.length} errors, for example: ${errors.slice(0, 3).map((m) => `${m.object ?? ""} ${m.text}`.trim()).join("; ")}`,
           );
         } else notes.push("Compiles with 0 errors. Start the simulation to see it live.");
-        if (built.warnings.length) notes.push(`Not applied (${built.warnings.length}): ${built.warnings.slice(0, 6).join("; ")}`);
+        if (warnings.length) notes.push(`Not applied (${warnings.length}): ${warnings.slice(0, 6).join("; ")}`);
         const png = join(dir, "visu.png");
         let image: ActionResult["content"] = [];
-        try {
-          await b.call("visu.render", { name: plan.visu, path: png, width: canvasOf(s).w, height: canvasOf(s).h }, { timeoutMs: 60_000 });
-          image = [{ type: "image", data: readFileSync(png).toString("base64"), mimeType: "image/png" }];
-        } catch (e) {
-          notes.push(`No picture: ${(e as Error).message}`);
+        if (first) {
+          try {
+            await b.call("visu.render", { name: first.visu, path: png, width: first.w, height: first.h }, { timeoutMs: 60_000 });
+            image = [{ type: "image", data: readFileSync(png).toString("base64"), mimeType: "image/png" }];
+          } catch (e) {
+            notes.push(`No picture: ${(e as Error).message}`);
+          }
         }
-        return { content: [...image, { type: "text", text: `Built ${built.name} (${built.elements} elements) from screen '${s.name}', with image pool ${plan.imagePool} and program ${plan.helper.name}.\n${notes.join("\n")}` }] };
+        return { content: [...image, { type: "text", text: [`Built ${builtNames.join(", ")}.`, ...notes].join("\n") }] };
       } catch (e) {
         return text(`${(e as { code?: string }).code ? `${(e as { code: string }).code}: ` : ""}${(e as Error).message}`, true);
       } finally {

@@ -227,6 +227,11 @@ def op_visu_build(args):
             except Exception as ex:
                 warnings.append("image %s: %s" % (img["id"], to_text(ex)))
     visu = c.app.create_visualobject(name)
+    if args.get("size") or args.get("dialog"):
+        try:
+            _visual_property(c, visu, args.get("size"), bool(args.get("dialog")))
+        except Exception as ex:
+            warnings.append("size/dialog: %s" % to_text(ex))
     T = se.VisualElementType
     corners = []
     for i, el in enumerate(args.get("elements") or []):
@@ -249,11 +254,46 @@ def op_visu_build(args):
             except Exception as ex:
                 if len(warnings) < 40:
                     warnings.append("%s %s: %s" % (label, path, to_text(ex)))
+        if el["kind"] not in _SIMPLE and (el.get("click") or el.get("goto") or el.get("dialog") or el.get("close_dialog") or el.get("login")):
+            # Image elements have no input handling: an input action there makes CODESYS's
+            # code generation raise an assertion dialog. Click areas are simple shapes.
+            warnings.append("%s: input actions only go on shapes, not on %s" % (label, el["kind"]))
+            el = dict(el)
+            for k in ("click", "goto", "dialog", "close_dialog", "login"):
+                el.pop(k, None)
         if el.get("click"):
             try:
                 e.add_input_action(visu.input_action_factory.create_execute_st_code(el["click"]), se.InputActionEventType.OnMouseClick)
             except Exception as ex:
                 warnings.append("%s click: %s" % (label, to_text(ex)))
+        if el.get("goto"):
+            try:
+                act = visu.input_action_factory.create_change_shown_visualization(se.ChangeShownVisualizationType.Assignment, el["goto"])
+                e.add_input_action(act, se.InputActionEventType.OnMouseClick)
+            except Exception as ex:
+                warnings.append("%s goto: %s" % (label, to_text(ex)))
+        if el.get("dialog"):
+            try:
+                from System.Collections.Generic import Dictionary, List
+                d = el["dialog"]
+                act = visu.input_action_factory.create_open_dialog(d["name"], Dictionary[object, object](), List[object](), True, False, str(int(d.get("x", 200))), str(int(d.get("y", 120))))
+                e.add_input_action(act, se.InputActionEventType.OnMouseClick)
+            except Exception as ex:
+                warnings.append("%s dialog: %s" % (label, to_text(ex)))
+        if el.get("login"):
+            try:
+                lt = _find_type("_3S.CoDeSys.VisualElem.VisuUserMgmtInputActionFactory")
+                import System
+                act = System.Activator.CreateInstance(lt).CreateInputAction()
+                e.add_input_action(act, se.InputActionEventType.OnMouseClick)
+            except Exception as ex:
+                warnings.append("%s login: %s" % (label, to_text(ex)))
+        if el.get("close_dialog"):
+            try:
+                act = visu.input_action_factory.create_close_dialog(el["close_dialog"], "OK")
+                e.add_input_action(act, se.InputActionEventType.OnMouseClick)
+            except Exception as ex:
+                warnings.append("%s close: %s" % (label, to_text(ex)))
         if el.get("radius"):
             corners.append((eid, int(el["radius"])))
     try:
@@ -271,6 +311,83 @@ def op_visu_build(args):
     except Exception as ex:
         warnings.append("background/corners: %s" % to_text(ex))
     return {"name": name_of(visu), "path": name_of(visu), "kind": "visualization", "elements": len(visu.visual_element_list), "warnings": warnings, "saved": c.save_if(args)}
+
+
+def _visual_property(c, visu, size, dialog):
+    """The visualization's own settings: canvas size, and whether it is a dialog."""
+    import System
+    SD = _drawing()
+    mgr = _object_mgr()
+    mo = mgr.GetObjectToModify(c.proj.handle, visu.guid)
+    ok = False
+    try:
+        props = [p for p in mo.Properties if p.GetType().Name == "VisualProperty"]
+        if props:
+            vp = props[0]
+            if size:
+                vp.Size = SD.Size(int(size[0]), int(size[1]))
+            if dialog:
+                vp.UsageType = System.Enum.Parse(_find_type("_3S.CoDeSys.VisualObject.VisualUsageType"), "Dialog")
+        ok = True
+    finally:
+        mgr.SetObject(mo, ok, None)
+
+
+def op_visu_manager(args):
+    """Start page, client size and style of the Visualization Manager, TargetVisu and WebVisu."""
+    import System
+    c = Ctx()
+    SD = _drawing()
+    done, warnings = [], []
+    style = None
+    if args.get("style"):
+        repo = _static("_3S.CoDeSys.VisualEditor.APEnvironment", "VisualizationStylesRepository")
+        for st in (repo.GetAllStyles() if repo is not None else []):
+            nm = to_text(_get(st, "Name") or "")
+            if nm.lower() == args["style"].lower():
+                style = to_text(_get(st, "DisplayName"))
+        if style is None:
+            warnings.append("style %s is not installed" % args["style"])
+    for name in ("Visualization Manager", "TargetVisu", "WebVisu"):
+        obj = _find_child_deep(c, name)
+        if obj is None:
+            continue
+        try:
+            with _Modify(c.proj, obj) as vo:
+                vs = vo.ViewSettings
+                if args.get("start"):
+                    vs.StartVisu = args["start"]
+                if name == "Visualization Manager":
+                    if style:
+                        vs.VisualizationStyle = style
+                elif args.get("width") and args.get("height"):
+                    try:
+                        vs.ClientSizeMode = System.Enum.Parse(vs.ClientSizeMode.GetType(), "Specified")
+                    except Exception:
+                        pass
+                    vs.ClientSize = SD.Size(int(args["width"]), int(args["height"]))
+                    try:
+                        vs.BestFit = True
+                    except Exception:
+                        pass
+            done.append(name)
+        except Exception as ex:
+            warnings.append("%s: %s" % (name, to_text(ex)))
+    return {"updated": done, "warnings": warnings, "saved": c.save_if(args)}
+
+
+def _get(o, name):
+    try:
+        return getattr(o, name)
+    except Exception:
+        return None
+
+
+def _find_child_deep(c, name):
+    for ch in c.app.get_children(True):
+        if name_of(ch).lower() == name.lower():
+            return ch
+    return None
 
 
 def op_visu_render(args):
@@ -299,6 +416,7 @@ def op_visu_render(args):
 
 
 mcp_ops.OPS.update({
+    "visu.manager": op_visu_manager,
     "visu.build": op_visu_build,
     "visu.render": op_visu_render,
 })

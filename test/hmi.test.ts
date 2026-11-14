@@ -164,11 +164,13 @@ describe("native CODESYS visualization plan", () => {
   });
 
   it("uses SVG symbols for pumps, with buttons, alarms and texts bound to the program", () => {
-    const pump = plan.elements.find((e) => e.kind === "switcher")!;
-    // one SVG per symbol size, drawn at exactly the box's size
-    expect(plan.images.map((i) => i.id).sort()).toEqual([`pump_off_${pump.w}`, `pump_on_${pump.w}`]);
+    const pump = plan.elements.find((e) => e.kind === "image")!;
+    // one SVG per symbol size, drawn at exactly the box's size: the stopped picture and 8 running frames
+    expect(plan.images.map((i) => i.id).sort()).toEqual([...Array.from({ length: 8 }, (_, k) => `pump_f${k}_${pump.w}`), `pump_off_${pump.w}`].sort());
     for (const i of plan.images) expect(i.svg).toMatch(new RegExp(`^<svg xmlns="http://www.w3.org/2000/svg" width="${pump.w}" height="${pump.w}"`));
-    expect(pump.props).toMatchObject({ Variable: "PLC_PRG.xRun", 'Image settings.Image, if "on"': `IP_Overview.pump_on_${pump.w}` });
+    expect(pump.props!["Static ID"]).toBe(`IP_Overview.pump_off_${pump.w}`);
+    expect(pump.props!["Bitmap ID variable.Bitmap ID"]).toBe(`SEL(PLC_PRG.xRun, 'IP_Overview.pump_off_${pump.w}', CONCAT('IP_Overview.pump_f', CONCAT(INT_TO_STRING(PRG_HMI_Overview.iF${(plan.helper.implementation.match(/iF(\d+)/) ?? [])[1]}), '_${pump.w}')))`);
+    expect(plan.helper.implementation).toMatch(/IF PLC_PRG\.xRun THEN iF\d+ := DINT_TO_INT\(\(TIME_TO_DINT\(TIME\(\)\) \/ 100\) MOD 8\); END_IF/);
     expect(plan.elements.find((e) => e.text === "Start")!.props).toMatchObject({ "Input configuration.Tap.Variable": "PLC_PRG.xStart" });
     expect(plan.elements.find((e) => e.invisible === "NOT PLC_PRG.xHigh")!.text).toMatch(/High level <T-101>/);
     for (const e of plan.elements) expect(e.x + e.w).toBeLessThanOrEqual(1280);
