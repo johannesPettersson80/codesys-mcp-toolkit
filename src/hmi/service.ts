@@ -10,14 +10,17 @@ import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { currentCodesysSim } from "../codesys/simulation.js";
 import type { AppContext } from "../tools.js";
-import { canvasOf, type PageContext } from "./render.js";
+import { canvasOf, HMI_CSS, symbolMarkup, type PageContext } from "./render.js";
 import { allAlarms, screenSchema, screenVariables, type Screen } from "./spec.js";
+import { BUILTIN_SYMBOLS, svgProblems, symbolPorts, symbolSchema, type SymbolDef, type SymbolLib } from "./symbols.js";
 
 export type Values = Record<string, string | undefined>;
 
 interface HmiFile {
   version: 1;
   screens: Screen[];
+  /** The project's own symbols (hmi_save_symbol). */
+  symbols?: SymbolLib;
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -40,18 +43,60 @@ export class HmiService {
     return join(dirname(p), `${basename(p, extname(p))}.hmi.json`);
   }
 
-  screens(): Screen[] {
+  private read(): HmiFile {
     const f = this.file();
-    if (!f || !existsSync(f)) return [];
+    if (!f || !existsSync(f)) return { version: 1, screens: [] };
     try {
-      const raw = JSON.parse(readFileSync(f, "utf8")) as HmiFile;
-      return (raw.screens ?? []).flatMap((s) => {
-        const r = screenSchema.safeParse(s);
-        return r.success ? [r.data] : [];
-      });
+      return JSON.parse(readFileSync(f, "utf8")) as HmiFile;
     } catch {
-      return [];
+      return { version: 1, screens: [] };
     }
+  }
+
+  private store(data: HmiFile): string {
+    const f = this.file();
+    if (!f) throw new Error("No project is open. Open or create a project first; screens are stored next to it.");
+    const out: HmiFile = { version: 1, screens: data.screens, ...(data.symbols && Object.keys(data.symbols).length ? { symbols: data.symbols } : {}) };
+    writeFileSync(f, `${JSON.stringify(out, null, 2)}\n`, "utf8");
+    return f;
+  }
+
+  screens(): Screen[] {
+    return (this.read().screens ?? []).flatMap((s) => {
+      const r = screenSchema.safeParse(s);
+      return r.success ? [r.data] : [];
+    });
+  }
+
+  /** The project's own symbols (only those that still pass the checks). */
+  symbols(): SymbolLib {
+    const out: SymbolLib = {};
+    for (const [name, raw] of Object.entries(this.read().symbols ?? {})) {
+      const r = symbolSchema.safeParse(raw);
+      if (r.success && !svgProblems(r.data.svg).length) out[name] = r.data;
+    }
+    return out;
+  }
+
+  /** Standard and project symbols together. */
+  library(): SymbolLib {
+    return { ...BUILTIN_SYMBOLS, ...this.symbols() };
+  }
+
+  saveSymbol(name: string, def: SymbolDef): { file: string; replaced: boolean } {
+    const data = this.read();
+    const symbols = { ...(data.symbols ?? {}) };
+    const replaced = name in symbols;
+    symbols[name] = def;
+    return { file: this.store({ ...data, screens: data.screens ?? [], symbols }), replaced };
+  }
+
+  removeSymbol(name: string): boolean {
+    const data = this.read();
+    if (!data.symbols || !(name in data.symbols)) return false;
+    const { [name]: _gone, ...rest } = data.symbols;
+    this.store({ ...data, screens: data.screens ?? [], symbols: rest });
+    return true;
   }
 
   screen(name?: string): Screen | undefined {
@@ -60,30 +105,29 @@ export class HmiService {
   }
 
   save(screen: Screen): { file: string; replaced: boolean } {
-    const f = this.file();
-    if (!f) throw new Error("No project is open. Open or create a project first; screens are stored next to it.");
+    const data = this.read();
     const all = this.screens();
     const i = all.findIndex((s) => s.name.toLowerCase() === screen.name.toLowerCase());
     if (i >= 0) all[i] = screen;
     else all.push(screen);
-    writeFileSync(f, `${JSON.stringify({ version: 1, screens: all } satisfies HmiFile, null, 2)}\n`, "utf8");
-    return { file: f, replaced: i >= 0 };
+    return { file: this.store({ ...data, screens: all }), replaced: i >= 0 };
   }
 
   remove(name: string): boolean {
-    const f = this.file();
-    if (!f) return false;
+    if (!this.file()) return false;
+    const data = this.read();
     const all = this.screens();
     const left = all.filter((s) => s.name.toLowerCase() !== name.toLowerCase());
     if (left.length === all.length) return false;
-    writeFileSync(f, `${JSON.stringify({ version: 1, screens: left } satisfies HmiFile, null, 2)}\n`, "utf8");
+    this.store({ ...data, screens: left });
     return true;
   }
 
-  /** What every page shows besides its tiles: the page list and the HMI's alarms. */
+  /** What every page shows besides its tiles: the page list, the HMI's alarms and the project's symbols. */
   page(): PageContext {
     const all = this.screens();
-    return { pages: all.map((x) => ({ name: x.name, title: x.title })), alarms: allAlarms(all) };
+    const symbols = this.symbols();
+    return { pages: all.map((x) => ({ name: x.name, title: x.title })), alarms: allAlarms(all), ...(Object.keys(symbols).length ? { symbols } : {}) };
   }
 
   sim(): { state?: string } {
@@ -139,6 +183,37 @@ export function staticPage(screen: Screen, values: Values, sim: { state?: string
   return `<!doctype html><html><head><meta charset="utf-8"><title>${screen.title.replace(/[<&]/g, "")}</title>
 <style>html,body{margin:0;background:#05080f}body{width:${cv.w}px;height:${cv.h}px;overflow:hidden}</style></head>
 <body data-page="static"><div id="stage"></div><script>window.HMI_STATIC=${data};</script><script>${script.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
+}
+
+/**
+ * A picture of symbols for the model: each in its off, on and fault colours,
+ * with its ports marked and named. Returns the page and its pixel size.
+ */
+export function symbolSheet(entries: [string, SymbolDef][], theme: "dark" | "light" = "dark"): { html: string; size: { w: number; h: number } } {
+  const rowH = 128;
+  const W = 920;
+  const rows = entries.map(([name, d], k) => {
+    const fit = Math.min(64, (40 * d.viewBox[0]) / d.viewBox[1]);
+    const cell = (cls: string, ports: boolean) => {
+      const marks = ports
+        ? Object.entries(symbolPorts(d, { x: 0, y: 0, size: fit }, 1))
+            .map(([pn, p]) => `<circle cx="${p.at[0]}" cy="${p.at[1]}" r="1.6" fill="#f472b6"/><text x="${p.at[0]}" y="${p.at[1] - 2.6}" class="pn">${pn}</text>`)
+            .join("")
+        : "";
+      return `<svg width="190" height="114" viewBox="-40 -24 80 48"><g class="${cls}">${symbolMarkup(name, d, fit)}</g>${marks}</svg>`;
+    };
+    return `<div class="row" style="top:${44 + k * rowH}px"><div class="nm">${name.replace(/[<&]/g, "")}<div class="ds">${(d.description ?? "").replace(/[<&]/g, "")}</div><div class="ds">ports: ${Object.keys(d.ports).join(", ") || "none"}</div></div>${cell("sym", true)}${cell("sym on", false)}<span class="fault">${cell("sym", false)}</span></div>`;
+  });
+  const h = 44 + entries.length * rowH + 10;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>${HMI_CSS}
+html,body{margin:0}body{width:${W}px;height:${h}px;overflow:hidden}
+.sheet{position:relative;width:${W}px;height:${h}px;border-radius:0}
+.hd{position:absolute;top:12px;left:250px;display:flex;gap:0;color:var(--muted);font:600 12px "Segoe UI";letter-spacing:.08em;text-transform:uppercase}.hd span{width:198px;text-align:center}
+.row{position:absolute;left:12px;right:12px;height:${rowH - 8}px;display:flex;align-items:center;gap:8px;border-radius:12px;background:var(--tile);border:1px solid var(--tile-bd)}
+.row svg{overflow:visible}.nm{width:228px;padding-left:14px;font:650 15px "Segoe UI";color:var(--fg)}.ds{font:400 11.5px "Segoe UI";color:var(--muted);margin-top:4px}
+.pn{font:600 3.6px "Segoe UI";fill:#f472b6;text-anchor:middle}.sym,.sym *{animation:none!important}
+</style></head><body><div class="hmi sheet theme-${theme}"><div class="hd"><span>off · ports</span><span>on</span><span>fault</span></div>${rows.join("")}</div></body></html>`;
+  return { html, size: { w: W, h } };
 }
 
 /** Edge or Chrome on this machine, for headless screenshots. */

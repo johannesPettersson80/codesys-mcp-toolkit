@@ -9,9 +9,9 @@
  * size / aspect, where aspect = height / width of the diagram on screen.
  */
 import type { ProcessItem } from "./spec.js";
+import { BUILTIN_SYMBOLS, findSymbol, symbolBox, symbolPorts, type Dir, type SymbolLib } from "./symbols.js";
 
 type Pt = [number, number];
-type Dir = "l" | "r" | "u" | "d";
 export interface Port {
   at: Pt;
   dir: Dir;
@@ -20,8 +20,12 @@ export interface Port {
 const keyOf = (p: ProcessItem): string | undefined => ("id" in p && p.id) || ("label" in p && p.label) || undefined;
 
 /** The ports of a symbol (keyed by name), for a diagram of the given aspect. */
-export function portsOf(p: ProcessItem, aspect: number): Record<string, Port> {
+export function portsOf(p: ProcessItem, aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): Record<string, Port> {
   switch (p.type) {
+    case "symbol": {
+      const f = findSymbol(lib, p.symbol);
+      return f ? symbolPorts(f[1], p, aspect) : {};
+    }
     case "tank": {
       const { x, y, w, h } = p;
       const cx = x + w / 2;
@@ -67,18 +71,32 @@ export const PORT_NAMES: Record<string, string[]> = {
   junction: ["c"],
 };
 
-/** Problems with pipe ends: unknown symbols or ports. */
-export function routeProblems(items: ProcessItem[]): string[] {
-  const syms = new Map(items.flatMap((p) => (keyOf(p) && p.type in PORT_NAMES ? [[keyOf(p)!.toLowerCase(), p] as const] : [])));
+const connectable = (p: ProcessItem) => p.type in PORT_NAMES || p.type === "symbol";
+const symbolMap = (items: ProcessItem[]) => new Map(items.flatMap((p) => (keyOf(p) && connectable(p) ? [[keyOf(p)!.toLowerCase(), p] as const] : [])));
+
+/** The port names of a symbol on the diagram. */
+function portNames(s: ProcessItem, lib: SymbolLib): string[] {
+  if (s.type === "symbol") return Object.keys(findSymbol(lib, s.symbol)?.[1].ports ?? {});
+  return PORT_NAMES[s.type] ?? [];
+}
+
+/** Problems with library symbols and pipe ends: unknown symbols or ports. */
+export function routeProblems(items: ProcessItem[], lib: SymbolLib = BUILTIN_SYMBOLS): string[] {
+  const syms = symbolMap(items);
   const out: string[] = [];
   items.forEach((p, i) => {
+    if (p.type === "symbol" && !findSymbol(lib, p.symbol)) out.push(`item ${i + 1}: no symbol '${p.symbol}' in the library (symbols: ${Object.keys(lib).join(", ")}; add your own with hmi_save_symbol).`);
     if (p.type !== "pipe") return;
     for (const e of [p.from, p.to]) {
       if (typeof e !== "string") continue;
       const [name, port] = e.split(".") as [string, string];
       const s = syms.get(name.toLowerCase());
       if (!s) out.push(`pipe ${i + 1}: no symbol named '${name}' (symbols: ${[...syms.keys()].join(", ") || "none"}).`);
-      else if (!PORT_NAMES[s.type]!.includes(port) || (s.type === "valve" && !["in", "out"].includes(port))) out.push(`pipe ${i + 1}: ${s.type} '${name}' has no port '${port}' (ports: ${PORT_NAMES[s.type]!.join(", ")}).`);
+      else if (!portNames(s, lib).includes(port)) {
+        const kind = s.type === "symbol" ? s.symbol : s.type;
+        const names = portNames(s, lib);
+        out.push(`pipe ${i + 1}: ${kind} '${name}' has no port '${port}' (${names.length ? `ports: ${names.join(", ")}` : "it has no ports"}).`);
+      }
     }
   });
   return out;
@@ -88,9 +106,9 @@ const STEP: Record<Dir, Pt> = { l: [-1, 0], r: [1, 0], u: [0, -1], d: [0, 1] };
 const horiz = (d: Dir) => d === "l" || d === "r";
 
 /** The points of a pipe: right angles from port to port (or along raw points). */
-export function routePipe(p: Extract<ProcessItem, { type: "pipe" }>, items: ProcessItem[], aspect: number): Pt[] {
+export function routePipe(p: Extract<ProcessItem, { type: "pipe" }>, items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): Pt[] {
   if (!p.from || !p.to) return p.points ?? [];
-  const syms = new Map(items.flatMap((s) => (keyOf(s) && s.type in PORT_NAMES ? [[keyOf(s)!.toLowerCase(), s] as const] : [])));
+  const syms = symbolMap(items);
   const resolve = (e: string | Pt, other?: Pt): Port => {
     if (typeof e !== "string") {
       // A free end at the diagram's edge leaves through that edge.
@@ -105,7 +123,7 @@ export function routePipe(p: Extract<ProcessItem, { type: "pipe" }>, items: Proc
     }
     const [name, port] = e.split(".") as [string, string];
     const s = syms.get(name.toLowerCase());
-    const ports = s ? portsOf(s, aspect) : {};
+    const ports = s ? portsOf(s, aspect, lib) : {};
     return ports[port] ?? { at: [50, 50], dir: "r" };
   };
   const a0 = typeof p.from === "string" ? resolve(p.from) : undefined;
@@ -165,12 +183,12 @@ function dedupe(pts: Pt[]): Pt[] {
 }
 
 /** The diagram with every pipe's points resolved. */
-export function routed(items: ProcessItem[], aspect: number): ProcessItem[] {
-  return items.map((p) => (p.type === "pipe" ? { ...p, points: routePipe(p, items, aspect), from: undefined, to: undefined, via: undefined } : p));
+export function routed(items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): ProcessItem[] {
+  return items.map((p) => (p.type === "pipe" ? { ...p, points: routePipe(p, items, aspect, lib), from: undefined, to: undefined, via: undefined } : p));
 }
 
 /** Symbols that overlap each other or leave the diagram, as warnings (the screen still saves). */
-export function overlapWarnings(items: ProcessItem[], aspect: number): string[] {
+export function overlapWarnings(items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): string[] {
   type Box = { name: string; x0: number; y0: number; x1: number; y1: number };
   const boxes: Box[] = [];
   items.forEach((p, i) => {
@@ -179,6 +197,10 @@ export function overlapWarnings(items: ProcessItem[], aspect: number): string[] 
     else if (p.type === "pump" || p.type === "fan" || p.type === "valve") {
       const r = p.size / 2;
       boxes.push({ name, x0: p.x - r, y0: p.y - r / aspect, x1: p.x + r, y1: p.y + r / aspect });
+    } else if (p.type === "symbol") {
+      const f = findSymbol(lib, p.symbol);
+      // Mounted symbols (agitator, level switch) are meant to sit on a tank: no overlap warning for them.
+      if (f && !["mixer", "level_switch"].includes(f[0])) boxes.push({ name: `${p.symbol} ${keyOf(p) ?? i + 1}`, ...symbolBox(f[1], p, aspect) });
     } else if (p.type === "sensor") boxes.push({ name, x0: p.x - 7, y0: p.y - 2.2 / aspect, x1: p.x + 7, y1: p.y + 2.2 / aspect });
   });
   const out: string[] = [];

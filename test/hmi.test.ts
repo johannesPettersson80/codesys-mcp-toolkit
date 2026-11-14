@@ -239,6 +239,28 @@ describe("HMI actions over MCP (fake CODESYS)", () => {
     expect(r.text).toMatch(/example values/);
   }, 90_000);
 
+  it("saves the project's own symbol, refuses unsafe SVG, and uses it on a screen", async () => {
+    const bad = await call("hmi_save_symbol", { name: "centrifuge", svg: `<circle r="4" onclick="x()"/><script>1</script>` });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toMatch(/Not saved: the symbol's SVG needs changes[\s\S]*onclick[\s\S]*<script> is not allowed/);
+    expect((await call("hmi_save_symbol", { name: "motor", svg: "<g/>" })).text).toMatch(/standard symbol/);
+    const ok = await call("hmi_save_symbol", { name: "centrifuge", svg: `<circle cx="50" cy="50" r="44" fill="var(--body)" stroke="var(--state)" stroke-width="5"/><g class="spin"><path d="M50 20v60M20 50h60" stroke="var(--line)" stroke-width="5"/></g>`, ports: { in: { x: 6, y: 50, dir: "left" }, out: { x: 94, y: 50, dir: "right" } }, description: "Decanter centrifuge" });
+    expect(ok.isError).toBe(false);
+    expect(ok.text).toMatch(/Saved symbol 'centrifuge' \(100x100, ports: in, out\)/);
+    if (findBrowser()) expect(ok.images).toHaveLength(1);
+    const list = await call("hmi_symbols", { names: ["centrifuge", "heat_exchanger"] });
+    expect(list.text).toMatch(/centrifuge \(project\): Decanter centrifuge \[100x100; ports: in left, out right\]/);
+    expect(list.text).toMatch(/heat_exchanger: Heat exchanger/);
+    const plant = { name: "Plant", title: "Plant", widgets: [{ type: "process", at: [1, 1, 8, 5], items: [{ type: "symbol", symbol: "centrifuge", label: "C-1", x: 50, y: 50, size: 16, on: "PLC_PRG.xRun" }, { type: "pipe", from: [0, 50], to: "C-1.in" }] }] };
+    expect((await call("hmi_save_screen", { screen: plant })).isError).toBe(false);
+    const h = await panel("get_hmi", { screen: "Plant" });
+    expect(Object.keys(h.symbols as object)).toEqual(["centrifuge"]);
+    const wrong = await call("hmi_save_screen", { screen: { ...plant, widgets: [{ ...plant.widgets[0], items: [{ type: "symbol", symbol: "decanter", x: 50, y: 50 }] }] } });
+    expect(wrong.text).toMatch(/no symbol 'decanter' in the library/);
+    expect((await call("hmi_delete_screen", { screen: "Plant" })).text).toMatch(/Deleted/);
+    expect((await call("hmi_delete_symbol", { name: "centrifuge" })).text).toMatch(/Deleted symbol 'centrifuge'/);
+  }, 90_000);
+
   it("says when this CODESYS can't build visualizations", async () => {
     const r = await call("hmi_export_codesys", { screen: "Overview" });
     expect(r.isError).toBe(true);

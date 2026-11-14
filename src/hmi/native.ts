@@ -8,6 +8,7 @@ import { canvasOf, tileBox } from "./render.js";
 import { routed } from "./route.js";
 import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
 import { screenVariables } from "./spec.js";
+import { BUILTIN_SYMBOLS, findSymbol, symbolPicture, symbolSize, type SymbolColors, type SymbolLib } from "./symbols.js";
 
 type Argb = number;
 export interface NativeElement {
@@ -165,8 +166,17 @@ ${on ? `<circle cx="50" cy="50" r="46" fill="none" stroke="${ring}" stroke-width
   ];
 }
 
-export function nativePlan(screen: Screen, pages: { name: string; title: string }[] = []): NativePlan {
+export function nativePlan(screen: Screen, pages: { name: string; title: string }[] = [], custom: SymbolLib = {}): NativePlan {
   const p = PALETTES[screen.theme];
+  const lib: SymbolLib = { ...BUILTIN_SYMBOLS, ...custom };
+  const dark = screen.theme === "dark";
+  const symColors = (state: "off" | "on" | "fault"): SymbolColors => ({
+    state: hex(state === "on" ? p.tones.ok : state === "fault" ? p.tones.alarm : p.tones.neutral),
+    body: dark ? "#334155" : "#f1f5f9",
+    body2: dark ? "#1e293b" : "#cbd5e1",
+    line: hex(p.muted),
+    accent: hex(p.tones.accent),
+  });
   const visu = `Visu_${screen.name}`;
   const pool = `IP_${screen.name}`;
   const helperName = `PRG_HMI_${screen.name}`;
@@ -334,7 +344,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         const sy = box.h / 100;
         const X = (x: number) => box.x + x * sx;
         const Y = (y: number) => box.y + y * sy;
-        const items = routed(w.items, box.h / box.w).sort((a, b2) => (a.type === "pipe" ? -1 : 0) - (b2.type === "pipe" ? -1 : 0));
+        const items = routed(w.items, box.h / box.w, lib).sort((a, b2) => (a.type === "pipe" ? -1 : 0) - (b2.type === "pipe" ? -1 : 0));
         for (const it of items) processItem(it, X, Y, sx);
         break;
       }
@@ -344,6 +354,29 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
   function processItem(it: ProcessItem, X: (x: number) => number, Y: (y: number) => number, sx: number) {
     const label = (cx: number, y: number, t?: string) => t && els.push(text(cx - 60, y, 120, 18, t, [SEMI, 8.5], p.muted, "HCENTER"));
     switch (it.type) {
+      case "symbol": {
+        const f = findSymbol(lib, it.symbol);
+        if (!f) break;
+        const [name, d] = f;
+        const rot = it.rotate ?? 0;
+        const { w, h } = symbolSize(d, it.size);
+        const [vw, vh] = rot % 180 ? [h, w] : [w, h];
+        const wpx = Math.max(4, r(vw * sx)), hpx = Math.max(4, r(vh * sx));
+        const cx = X(it.x), cy = Y(it.y);
+        // One picture per state; the bitmap ID expression picks it (fault wins over on).
+        const pic = (state: "off" | "on" | "fault") => {
+          const id = `sym_${name}_${state}${rot ? `_r${rot}` : ""}_${wpx}x${hpx}`;
+          if (!needed.has(id)) needed.set(id, symbolPicture(d, name, symColors(state), rot, wpx, hpx));
+          return `${pool}.${id}`;
+        };
+        let expr = `'${pic("off")}'`;
+        if (it.on) expr = `SEL(${it.on}, ${expr}, '${pic("on")}')`;
+        if (it.fault) expr = `SEL(${it.fault}, ${expr}, '${pic("fault")}')`;
+        els.push({ kind: "image", x: r(cx - wpx / 2), y: r(cy - hpx / 2), w: wpx, h: hpx, props: { "Static ID": pic("off"), ...(it.on || it.fault ? { "Bitmap ID variable.Bitmap ID": expr } : {}) } });
+        if (it.faceplate) els.push({ kind: "rect", x: r(cx - wpx / 2), y: r(cy - hpx / 2), w: wpx, h: hpx, fill: null, frame: null, dialog: { name: dialogFor(it.label ?? name, it.faceplate, it), x: r(cx + wpx / 2 + 10), y: r(cy - 60) } });
+        label(cx, cy + hpx / 2 + 2, it.label);
+        break;
+      }
       case "pipe": {
         const th = 7;
         const pts = it.points ?? [];
@@ -441,9 +474,9 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
       d.push({ kind: "circle", x, y: y + 4, w: 14, h: 14, fill: p.track, frame: null, props: { "Color variables.Toggle color": v, "Colors.Alarm state.Fill color": c(p.tones[tone]), "Colors.Alarm state.Frame color": c(p.tones[tone]) } });
       d.push(text(x + 22, y, 120, 22, label, [FONT, 10], p.text));
     };
-    const running = sym.type === "pump" || sym.type === "fan" ? sym.running : undefined;
+    const running = sym.type === "pump" || sym.type === "fan" ? sym.running : sym.type === "symbol" ? sym.on : undefined;
     const open = sym.type === "valve" ? sym.open : undefined;
-    const fault = sym.type === "pump" ? sym.fault : undefined;
+    const fault = sym.type === "pump" || sym.type === "symbol" ? sym.fault : undefined;
     if (running) lamp("Running", running, "ok", 18);
     if (open) lamp("Open", open, "ok", 18);
     if (fault) lamp("Fault", fault, "alarm", 160);

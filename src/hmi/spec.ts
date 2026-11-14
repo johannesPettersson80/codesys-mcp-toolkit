@@ -6,6 +6,7 @@
  */
 import * as z from "zod/v4";
 import { routeProblems } from "./route.js";
+import { BUILTIN_SYMBOLS, type SymbolLib } from "./symbols.js";
 
 const v = z.string().min(1).describe("PLC variable, full path, e.g. 'PLC_PRG.fbPump.xRunning' or 'GVL.rLevel'");
 const tone = z.enum(["accent", "ok", "warn", "alarm", "neutral"]);
@@ -45,6 +46,21 @@ const processItem = z.discriminatedUnion("type", [
   z.object({ type: z.literal("fan"), id, x: num, y: num, size: num.default(12), running: v, label: z.string().optional(), faceplate: faceplate.optional() }),
   z.object({ type: z.literal("valve"), id, x: num, y: num, size: num.default(8), open: v, vertical: z.boolean().optional(), label: z.string().optional(), faceplate: faceplate.optional() }),
   z.object({ type: z.literal("junction"), id: z.string(), x: num, y: num }).describe("A tee or bend that several pipes meet at"),
+  z
+    .object({
+      type: z.literal("symbol"),
+      symbol: z.string().describe("A standard symbol (motor, conveyor, heat_exchanger, mixer, filter, compressor, cylinder, level_switch, pressure_switch, check_valve, control_valve) or one saved with hmi_save_symbol"),
+      id,
+      x: num.describe("Centre"),
+      y: num.describe("Centre"),
+      size: num.default(10).describe("Width in diagram units (0..100 across)"),
+      rotate: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).optional().describe("Clockwise, in degrees; ports turn with it"),
+      on: v.optional().describe("BOOL: on or running (green)"),
+      fault: v.optional().describe("BOOL: fault (red, wins over on)"),
+      label: z.string().optional(),
+      faceplate: faceplate.optional(),
+    })
+    .describe("A symbol from the library: hmi_symbols lists them with their ports"),
   z
     .object({
       type: z.literal("pipe"),
@@ -157,6 +173,7 @@ export function screenVariables(s: Screen): string[] {
           else if (p.type === "pump") (add(p.running), add(p.fault));
           else if (p.type === "fan") add(p.running);
           else if (p.type === "valve") add(p.open);
+          else if (p.type === "symbol") (add(p.on), add(p.fault));
           else if (p.type === "pipe") add(p.flow);
           else if (p.type === "sensor") add(p.value);
           else if (p.type === "lamp") add(p.on);
@@ -170,7 +187,7 @@ export function screenVariables(s: Screen): string[] {
 }
 
 /** Overlapping or out-of-grid tiles, as readable problems (empty when the layout is fine). */
-export function layoutProblems(s: Screen): string[] {
+export function layoutProblems(s: Screen, lib: SymbolLib = BUILTIN_SYMBOLS): string[] {
   const [cols, rows] = s.grid;
   const out: string[] = [];
   const cells = new Map<string, number>();
@@ -190,7 +207,7 @@ export function layoutProblems(s: Screen): string[] {
       }
   });
   s.widgets.forEach((w, i) => {
-    if (w.type === "process") for (const msg of routeProblems(w.items)) out.push(`widget ${i + 1} (process): ${msg}`);
+    if (w.type === "process") for (const msg of routeProblems(w.items, lib)) out.push(`widget ${i + 1} (process): ${msg}`);
   });
   return out;
 }

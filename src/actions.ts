@@ -7,6 +7,7 @@
  */
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
+import { reportProgress, withProgress, type ProgressRequest } from "./progress.js";
 
 export const TOOL_NAME = "codesys";
 
@@ -92,6 +93,7 @@ function batchAction(actions: Map<string, Action>): Action {
       const out: string[] = [];
       let failed = false;
       for (const [i, s] of steps.entries()) {
+        if (steps.length > 1) reportProgress(`step ${i + 1}/${steps.length}: ${s.name}`);
         const r = await s.action.run(s.args);
         out.push(`[${i + 1}/${steps.length}] ${s.name}${r.isError ? " FAILED" : ""}:\n${r.content.map((c) => (c.type === "text" ? c.text : "(an image: call this action on its own to see it)")).join("\n")}`);
         failed ||= !!r.isError;
@@ -119,7 +121,7 @@ export function registerActionTool(server: McpServer, actions: Map<string, Actio
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    async ({ action, args }) => {
+    async ({ action, args }, ctx) => {
       if (action === "help") {
         if (args?.action === undefined) return reply(catalog);
         const wanted = String(args.action);
@@ -129,7 +131,9 @@ export function registerActionTool(server: McpServer, actions: Map<string, Actio
       const a = all.get(action)!;
       const parsed = checkArgs(a, args);
       if (!parsed.success) return reply(`Invalid arguments for ${action}:\n${z.prettifyError(parsed.error)}\n\n${usage(action, a)}`, true);
-      return a.run(parsed.data);
+      const token = ctx?.mcpReq?._meta?.progressToken as string | number | undefined;
+      const req: ProgressRequest | undefined = token === undefined ? undefined : { progressToken: token, notify: (n) => ctx.mcpReq.notify(n) };
+      return withProgress(req, action, () => a.run(parsed.data));
     },
   );
 }

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Process-diagram symbols: a `symbol` item with a library of standard
+  symbols (motor, conveyor, heat exchanger, mixer, filter, compressor,
+  cylinder, level switch, pressure switch, check valve, control valve), each
+  with off, on and fault colours, named ports for pipes and rotation in 90°
+  steps. In CODESYS each state is its own picture in the image pool, chosen by
+  the on and fault variables. Checked live on SP21.
+- Your own symbols: `hmi_save_symbol` adds an SVG symbol to the project, drawn
+  by Claude or imported from an SVG file (Inkscape, Illustrator), and returns
+  a picture of it in every state with its ports marked. `hmi_symbols` shows
+  the library, `hmi_delete_symbol` removes one. The SVG is checked against a
+  short list of elements and attributes; scripts, styles, links and external
+  images are refused.
+- MCP progress: long actions send progress notifications (the steps of an HMI
+  export, the steps of a batch, and a heartbeat every 10 s), so clients that
+  reset their timeout on progress don't give up on a long export.
+- `hmi_export_codesys` checks for the FloatingPointUtils library first and
+  says how to install it, instead of building for minutes and failing at the
+  compile.
+
 ## [2.3.0] - 2026-11-14
 
 Several of the new actions use CODESYS's own services inside the IDE, beyond

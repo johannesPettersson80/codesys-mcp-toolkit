@@ -7,6 +7,7 @@
  */
 import { routed } from "./route.js";
 import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
+import { BUILTIN_SYMBOLS, findSymbol, scopeIds, symbolBox, symbolSize, type SymbolDef, type SymbolLib } from "./symbols.js";
 
 export const CANVAS = { w: 1280, h: 720, header: 76, pad: 20, gap: 14 } as const;
 
@@ -22,6 +23,8 @@ export function canvasOf(screen: { size?: string }): { w: number; h: number; hea
 export interface PageContext {
   pages?: { name: string; title: string }[];
   alarms?: { active: string }[];
+  /** The project's own symbols (hmi_save_symbol), besides the standard ones. */
+  symbols?: SymbolLib;
 }
 
 export type Binding =
@@ -68,10 +71,11 @@ export function renderScreen(screen: Screen, page: PageContext = {}): Rendered {
     return `data-open="${k}"`;
   };
   const cv = canvasOf(screen);
+  const lib: SymbolLib = { ...BUILTIN_SYMBOLS, ...page.symbols };
 
   const tiles = screen.widgets.map((wg) => {
     const box = tileBox(screen, wg.at);
-    const inner = widget(wg, box, bind, id, face);
+    const inner = widget(wg, box, bind, id, face, lib);
     const title = wg.title ? `<div class="t-title">${esc(wg.title)}</div>` : "";
     return `<section class="tile t-${wg.type}${wg.title ? "" : " untitled"}${box.h < 110 ? " compact" : ""}" style="left:${r1(box.x)}px;top:${r1(box.y)}px;width:${r1(box.w)}px;height:${r1(box.h)}px">${title}<div class="t-body">${inner}</div></section>`;
   });
@@ -114,7 +118,7 @@ function toneOf(t: Tone | undefined): string {
   return t ?? "accent";
 }
 
-function widget(w: Widget, box: { w: number; h: number }, bind: Bind, id: (p: string) => string, face: Face): string {
+function widget(w: Widget, box: { w: number; h: number }, bind: Bind, id: (p: string) => string, face: Face, lib: SymbolLib): string {
   const bodyH = box.h - (w.title ? 44 : 20);
   switch (w.type) {
     case "value": {
@@ -170,8 +174,8 @@ function widget(w: Widget, box: { w: number; h: number }, bind: Bind, id: (p: st
       const vw = 100;
       const vh = r1((100 * Math.max(60, bodyH)) / Math.max(60, box.w - 24));
       const sy = vh / 100;
-      const items = routed(w.items, sy).sort((a, b) => (a.type === "pipe" ? -1 : 0) - (b.type === "pipe" ? -1 : 0));
-      return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id, face)).join("")}</svg>`;
+      const items = routed(w.items, sy, lib).sort((a, b) => (a.type === "pipe" ? -1 : 0) - (b.type === "pipe" ? -1 : 0));
+      return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id, face, lib)).join("")}</svg>`;
     }
   }
 }
@@ -190,10 +194,24 @@ const DEFS = `<defs>
 <filter id="fGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
 </defs>`;
 
-function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => string, face: Face): string {
+/** A library symbol drawn at the origin, in diagram units (shared with the symbol preview). */
+export function symbolMarkup(name: string, d: SymbolDef, size: number, rotate = 0): string {
+  const { w, h } = symbolSize(d, size);
+  return `<g${rotate ? ` transform="rotate(${rotate})"` : ""}><svg x="${r1(-w / 2)}" y="${r1(-h / 2)}" width="${r1(w)}" height="${r1(h)}" viewBox="0 0 ${d.viewBox[0]} ${d.viewBox[1]}" overflow="visible">${scopeIds(d.svg, `sym-${name}`)}</svg></g>`;
+}
+
+function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => string, face: Face, lib: SymbolLib): string {
   const Y = (y: number) => r1(y * sy);
   const label = (x: number, y: number, t?: string) => (t ? `<text class="p-label" x="${r1(x)}" y="${Y(y)}">${esc(t)}</text>` : "");
   switch (p.type) {
+    case "symbol": {
+      const f = findSymbol(lib, p.symbol);
+      if (!f) return "";
+      const [name, d] = f;
+      const box = symbolBox(d, p, sy);
+      const click = p.faceplate ? `class="clickable" ${face(p.label ?? name, p.faceplate, { running: p.on, fault: p.fault })}` : "";
+      return `<g ${p.fault ? bind({ kind: "fault", v: p.fault }) : ""} ${click}><g class="sym sym-${esc(name)}" ${p.on ? bind({ kind: "on", v: p.on }) : ""}><g transform="translate(${r1(p.x)} ${Y(p.y)})">${symbolMarkup(name, d, p.size, p.rotate ?? 0)}</g></g>${label(p.x, box.y1 + 2.6 / sy, p.label)}</g>`;
+    }
     case "pipe": {
       const d = (p.points ?? []).map(([x, y], i) => `${i ? "L" : "M"}${r1(x)} ${Y(y)}`).join(" ");
       return `<g class="pipe" ${p.flow ? bind({ kind: "on", v: p.flow }) : ""}><path class="pipe-outer" d="${d}"/><path class="pipe-inner" d="${d}"/><path class="pipe-flow" d="${d}"/></g>`;
@@ -333,6 +351,11 @@ export const HMI_CSS = String.raw`
 .pump-imp path{fill:none;stroke:var(--muted);stroke-width:.9;stroke-linecap:round}.fan .pump-imp path{fill:var(--muted);stroke:none;opacity:.85}.pump-hub{fill:var(--muted)}
 .pump.on .pump-ring{stroke:var(--ok);filter:url(#fGlow)}.pump.on .pump-imp{animation:spin 1s linear infinite}.pump.on .pump-imp path{stroke:var(--ok)}.fan.on .pump-imp path{fill:var(--ok)}.pump.on .pump-hub{fill:var(--ok)}
 .fault .pump-ring{stroke:var(--alarm);animation:blink .8s infinite}
+.sym{--state:var(--neutral);--body:var(--shell-b);--body2:var(--shell-a);--line:var(--muted);transition:filter .3s}
+.sym.on{--state:var(--ok);filter:drop-shadow(0 0 1px color-mix(in srgb,var(--ok) 70%,transparent))}
+.fault .sym{--state:var(--alarm);animation:blink .8s infinite}
+.sym .spin{transform-box:fill-box;transform-origin:center}.sym.on .spin{animation:spin 1.2s linear infinite}
+.clickable:hover .sym{filter:drop-shadow(0 0 1.5px var(--accent))}
 .valve-body{fill:var(--neutral);stroke:var(--tile-bd);stroke-width:.3;transition:fill .3s}.valve-stem{stroke:var(--muted);stroke-width:.6}.valve-act{fill:var(--shell-b);stroke:var(--tile-bd);stroke-width:.3}
 .valve.on .valve-body{fill:var(--ok);filter:url(#fGlow)}
 .sen-box{fill:rgba(2,6,23,.6);stroke:color-mix(in srgb,var(--accent) 70%,transparent);stroke-width:.22}.theme-light .sen-box{fill:#fff}

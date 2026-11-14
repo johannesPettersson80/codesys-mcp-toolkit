@@ -76,12 +76,12 @@ async function live(stage: HTMLElement) {
   const write = (variable: string, value: string) => void call("ui_hmi_write", { variable, value }).then((r) => show(r.ok === false ? String(r.message) : undefined), (e: Error) => show(e.message));
   for (;;) {
     try {
-      const r = (await call("get_hmi", { screen: name })) as { screens: { name: string; title: string }[]; screen?: Screen; values?: Values; sim?: { state?: string }; alarms?: { active: string }[] };
+      const r = (await call("get_hmi", { screen: name })) as { screens: { name: string; title: string }[]; screen?: Screen; values?: Values; sim?: { state?: string }; alarms?: { active: string }[]; symbols?: PageContext["symbols"] };
       show(r.screen ? undefined : "No HMI screens in this project yet: ask Claude to make one.");
       tabs.innerHTML = "";
       void (r.screens.length > 1 ? r.screens.map((s) => `<button data-s="${s.name}" class="${s.name === r.screen?.name ? "cur" : ""}">${s.title.replace(/[<&]/g, "")}</button>`).join("") : "");
       if (r.screen) {
-        const key = JSON.stringify([r.screen, r.screens, r.alarms]);
+        const key = JSON.stringify([r.screen, r.screens, r.alarms, r.symbols]);
         if (key !== screenKey) {
           screen?.destroy();
           const go = (p: string) => {
@@ -89,7 +89,7 @@ async function live(stage: HTMLElement) {
             history.replaceState(null, "", `?t=${encodeURIComponent(token)}&s=${encodeURIComponent(p)}`);
             screenKey = "";
           };
-          screen = mount(stage, r.screen, write, { pages: r.screens, alarms: r.alarms }, go);
+          screen = mount(stage, r.screen, write, { pages: r.screens, alarms: r.alarms, symbols: r.symbols }, go);
           screenKey = key;
           document.title = r.screen.title;
           fit(stage, false);
