@@ -253,7 +253,7 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 | **读取代码** | `get_project_tree` `read_objects` `search_code` `get_outline` |
 | **修改代码** | `write_object` `create_object` `create_graphical` `delete_object` `rename_object` |
 | **编译** | `compile` |
-| **库** | `list_libraries` `add_library` `remove_library` `get_library_api` `get_signature` |
+| **库** | `find_library` `list_libraries` `add_library` `pin_library` `remove_library` `get_library_api` `get_signature` |
 | **代码导航** | `find_references` `rename_symbol` |
 | **任务与 I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` `find_device` `add_device` `device_parameters` `configure_device` |
 | **改动跟踪** | `checkpoint` `get_changes` `revert_object` |

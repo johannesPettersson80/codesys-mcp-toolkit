@@ -40,7 +40,9 @@ panel to one tool.
 | `delete_object` / `rename_object` | Delete or rename an object. |
 | `search_code` | Text or regex search over all ST. |
 | `compile` | Build the application and return errors and warnings with object, line and code. Also checks POUs no task calls (default); `deep` generates code too, `clean` builds from scratch. |
-| `list_libraries` / `add_library` / `remove_library` | Library references. Add by title (`Util`, the newest installed unless you pass `version`) or full name (`Util, 3.5.17.0 (System)`). |
+| `list_libraries` / `add_library` / `remove_library` | Library references. Add by title (`Util`, the newest installed unless you pass `version`) or full name (`Util, 3.5.17.0 (System)`). `list_libraries` marks references that take the newest installed version (`*`), which can differ between machines. |
+| `find_library` | Search the installed libraries by title, company or category: every installed version, the default namespace, the categories, and how the open project references each. |
+| `pin_library` | Fix a reference to one version: the version it uses now, or `version`. A placeholder (`#Standard`) is pinned with CODESYS's redirection, a `*` reference is replaced by the fixed version (its namespace kept). `unpin` goes back to the newest installed version, or the placeholder's own resolution. |
 | `get_library_api` | What a library offers. A referenced source library (`.library`) gives the real interface of its FBs, functions and types. A compiled library, or one the project doesn't reference yet, gives its objects and descriptions from CODESYS's library browser, without parameters. |
 | `create_graphical` | Create an LD, FBD or SFC program or function block from a description (`replace: true` replaces an existing one, e.g. after editing the description `read_objects` gave): ladder rungs (`when`: contacts in series `and` / parallel `or`, `NOT x` for a normally closed contact; `then`: coils, set, reset), FBD networks (functions such as AND or ADD, function blocks with instance and inputs, results to variables), SFC steps (actions in ST with qualifiers, a condition to the next step; one sequence whose last step jumps back), or an SFC `chart` with branches: steps and transitions top to bottom, `alternative` paths (one is taken; each starts with a condition), `parallel` paths (all run; they follow a transition and join before the next one) and jumps. `cfc` takes the same description as `fbd` and draws it as CFC. The declaration is given as ST. |
 | `get_signature` | The real interface of POUs and types as CODESYS's compiler sees them (inputs, outputs, other variables, types, initial values, doc comments, methods and properties), for the project's code and for FBs in any referenced library, compiled ones included. Builds first if needed. |
@@ -105,6 +107,8 @@ action that can't work there says so instead of failing halfway.
 | `trace_setup`, `trace_record` | yes (probe) | yes | not checked |
 | Debugging (breakpoints, stepping, call stack) | yes (probe) | yes | not checked |
 | `breakpoint_on_change`, `watch` | not checked | yes | not checked |
+| `find_library`, `pin_library` | not checked | yes | not checked |
+| HMI themes, native pipe flow, access rights per tile | yes | not checked | not checked |
 | `find_device`, `add_device`, `device_parameters`, `configure_device` | yes | yes | not checked |
 | `project_report`, `export_sources` | yes | yes | not checked |
 

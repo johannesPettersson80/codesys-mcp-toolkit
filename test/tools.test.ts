@@ -75,6 +75,8 @@ describe("MCP tools over the real watcher", () => {
         "delete_object",
         "device_parameters",
         "export_sources",
+        "pin_library",
+        "find_library",
         "get_project_tree",
         "get_signature",
         "find_device",
@@ -344,6 +346,28 @@ describe("watch list and data breakpoints", () => {
     } finally {
       spy.mockRestore();
       ctx.codesysSim = undefined;
+    }
+  });
+});
+
+describe("library finder and pinning", () => {
+  it("marks references that take the newest version, and reports a pin", async () => {
+    const spy = vi.spyOn(ctx.bridge, "call").mockImplementation(async (op: string, args?: Record<string, unknown>) => {
+      if (op === "libraries.list") return { libraries: [{ name: "Util, * (System)", namespace: "Util" }, { name: "#IoStandard", is_placeholder: true, effective_resolution: "IoStandard, 3.5.22.0 (System)" }] } as never;
+      if (op === "libraries.pin") return { reference: "#IoStandard", was: "IoStandard, 3.5.22.0 (System)", now: args?.unpin ? "IoStandard, 3.5.22.0 (System)" : "IoStandard, 3.5.4.0 (System)", placeholder: true } as never;
+      if (op === "library.search") return { total: 1, libraries: [{ title: "Util", company: "System", versions: ["3.5.22.0", "3.5.17.0"], categories: ["Common"], reference: "Util, * (System)" }] } as never;
+      throw new Error("unexpected " + op);
+    });
+    try {
+      const list = (await call("list_libraries")).text;
+      expect(list).toContain("Util, * (System), namespace Util  [newest installed: not pinned]");
+      expect(list).toContain("1 reference(s) take the newest installed version");
+      expect((await call("pin_library", { name: "#IoStandard", version: "3.5.4.0" })).text).toContain("IoStandard, 3.5.22.0 (System) -> IoStandard, 3.5.4.0 (System) (pinned)");
+      expect((await call("pin_library", { name: "IoStandard", unpin: true })).text).toContain("(the device's resolution again)");
+      const found = (await call("find_library", { query: "util" })).text;
+      expect(found).toContain("Util (System): 3.5.22.0, 3.5.17.0; Common\n    referenced as Util, * (System)");
+    } finally {
+      spy.mockRestore();
     }
   });
 });

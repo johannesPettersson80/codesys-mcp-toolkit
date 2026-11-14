@@ -20,7 +20,7 @@ SIM = {"online": None, "device": None, "project": None, "was_dirty": False, "for
 LOCKED = (
     "project.open", "project.open_new", "project.create_empty", "project.save", "project.close",
     "object.write", "object.create", "object.delete", "object.rename", "object.import_xml",
-    "libraries.add", "libraries.remove", "task.configure", "build",
+    "libraries.add", "libraries.remove", "libraries.pin", "task.configure", "build",
 )
 
 # Between single cycles: the command returns before the cycle has run.

@@ -244,7 +244,7 @@ export function formatBuild(messages: BuildMessage[]): { text: string; errors: n
 export function registerTools(server: McpServer, ctx: AppContext): void {
   const b = ctx.bridge;
   /** Tools that change the project are held while the user has paused Claude (panel). */
-  const HELD = new Set(["write_object", "create_object", "delete_object", "rename_object", "revert_object", "add_library", "remove_library", "configure_task", "create_project", "open_project", "close_project", "codesys_sim_start", "codesys_sim_stop", "codesys_sim_control", "codesys_sim_cycle", "codesys_sim_write", "codesys_sim_force", "codesys_sim_unforce"]);
+  const HELD = new Set(["write_object", "create_object", "delete_object", "rename_object", "revert_object", "add_library", "remove_library", "pin_library", "configure_task", "create_project", "open_project", "close_project", "codesys_sim_start", "codesys_sim_stop", "codesys_sim_control", "codesys_sim_cycle", "codesys_sim_write", "codesys_sim_force", "codesys_sim_unforce"]);
   const actions = new Map<string, Action>();
   const reg: RegisterAction = (name, config, cb) => {
     actions.set(name, {
@@ -653,9 +653,11 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       run(ctx, async () => {
         const r = await b.call<{ libraries: { name: string; is_placeholder?: boolean; namespace?: string; effective_resolution?: string }[] }>("libraries.list");
         if (!r.libraries.length) return "No libraries referenced.";
-        return r.libraries
-          .map((l) => `${l.name}${l.is_placeholder ? " (placeholder)" : ""}${l.namespace ? `, namespace ${l.namespace}` : ""}${l.effective_resolution ? ` -> ${l.effective_resolution}` : ""}`)
-          .join("\n");
+        const lines = r.libraries.map(
+          (l) => `${l.name}${l.is_placeholder ? " (placeholder)" : ""}${l.namespace ? `, namespace ${l.namespace}` : ""}${l.effective_resolution ? ` -> ${l.effective_resolution}` : ""}${/,\s*\*\s*\(/.test(l.name) ? "  [newest installed: not pinned]" : ""}`,
+        );
+        const loose = r.libraries.filter((l) => /,\s*\*\s*\(/.test(l.name)).length;
+        return [...lines, ...(loose ? [`${loose} reference(s) take the newest installed version, so another machine may build with a different one: pin_library fixes the version.`] : [])].join("\n");
       }),
   );
 
@@ -682,6 +684,40 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       run(ctx, async () => {
         const r = await b.call<{ added: string; saved?: boolean }>("libraries.add", { name, ...(version ? { version } : {}), ...save() });
         return `Added library ${r.added}.${savedNote(r)}`;
+      }),
+  );
+
+  reg(
+    "find_library",
+    {
+      description:
+        "Search the libraries installed in CODESYS's library repository by title, company or category (e.g. 'modbus', 'serial', 'recipe', '3S'): every installed version, the default namespace, and whether and how the open project references it. Then add_library to use one, pin_library to fix its version.",
+      inputSchema: z.object({ query: z.string().describe("Part of a title, company or category; empty lists all"), limit: z.number().int().min(1).max(200).default(40) }),
+    },
+    async ({ query, limit }) =>
+      run(ctx, async () => {
+        type Lib = { title: string; company: string; versions: string[]; namespace?: string; categories?: string[]; reference?: string; resolves_to?: string };
+        const r = await b.call<{ libraries: Lib[]; total: number }>("library.search", { query, limit }, { timeoutMs: 180_000 });
+        if (!r.libraries.length) return `No installed library matches '${query}'.`;
+        const line = (l: Lib) =>
+          `${l.title} (${l.company}): ${l.versions.slice(0, 6).join(", ")}${l.versions.length > 6 ? `, ... (${l.versions.length} versions)` : ""}${l.namespace ? `; namespace ${l.namespace}` : ""}${l.categories?.length ? `; ${l.categories.slice(0, 3).join(", ")}` : ""}${l.reference ? `\n    referenced as ${l.reference}${l.resolves_to && l.resolves_to !== l.reference ? ` -> ${l.resolves_to}` : ""}` : ""}`;
+        return [`${r.total} installed librar${r.total === 1 ? "y" : "ies"} match${r.total === 1 ? "es" : ""} '${query}'${r.total > r.libraries.length ? ` (first ${r.libraries.length})` : ""}:`, ...r.libraries.map(line)].join("\n");
+      }),
+  );
+
+  reg(
+    "pin_library",
+    {
+      description:
+        "Fix a referenced library to one version, so the project builds the same on every machine: to the version it uses now (default) or to version. A placeholder (#Standard) is pinned with CODESYS's redirection; a reference to the newest version ('*') is replaced by the fixed one, keeping its namespace. unpin: back to the newest installed version (or the placeholder's normal resolution).",
+      inputSchema: z.object({ name: z.string().min(1).describe("e.g. 'Util' or '#Standard'"), version: z.string().optional().describe("e.g. '3.5.17.0'"), unpin: z.boolean().optional() }),
+    },
+    async ({ name, version, unpin }) =>
+      run(ctx, async () => {
+        const r = await b.call<{ reference: string; was: string; now: string; placeholder?: boolean; unchanged?: boolean; saved?: boolean }>("libraries.pin", { name, ...(version ? { version } : {}), ...(unpin ? { unpin } : {}), ...save() });
+        if (r.unchanged) return `${r.reference} is already ${unpin ? "unpinned" : "pinned to that version"}.`;
+        const how = unpin ? (r.placeholder ? " (the device's resolution again)" : " (newest installed)") : " (pinned)";
+        return `${r.placeholder ? `Placeholder ${r.reference}` : "Library"}: ${r.was} -> ${r.now}${how}.${savedNote(r)} Compile to check.`;
       }),
   );
 

@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   group (nobody logged in). Checked in the SP21 simulation: inoperative and
   hidden tiles with nobody logged in. The browser HMI marks such tiles.
 
+- `find_library` searches the installed libraries by title, company or
+  category, with every installed version and how the project references each.
+  `pin_library` fixes a reference to one version (placeholders through
+  CODESYS's redirection) or unpins it; `list_libraries` marks references that
+  take the newest installed version. Checked on SP22, compile included.
+
 ### Fixed
 - The native export reused the visualization user management instead of
   creating a new one on every export, which could drop users added by hand.

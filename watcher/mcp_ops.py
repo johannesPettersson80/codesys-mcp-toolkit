@@ -786,6 +786,118 @@ def op_libraries_remove(args):
     return {"removed": match[0], "saved": c.save_if(args)}
 
 
+def op_library_search(args):
+    """Installed libraries whose title, company or category contains the query, with every
+    installed version, and how the open project references each (if it does)."""
+    glm = getattr(se, "librarymanager", None)
+    if glm is None:
+        raise OpError("unavailable", "The CODESYS library manager is not available to scripts here.")
+    q = (args.get("query") or "").strip().lower()
+    refs = {}
+    try:
+        c = Ctx()
+        for r in list(_safe(lambda: _library_manager(c).references, []) or []):
+            eff = to_text(_safe(lambda: r.effective_resolution)) or to_text(_safe(lambda: r.name))
+            refs[eff.split(",")[0].strip().lstrip("#").lower()] = {"reference": to_text(_safe(lambda: r.name)), "resolves_to": eff}
+    except OpError:
+        pass
+    found = {}
+    for l in glm.get_all_libraries(False):
+        title = to_text(l.title)
+        company = to_text(l.company)
+        cats = []
+        for cat in (_safe(lambda: l.categories, []) or []):
+            cats.append(to_text(_safe(lambda: cat.name) or _safe(lambda: cat.default_name) or cat))
+        hay = " ".join([title, company] + cats).lower()
+        if q and q not in hay:
+            continue
+        key = (title.lower(), company.lower())
+        e = found.get(key)
+        if e is None:
+            e = {"title": title, "company": company, "versions": [], "namespace": to_text(_safe(lambda: l.default_namespace)), "categories": cats}
+            found[key] = e
+        v = to_text(l.version)
+        if v not in e["versions"]:
+            e["versions"].append(v)
+    out = []
+    for e in found.values():
+        e["versions"].sort(key=_version_key, reverse=True)
+        ref = refs.get(e["title"].lower())
+        if ref:
+            e.update(ref)
+        out.append(e)
+    def rank(e):
+        t = e["title"].lower()
+        return (0 if t == q else 1 if t.startswith(q) else 2 if q in t else 3, 0 if e.get("reference") else 1, t)
+    out.sort(key=rank)
+    limit = int(args.get("limit") or 40)
+    return {"libraries": out[:limit], "total": len(out)}
+
+
+def _split_lib(name):
+    """'Title, 1.2.3.4 (Company)' -> (title, version, company); None when it isn't that form."""
+    import re
+    m = re.match(r"^\s*#?(.*?),\s*(\S+)\s*\((.*)\)\s*$", name or "")
+    return (m.group(1).strip(), m.group(2), m.group(3).strip()) if m else None
+
+
+def op_libraries_pin(args):
+    """Pin a library reference to a fixed version (or back to the newest, '*'). A placeholder
+    is pinned by its redirection; a managed reference is replaced, keeping its namespace."""
+    c = Ctx()
+    lm = _library_manager(c)
+    want = (args.get("name") or "").strip().lstrip("#").split(",")[0].strip().lower()
+    ref = None
+    for r in list(_safe(lambda: lm.references, []) or []):
+        nm = to_text(_safe(lambda: r.name)) or ""
+        eff = to_text(_safe(lambda: r.effective_resolution)) or ""
+        if want in (nm.lstrip("#").split(",")[0].strip().lower(), eff.split(",")[0].strip().lower()):
+            ref = r
+            break
+    if ref is None:
+        raise OpError("not_found", "No library reference '%s'. Use list_libraries." % args.get("name"))
+    name = to_text(ref.name)
+    eff = to_text(_safe(lambda: ref.effective_resolution)) or name
+    parts = _split_lib(eff) or _split_lib(name)
+    if parts is None:
+        raise OpError("codesys_error", "Can't read the version of %s (%s)." % (name, eff))
+    title, current, company = parts
+    installed = [to_text(l.version) for l in (_installed_libraries(title) or []) if to_text(l.company).lower() == company.lower()]
+    if current == "*":
+        # "Newest installed": the version CODESYS resolves it to now.
+        resolved = to_text(_safe(lambda: ref.managed_library.version))
+        current = resolved or (max(installed, key=_version_key) if installed else "*")
+    unpin = bool(args.get("unpin"))
+    version = args.get("version") or current
+    if not unpin and version != "*":
+        if installed and version not in installed:
+            raise OpError("not_found", "%s %s isn't installed. Installed: %s" % (title, version, ", ".join(sorted(installed, key=_version_key, reverse=True))))
+    target = "%s, %s (%s)" % (title, "*" if unpin else version, company)
+    if _safe(lambda: ref.is_placeholder, False):
+        # None removes the redirection; an empty string leaves the placeholder unresolved.
+        ref.set_redirection(None if unpin else target)
+        now = to_text(_safe(lambda: ref.effective_resolution)) or target
+        if unpin and not to_text(_safe(lambda: ref.effective_resolution)):
+            raise OpError("codesys_error", "%s no longer resolves after removing its redirection." % name)
+        return {"reference": name, "was": eff, "now": now, "placeholder": True, "saved": c.save_if(args)}
+    if target == name:
+        return {"reference": name, "was": eff, "now": eff, "unchanged": True, "saved": False}
+    ns = to_text(_safe(lambda: ref.namespace))
+    lm.remove_library(name)
+    lm.add_library(target)
+    new = None
+    for r in list(_safe(lambda: lm.references, []) or []):
+        if to_text(_safe(lambda: r.name)).split(",")[0].strip().lower() == title.lower():
+            new = r
+    if new is not None and ns and to_text(_safe(lambda: new.namespace)) != ns:
+        try:
+            new.namespace = ns
+        except Exception:
+            pass
+    now = to_text(_safe(lambda: new.effective_resolution)) if new is not None else target
+    return {"reference": target, "was": eff, "now": now or target, "placeholder": False, "saved": c.save_if(args)}
+
+
 def op_tasks_list(args):
     c = Ctx()
     tasks = []
@@ -1180,6 +1292,8 @@ OPS = {
     "libraries.list": op_libraries_list,
     "libraries.add": op_libraries_add,
     "libraries.remove": op_libraries_remove,
+    "libraries.pin": op_libraries_pin,
+    "library.search": op_library_search,
     "tasks.list": op_tasks_list,
     "task.configure": op_task_configure,
     "devices.list": op_devices_list,

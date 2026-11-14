@@ -115,7 +115,7 @@ operation. [The reference](docs/reference.md) describes each one.
 | **Read code** | `get_project_tree` `read_objects` `search_code` `get_outline` |
 | **Change code** | `write_object` `create_object` `create_graphical` `delete_object` `rename_object` |
 | **Build** | `compile` |
-| **Libraries** | `list_libraries` `add_library` `remove_library` `get_library_api` `get_signature` |
+| **Libraries** | `find_library` `list_libraries` `add_library` `pin_library` `remove_library` `get_library_api` `get_signature` |
 | **Navigate code** | `find_references` `rename_symbol` |
 | **Tasks and I/O** | `list_tasks` `configure_task` `get_io_list` `get_devices` `find_device` `add_device` `device_parameters` `configure_device` |
 | **Change tracking** | `checkpoint` `get_changes` `revert_object` |
