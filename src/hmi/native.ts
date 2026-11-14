@@ -8,7 +8,7 @@ import { darkTextOn } from "./color.js";
 import { canvasOf, tileBox } from "./render.js";
 import { routed } from "./route.js";
 import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
-import { screenVariables } from "./spec.js";
+import { screenVariables, USER_GROUPS } from "./spec.js";
 import { BUILTIN_SYMBOLS, findSymbol, symbolPicture, symbolSize, type SymbolColors, type SymbolLib } from "./symbols.js";
 
 type Argb = number;
@@ -35,6 +35,8 @@ export interface NativeElement {
   gradient?: [Argb, Argb, number];
   radius?: number;
   invisible?: string;
+  /** CODESYS access rights per user group (VisuAccessRightType). */
+  access?: [string, "Operable" | "OnlyVisible" | "Invisible"][];
   props?: Record<string, string | number | boolean | { argb: Argb }>;
   click?: string;
   /** Switch the client to another visualization on click. */
@@ -148,6 +150,16 @@ function mix(a: Argb, b: Argb, t: number): Argb {
   const ch = (x: Argb, s: number) => (x >>> s) & 0xff;
   const m = (s: number) => Math.round(ch(a, s) * t + ch(b, s) * (1 - t)) << s;
   return (0xff000000 | m(16) | m(8) | m(0)) >>> 0;
+}
+
+/**
+ * Rights per user group for a tile operated from group `min` up. "None" is CODESYS's group
+ * for a client where nobody is logged in: it gets what the groups below `min` get.
+ */
+export function accessRights(min: (typeof USER_GROUPS)[number], below: "see" | "hide"): [string, "Operable" | "OnlyVisible" | "Invisible"][] {
+  const from = USER_GROUPS.indexOf(min);
+  const lower = below === "hide" ? "Invisible" : "OnlyVisible";
+  return [["None", lower], ...USER_GROUPS.map((g, k): [string, "Operable" | "OnlyVisible" | "Invisible"] => [g, k >= from ? "Operable" : lower])];
 }
 
 /** Black or white text, whichever reads better on a colour (WCAG relative luminance). */
@@ -323,12 +335,18 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
   }
 
   screen.widgets.forEach((wg, i) => {
+    const first = els.length;
     const b = tileBox(screen, wg.at);
     const by = b.y; // the header band is 62 px; tiles start at 76
     els.push({ kind: "round", name: `Tile${i + 1}`, x: r(b.x), y: r(by), w: r(b.w), h: r(b.h), fill: p.tile, frame: p.border, lineWidth: 1, gradient: [p.tile, p.tile2, 90], radius: 14 });
     if (wg.title) els.push(text(b.x + 16, by + 10, b.w - 32, 20, wg.title.toUpperCase(), [SEMI, 8.5], p.muted));
     const box = { x: b.x + 16, y: by + (wg.title ? 36 : 14), w: b.w - 32, h: b.h - (wg.title ? 46 : 26) };
     widget(wg, box);
+    // Access rights go on every element of the tile: operating ones turn inoperative, or all hide.
+    if (wg.access) {
+      const rights = accessRights(wg.access.min, wg.access.below);
+      for (let k = first; k < els.length; k++) els[k] = { ...els[k]!, access: rights };
+    }
   });
 
   function widget(w: Widget, box: { x: number; y: number; w: number; h: number }) {

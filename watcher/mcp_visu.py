@@ -279,6 +279,7 @@ def op_visu_build(args):
             warnings.append("size/dialog: %s" % to_text(ex))
     T = se.VisualElementType
     corners = []
+    access = []
     queue = list(args.get("elements") or [])
     editor = {}
     i = -1
@@ -300,6 +301,8 @@ def op_visu_build(args):
                     e.set_property(pair[0], _value(pair[1]))
                 except Exception as ex:
                     warnings.append("%s %s: %s" % (label, pair[0], to_text(ex)[:120]))
+            if el.get("access"):
+                access.append((e.id, el["access"]))
             continue
         try:
             if el["kind"] in _SIMPLE:
@@ -313,6 +316,8 @@ def op_visu_build(args):
         except Exception as ex:
             warnings.append("%s: not added: %s" % (label, to_text(ex)))
             continue
+        if el.get("access"):
+            access.append((eid, el["access"]))
         for path, v in (el.get("props") or {}).items():
             try:
                 e.set_property(path, _value(v))
@@ -361,8 +366,13 @@ def op_visu_build(args):
                 warnings.append("%s close: %s" % (label, to_text(ex)))
         if el.get("radius"):
             corners.append((eid, int(el["radius"])))
+    rights = _access_rights(c, access, warnings) if access else {}
     try:
         with _Modify(c.proj, visu) as vo:
+            for eid, lst in rights.items():
+                el = vo.FindElementById(eid)
+                if el is not None:
+                    el.UserManagementAccessRights = lst
             if args.get("background") is not None:
                 import System
                 bg = vo.VisualElemList.Background
@@ -376,6 +386,58 @@ def op_visu_build(args):
     except Exception as ex:
         warnings.append("background/corners: %s" % to_text(ex))
     return {"name": name_of(visu), "path": name_of(visu), "kind": "visualization", "elements": len(visu.visual_element_list), "warnings": warnings, "saved": c.save_if(args)}
+
+
+def _visu_groups(c):
+    """name (lower case) -> id of the visualization user groups."""
+    vmg = _find_child(c, "Visualization Manager")
+    if vmg is None:
+        return {}
+    vm = _object_mgr().GetObjectToRead(c.proj.handle, vmg.guid).Object
+    um = getattr(vm, "VisuUserMgmt", None)
+    out = {}
+    if um is not None:
+        for g in um.GetGroups():
+            out[to_text(g.Name).lower()] = (to_text(g.Name), int(g.Id))
+    return out
+
+
+def _access_rights(c, access, warnings):
+    """Element id -> CODESYS access-right list (VisuAccessRightInfo per user group). The
+    groups are created first when missing (the Visualization Manager exists by now)."""
+    import System
+    from System.Collections import ArrayList
+    import mcp_alarms
+    # "None" (ID 0) is CODESYS's own group for a client where nobody is logged in.
+    names = []
+    for _, rights in access:
+        for g, _r in rights:
+            if g not in names and g.lower() != "none":
+                names.append(g)
+    have = _visu_groups(c)
+    if [n for n in names if n.lower() not in have]:
+        try:
+            mcp_alarms.op_visu_users({"groups": names, "save": False})
+        except Exception as ex:
+            warnings.append("user groups for access rights: %s" % to_text(ex)[:160])
+        have = _visu_groups(c)
+    T = _find_type("_3S.CoDeSys.VisualElem.VisuAccessRightInfo")
+    E = _find_type("_3S.CoDeSys.VisualElem.VisuAccessRightType")
+    if T is None or E is None:
+        warnings.append("access rights: this CODESYS has no element access rights to script")
+        return {}
+    out = {}
+    for eid, rights in access:
+        lst = ArrayList()
+        for g, r in rights:
+            found = have.get(g.lower()) or ((g, 0) if g.lower() == "none" else None)
+            if found is None:
+                if len(warnings) < 40:
+                    warnings.append("access rights: no user group %s" % g)
+                continue
+            lst.Add(System.Activator.CreateInstance(T, found[0], found[1], System.Enum.Parse(E, r)))
+        out[eid] = lst
+    return out
 
 
 def _visual_property(c, visu, size, dialog):

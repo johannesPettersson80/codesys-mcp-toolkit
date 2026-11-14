@@ -19,7 +19,16 @@ const at = z
   .tuple([z.number().int().min(1), z.number().int().min(1), z.number().int().min(1), z.number().int().min(1)])
   .describe("[column, row, width, height] in grid cells, 1-based (the grid is 12 columns by 8 rows unless the screen sets grid)");
 
-const base = { at, title: z.string().optional().describe("Tile title") };
+/** Visualization user groups, lowest first (the export creates them). */
+export const USER_GROUPS = ["Operator", "Maintenance", "Admin"] as const;
+const access = z
+  .object({
+    min: z.enum(USER_GROUPS).describe("The lowest group that may operate it (higher groups may too)"),
+    below: z.enum(["see", "hide"]).default("see").describe("What lower groups get: see it without operating it, or not see it"),
+  })
+  .optional()
+  .describe("Who may operate this tile in CODESYS's visualization, after Login, e.g. {min: 'Maintenance'} for setpoints only maintenance changes");
+const base = { at, title: z.string().optional().describe("Tile title"), access };
 
 const id = z.string().optional().describe("Name pipes connect to (default: the label, e.g. 'P-101')");
 const faceplate = z

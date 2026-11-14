@@ -240,6 +240,14 @@ with timestamps and acknowledge in the PLC), and user groups (Operator,
 Maintenance, Admin) behind a Login button. Users and passwords are yours to add
 in the Visualization Manager.
 
+A tile can be limited to a group and up: `access: {min: 'Maintenance'}` lets
+lower groups see it without operating it, `below: 'hide'` hides it from them.
+The rights go on CODESYS's own elements and also apply when nobody is logged
+in. Below, with nobody logged in, the pump buttons (Maintenance and up) are
+greyed out and the level setpoint (Admin only) is hidden:
+
+![The pump station with nobody logged in: the Start and Stop buttons are greyed out and the level setpoint tile is gone](docs/images/hmi-codesys-access.png)
+
 ![The same pump station as a native CODESYS visualization, running in CODESYS's simulation](docs/images/hmi-codesys.png)
 
 Themes and the company colour carry over, and pipes with flow show dashes

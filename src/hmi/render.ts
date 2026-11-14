@@ -81,8 +81,10 @@ export function renderScreen(screen: Screen, page: PageContext = {}): Rendered {
   const tiles = screen.widgets.map((wg) => {
     const box = tileBox(screen, wg.at);
     const inner = widget(wg, box, bind, id, face, lib);
+    // Access rights apply in CODESYS's visualization after Login; the browser marks them.
+    const lock = wg.access ? `<span class="t-lock" title="${esc(`In CODESYS: operated by ${wg.access.min} and up${wg.access.below === "hide" ? ", hidden from lower groups" : ""}`)}"><svg viewBox="0 0 10 12" width="9" height="11" aria-hidden="true"><rect x="1" y="5" width="8" height="6.5" rx="1.3" fill="currentColor"/><path d="M3 5V3.4a2 2 0 0 1 4 0V5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>${esc(wg.access.min)}</span>` : "";
     const title = wg.title ? `<div class="t-title">${esc(wg.title)}</div>` : "";
-    return `<section class="tile t-${wg.type}${wg.title ? "" : " untitled"}${box.h < 110 ? " compact" : ""}" style="left:${r1(box.x)}px;top:${r1(box.y)}px;width:${r1(box.w)}px;height:${r1(box.h)}px">${title}<div class="t-body">${inner}</div></section>`;
+    return `<section class="tile t-${wg.type}${wg.title ? "" : " untitled"}${box.h < 110 ? " compact" : ""}" style="left:${r1(box.x)}px;top:${r1(box.y)}px;width:${r1(box.w)}px;height:${r1(box.h)}px">${lock}${title}<div class="t-body">${inner}</div></section>`;
   });
 
   const nav = (page.pages?.length ?? 0) > 1 ? `<nav class="h-nav">${page.pages!.map((p) => `<button class="h-page${p.name === screen.name ? " cur" : ""}" data-nav="${esc(p.name)}">${esc(p.title)}</button>`).join("")}</nav>` : "";
@@ -279,6 +281,7 @@ export const HMI_CSS = String.raw`
 .hmi *{box-sizing:border-box}
 .theme-dark{--bg:radial-gradient(1200px 600px at 15% -10%,#13284a 0%,transparent 60%),radial-gradient(900px 500px at 110% 110%,#1c1640 0%,transparent 55%),#070d1a;--fg:#e6edf7;--muted:#8193ad;--tile:linear-gradient(160deg,rgba(30,41,64,.72),rgba(14,21,37,.78));--tile-bd:rgba(148,163,184,.13);--tile-sh:0 10px 30px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.05);--track:rgba(148,163,184,.16);--accent:#38bdf8;--ok:#22c55e;--warn:#f59e0b;--alarm:#ef4444;--neutral:#64748b;--shell-a:#1e293b;--shell-b:#334155;--liq-a:#38bdf8;--liq-b:#0369a1;--hub-a:#475569;--hub-b:#0f172a;--pipe:#334155;--pipe-in:#1e293b;--btn:rgba(148,163,184,.1)}
 .theme-light{--bg:radial-gradient(1000px 500px at 10% -10%,#dbeafe 0%,transparent 60%),#eef2f7;--fg:#0f172a;--muted:#64748b;--tile:linear-gradient(160deg,#ffffff,#f8fafc);--tile-bd:#e2e8f0;--tile-sh:0 6px 20px rgba(15,23,42,.06);--track:#e2e8f0;--accent:#0284c7;--ok:#16a34a;--warn:#d97706;--alarm:#dc2626;--neutral:#94a3b8;--shell-a:#cbd5e1;--shell-b:#f1f5f9;--liq-a:#38bdf8;--liq-b:#0284c7;--hub-a:#e2e8f0;--hub-b:#94a3b8;--pipe:#94a3b8;--pipe-in:#cbd5e1;--btn:#f1f5f9}
+.t-lock{position:absolute;top:12px;right:14px;z-index:2;display:inline-flex;align-items:center;gap:4px;font-size:9.5px;letter-spacing:.06em;color:var(--warn);text-transform:none}
 .glow{position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(56,189,248,.06),transparent 30%)}
 .theme-contrast{--bg:#000;--fg:#fff;--muted:#e5e7eb;--tile:#000;--tile-bd:#fff;--tile-sh:none;--track:#4b5563;--accent:#00e5ff;--ok:#00ff6a;--warn:#ffd400;--alarm:#ff3b30;--neutral:#9ca3af;--shell-a:#111827;--shell-b:#1f2937;--liq-a:#00e5ff;--liq-b:#0091ea;--hub-a:#374151;--hub-b:#000;--pipe:#9ca3af;--pipe-in:#1f2937;--btn:#000;--on-accent:#000}
 .theme-contrast .glow{display:none}.theme-contrast .tile{border-width:2px;backdrop-filter:none}.theme-contrast .h-bar{border-bottom:2px solid #fff}

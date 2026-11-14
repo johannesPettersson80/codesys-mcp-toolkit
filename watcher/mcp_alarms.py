@@ -201,11 +201,9 @@ def op_visu_users(args):
         raise OpError("not_found", "No Visualization Manager: build a visualization first.")
     made = []
     with _Modify(c.proj, vmg) as vm:
-        um = None
-        try:
-            um = vm.VisuUserManagement
-        except Exception:
-            um = None
+        # VisuUserMgmt: the existing user management (with the users the engineer added);
+        # it is created only when the project has none yet.
+        um = getattr(vm, "VisuUserMgmt", None)
         if um is None:
             um = vm.CreateVisuUserManagement()
         gl = um.GetGroups()

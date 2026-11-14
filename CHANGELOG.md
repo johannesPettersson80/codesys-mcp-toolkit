@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native pipe flow: pipes with `flow` show dashes moving along them in the
   CODESYS visualization (driven by the clock in the generated program),
   checked in the SP21 simulation.
+- Access rights per tile: `access: {min: 'Maintenance', below: 'see' | 'hide'}`
+  sets CODESYS's element access rights for the user groups, including the None
+  group (nobody logged in). Checked in the SP21 simulation: inoperative and
+  hidden tiles with nobody logged in. The browser HMI marks such tiles.
+
+### Fixed
+- The native export reused the visualization user management instead of
+  creating a new one on every export, which could drop users added by hand.
 
 ## [2.8.0] - 2026-11-14
 

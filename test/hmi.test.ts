@@ -7,7 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { ProjectCache } from "../src/codesys/cache.js";
 import { renderScreen } from "../src/hmi/render.js";
-import { GAUGE_STEPS, nativePlan, onColor, paletteFor, type NativeElement } from "../src/hmi/native.js";
+import { accessRights, GAUGE_STEPS, nativePlan, onColor, paletteFor, type NativeElement } from "../src/hmi/native.js";
 import { overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
 import { TEMPLATES } from "../src/hmi/templates.js";
 import { canvasOf } from "../src/hmi/render.js";
@@ -198,6 +198,24 @@ describe("native CODESYS visualization plan", () => {
     expect(plan.elements.find((e) => e.text === "Start")!.props).toMatchObject({ "Input configuration.Tap.Variable": "PLC_PRG.xStart" });
     expect(flat(plan.elements).find((e) => e.invisible === "NOT PLC_PRG.xHigh")!.text).toMatch(/High level <T-101>/);
     for (const e of plan.elements) expect(e.x + e.w).toBeLessThanOrEqual(1280);
+  });
+});
+
+describe("access rights per tile", () => {
+  it("rights per user group, with None for nobody logged in", () => {
+    expect(accessRights("Maintenance", "see")).toEqual([["None", "OnlyVisible"], ["Operator", "OnlyVisible"], ["Maintenance", "Operable"], ["Admin", "Operable"]]);
+    expect(accessRights("Admin", "hide")).toEqual([["None", "Invisible"], ["Operator", "Invisible"], ["Maintenance", "Invisible"], ["Admin", "Operable"]]);
+  });
+
+  it("every element of a restricted tile carries them; the browser marks the tile", () => {
+    const widgets = SCREEN.widgets.map((w: { type: string }, k: number) => (k === 0 ? { ...w, access: { min: "Maintenance" } } : w));
+    const s = screenSchema.parse({ ...SCREEN, widgets });
+    const plan = nativePlan(s);
+    const tile = plan.elements.find((e) => e.name === "Tile1")!;
+    expect(tile.access?.[2]).toEqual(["Maintenance", "Operable"]);
+    expect(plan.elements.find((e) => e.name === "Tile2")!.access).toBeUndefined();
+    expect(renderScreen(s).html).toContain('class="t-lock" title="In CODESYS: operated by Maintenance and up"');
+    expect(() => screenSchema.parse({ ...SCREEN, widgets: SCREEN.widgets.map((w: object) => ({ ...w, access: { min: "Boss" } })) })).toThrow();
   });
 });
 

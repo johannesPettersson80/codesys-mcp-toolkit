@@ -189,6 +189,12 @@ HMI 只写入 CODESYS 自带的仿真，不会连接真实控制器。
 运行中的泵和风机会转动；操作面板生成为 CODESYS 对话框；用户组（Operator、Maintenance、Admin）
 配有登录按钮（用户和密码由你在 Visualization Manager 中添加）。
 
+可以把某个画块限制为某个用户组及以上：`access: {min: 'Maintenance'}` 让较低的用户组只能看到、不能操作，
+`below: 'hide'` 则对它们隐藏。权限设置在 CODESYS 自己的元素上，未登录时同样生效。下图为未登录时：
+泵的按钮（Maintenance 及以上）呈灰色不可操作，液位设定值（仅 Admin）被隐藏：
+
+![未登录时的泵站：启动和停止按钮呈灰色，液位设定值画块被隐藏](docs/images/hmi-codesys-access.png)
+
 ![同一个泵站画面，作为原生 CODESYS 可视化在仿真中运行](docs/images/hmi-codesys.png)
 
 主题和品牌色同样适用于原生可视化，有流动的管道上会有移动的虚线，与浏览器中一致：
