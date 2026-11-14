@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-11-14
+
 ### Added
 - `device_parameters` and `configure_device`: read and set a device's
   parameters (IP addresses, ports, unit IDs, enumerations such as DHCP) and map
