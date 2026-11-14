@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-11-14
+
 ### Added
 - HMI themes: `theme: 'contrast'` (black and white, full-strength colours,
   no glow) besides dark and light, per page; `accent` sets a company colour
@@ -19,7 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sets CODESYS's element access rights for the user groups, including the None
   group (nobody logged in). Checked in the SP21 simulation: inoperative and
   hidden tiles with nobody logged in. The browser HMI marks such tiles.
-
 - `find_library` searches the installed libraries by title, company or
   category, with every installed version and how the project references each.
   `pin_library` fixes a reference to one version (placeholders through
