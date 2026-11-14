@@ -34,7 +34,7 @@ panel to one tool.
 | `create_project` | New project from CODESYS's `Standard.project` (default), `empty`, or your own template file. |
 | `save_project` / `close_project` | Save (optionally also as a `.projectarchive` snapshot), or close the project. |
 | `get_project_tree` | Objects with their kinds. Graphical objects (SFC, CFC, LD, FBD) are marked `[non-ST]`, objects excluded from the build `[excluded from build]`. |
-| `read_objects` | Declaration and implementation of up to 50 objects. LD, FBD and SFC bodies come as `create_graphical`'s description (with a note and the PLCopenXML when something doesn't fit it, such as function boxes in a rung or SFC branches); CFC as PLCopenXML (read-only). |
+| `read_objects` | Declaration and implementation of up to 50 objects. LD, FBD, CFC and SFC bodies come as `create_graphical`'s description (with a note and the PLCopenXML when something doesn't fit it, such as function boxes in a rung); an SFC with branches comes as a `chart`. |
 | `write_object` | Replace a declaration and/or implementation. The header must match the object (see [Declaration checks](#declaration-checks)). |
 | `create_object` | `program`, `function_block`, `function`, `method`, `property`, `action`, `interface`, `dut`, `gvl`, `persistent_vars` (a persistent variable list: `VAR_GLOBAL PERSISTENT RETAIN`), `folder`, optionally with code. |
 | `delete_object` / `rename_object` | Delete or rename an object. |
@@ -42,7 +42,7 @@ panel to one tool.
 | `compile` | Build the application and return errors and warnings with object, line and code. Also checks POUs no task calls (default); `deep` generates code too, `clean` builds from scratch. |
 | `list_libraries` / `add_library` / `remove_library` | Library references. Add by title (`Util`, the newest installed unless you pass `version`) or full name (`Util, 3.5.17.0 (System)`). |
 | `get_library_api` | What a library offers. A referenced source library (`.library`) gives the real interface of its FBs, functions and types. A compiled library, or one the project doesn't reference yet, gives its objects and descriptions from CODESYS's library browser, without parameters. |
-| `create_graphical` | Create an LD, FBD or SFC program or function block from a description (`replace: true` replaces an existing one, e.g. after editing the description `read_objects` gave): ladder rungs (`when`: contacts in series `and` / parallel `or`, `NOT x` for a normally closed contact; `then`: coils, set, reset), FBD networks (functions such as AND or ADD, function blocks with instance and inputs, results to variables), SFC steps (actions in ST with qualifiers, a condition to the next step; one sequence whose last step jumps back). The declaration is given as ST. |
+| `create_graphical` | Create an LD, FBD or SFC program or function block from a description (`replace: true` replaces an existing one, e.g. after editing the description `read_objects` gave): ladder rungs (`when`: contacts in series `and` / parallel `or`, `NOT x` for a normally closed contact; `then`: coils, set, reset), FBD networks (functions such as AND or ADD, function blocks with instance and inputs, results to variables), SFC steps (actions in ST with qualifiers, a condition to the next step; one sequence whose last step jumps back), or an SFC `chart` with branches: steps and transitions top to bottom, `alternative` paths (one is taken; each starts with a condition), `parallel` paths (all run; they follow a transition and join before the next one) and jumps. `cfc` takes the same description as `fbd` and draws it as CFC. The declaration is given as ST. |
 | `get_signature` | The real interface of POUs and types as CODESYS's compiler sees them (inputs, outputs, other variables, types, initial values, doc comments, methods and properties), for the project's code and for FBs in any referenced library, compiled ones included. Builds first if needed. |
 | `find_references` | Every declaration, read, write, call and type use of a variable, POU or type in the application, with POU, line and column (CODESYS's cross-references). |
 | `rename_symbol` | Rename a variable (owner + name) or a POU everywhere it is used, from CODESYS's cross-references: the declaration, every read, write and call, and instance declarations of a renamed FB. Refused when several objects declare the same variable name. Graphical bodies that need changes are listed, not changed. |
@@ -77,6 +77,7 @@ panel to one tool.
 | `create_recipes` | Recipes for setpoints as generated ST (`name`, `variables`, `recipes: {name: {variable: value}}`): `ST_Recipe_<name>`, `GVL_Recipe_<name>` (the recipes in a RETAIN array, and their names) and `PRG_Recipe_<name>` added to MainTask. `iApply := k` writes recipe k to the variables (through pointers, so program variables work too), `iSave := k` stores the current values in it; `iActive`, `sActive` say which was applied. The HMI widget `{type: 'recipe', recipe, recipes}` shows Apply and Save buttons in the browser and in CODESYS. Types are looked up in the declarations, or given as `{path, type}`. |
 | `project_report` | A Markdown handover report next to the project (or at `path`): summary, tasks, I/O, device-tree mappings, alarms, HMI pages, libraries, devices, program structure, and a commissioning checklist built from the project. |
 | `export_sources` | The project as plain text in a folder (default `<project>_src`): one `.st` per object, graphical bodies as `.xml`, `project.txt` (tasks, libraries, devices, alarms) and `hmi.json`. Rewrites only changed files and removes files of deleted objects that an earlier export wrote (listed in `.codesys-export.json`). |
+| `compare_sources` | The open project compared with an `export_sources` folder or another `.project` file (opened without updates for the comparison, then the open project is opened again): objects only in one of them, and a line diff per changed object (`max_lines` in all). `path` limits it to one object or folder. |
 
 Long actions send MCP progress notifications (`notifications/progress`) when the client asks for them with a progress token: the steps of an HMI export or a batch, and a heartbeat every 10 s.
 
@@ -99,6 +100,7 @@ action that can't work there says so instead of failing halfway.
 | `get_signature`, `find_references` | yes | yes | not checked |
 | `rename_symbol` | not checked | yes | not checked |
 | `create_graphical` (LD, FBD, SFC) | yes | yes | not checked |
+| SFC branches, CFC, `compare_sources` | not checked | yes | not checked |
 | Reading LD, FBD, SFC as a description, `replace` | yes | yes | not checked |
 | `trace_setup`, `trace_record` | yes (probe) | yes | not checked |
 | Debugging (breakpoints, stepping, call stack) | yes (probe) | yes | not checked |

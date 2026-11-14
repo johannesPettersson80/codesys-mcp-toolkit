@@ -7,10 +7,11 @@
  * LD: every coil's power flow is followed back to the rail: contacts in series
  * become {and}, parallel paths {or}. FBD: each output variable (or output
  * written straight on a block) is followed back through blocks to the inputs.
- * SFC: steps, their actions and the transition to the next step. What has no
- * place in the description (function boxes in LD, SFC branches) is reported.
+ * SFC: steps, their actions and the transition to the next step; with branches,
+ * the chart (alternative and parallel paths, jumps). What has no place in the
+ * description (function boxes in LD) is reported.
  */
-import type { Fbd, Logic } from "./graphical.js";
+import type { Fbd, Logic, SfcAction, SfcElement } from "./graphical.js";
 
 interface El {
   name: string;
@@ -55,8 +56,8 @@ const inputsOf = (e: El | undefined): { ref: string; param?: string }[] => kids(
 
 export type GraphicalDescription =
   | { kind: "ladder"; spec: { rungs: { when: Logic; then: { coil: string; kind: "coil" | "set" | "reset" | "negated" }[] }[] }; notes: string[] }
-  | { kind: "fbd"; spec: { networks: { expr: Fbd; to?: string; assign?: Record<string, string> }[] }; notes: string[] }
-  | { kind: "sfc"; spec: { steps: { name: string; initial?: boolean; actions?: { name: string; qualifier: string; st: string }[]; next: string; when: string }[] }; notes: string[] };
+  | { kind: "fbd" | "cfc"; spec: { networks: { expr: Fbd; to?: string; assign?: Record<string, string> }[] }; notes: string[] }
+  | { kind: "sfc"; spec: { steps: { name: string; initial?: boolean; actions?: { name: string; qualifier: string; st: string }[]; next: string; when: string }[] } | { chart: SfcElement[] }; notes: string[] };
 
 /** A graphical POU's PLCopenXML as create_graphical's description; undefined when the body isn't LD, FBD or SFC. */
 export function describeGraphical(xml: string): GraphicalDescription | undefined {
@@ -70,7 +71,39 @@ export function describeGraphical(xml: string): GraphicalDescription | undefined
   if (fbd) return readFbd(fbd);
   const sfc = kid(body, "SFC");
   if (sfc) return readSfc(sfc, pou);
+  const cfc = find(body, "CFC");
+  if (cfc) return { ...readFbd(cfcAsFbd(cfc)), kind: "cfc" } as GraphicalDescription;
   return undefined;
+}
+
+/**
+ * CODESYS's CFC as the FBD the reader knows: every line runs through an unnamed
+ * connector, so a connection to a connector becomes the connector's own
+ * connection (an input variable's or a function's output has no parameter in
+ * FBD terms), and the elements are taken in execution order.
+ */
+function cfcAsFbd(cfc: El): El {
+  const byId = new Map(cfc.children.filter((c) => c.attrs.localId !== undefined).map((c) => [c.attrs.localId!, c] as const));
+  const through = (conn: El): El => {
+    const seen = new Set<string>();
+    let c = conn;
+    for (;;) {
+      const target = byId.get(c.attrs.refLocalId!);
+      if (target?.name !== "connector" || seen.has(target.attrs.localId!)) break;
+      seen.add(target.attrs.localId!);
+      const next = kids(kid(target, "connectionPointIn"), "connection")[0];
+      if (!next) return { ...c, attrs: { refLocalId: "missing" } };
+      c = next;
+    }
+    const src = byId.get(c.attrs.refLocalId!);
+    const plain = src?.name === "inVariable" || (src?.name === "block" && !src.attrs.instanceName);
+    const { formalParameter, ...rest } = c.attrs;
+    return { ...c, attrs: plain || !formalParameter ? rest : { ...rest, formalParameter } };
+  };
+  const rewire = (e: El): El => (e.name === "connection" ? through(e) : { ...e, children: e.children.map(rewire) });
+  const order = (e: El) => (e.attrs.executionOrderId === undefined ? -1 : Number(e.attrs.executionOrderId));
+  const children = cfc.children.filter((c) => c.name !== "connector").map(rewire);
+  return { ...cfc, name: "FBD", children: children.sort((a, b) => order(a) - order(b)) };
 }
 
 function readLadder(ld: El): GraphicalDescription {
@@ -182,7 +215,7 @@ function readSfc(sfc: El, pou: El | undefined): GraphicalDescription {
   const notes = new Set<string>();
   const byId = new Map(sfc.children.filter((c) => c.attrs.localId !== undefined).map((c) => [c.attrs.localId!, c] as const));
   const bodies = new Map(kids(kid(pou, "actions"), "action").map((a) => [a.attrs.name!, allText(find(a, "xhtml") ?? find(a, "ST")).trim()] as const));
-  for (const e of sfc.children) if (/Divergence|Convergence/.test(e.name)) notes.add(`${e.name} (a branch): the description holds one sequence; read_objects shows the XML`);
+  if (sfc.children.some((e) => /Divergence/.test(e.name))) return readSfcChart(sfc, byId, bodies);
   const after = (ref: string) => sfc.children.filter((c) => inputsOf(c).some((i) => i.ref === ref));
   const steps = sfc.children
     .filter((c) => c.name === "step")
@@ -209,4 +242,67 @@ function readSfc(sfc: El, pou: El | undefined): GraphicalDescription {
       return { name: s.attrs.name!, ...(s.attrs.initialStep === "true" ? { initial: true } : {}), ...(acts.length ? { actions: acts } : {}), next, when };
     });
   return { kind: "sfc", spec: { steps }, notes: [...notes] };
+}
+
+/** An SFC with branches, as create_graphical's chart: walked from the initial step along the connections. */
+function readSfcChart(sfc: El, byId: Map<string, El>, bodies: Map<string, string>): GraphicalDescription {
+  const notes = new Set<string>();
+  // Every connectionPointIn counts: a convergence has one per path.
+  const ins = (e: El) => kids(e, "connectionPointIn").flatMap((p) => kids(p, "connection").map((c) => c.attrs.refLocalId!));
+  const after = (id: string) => sfc.children.filter((c) => c.name !== "actionBlock" && c.name !== "inVariable" && ins(c).includes(id));
+  const actionsOf = (id: string): SfcAction[] =>
+    sfc.children
+      .filter((c) => c.name === "actionBlock" && ins(c).includes(id))
+      .flatMap((b) => kids(b, "action").map((a) => {
+        const name = kid(a, "reference")?.attrs.name ?? "";
+        return { name, qualifier: (a.attrs.qualifier ?? "N") as SfcAction["qualifier"], st: bodies.get(name) ?? allText(find(a, "xhtml")).trim() };
+      }));
+  const condition = (tr: El) => {
+    const cond = kid(tr, "condition");
+    const src = inputsOf(cond)[0];
+    return src ? allText(kid(byId.get(src.ref), "expression")).trim() : allText(find(cond ?? tr, "xhtml")).trim() || (kid(cond, "reference")?.attrs.name ?? "");
+  };
+  const seen = new Set<string>();
+  /** The sequence from node on, and the convergence it ends at (the end of a branch path). */
+  const walk = (start: El | undefined): { seq: SfcElement[]; conv?: El } => {
+    const seq: SfcElement[] = [];
+    let node = start;
+    while (node) {
+      const id = node.attrs.localId!;
+      if (/Convergence$/.test(node.name)) return { seq, conv: node };
+      if (seen.has(id)) {
+        notes.add("a connection loops back without a jump");
+        return { seq };
+      }
+      seen.add(id);
+      if (node.name === "step") {
+        const acts = actionsOf(id);
+        seq.push({ step: node.attrs.name!, ...(node.attrs.initialStep === "true" ? { initial: true } : {}), ...(acts.length ? { actions: acts } : {}) });
+        node = after(id)[0];
+      } else if (node.name === "transition") {
+        seq.push({ when: condition(node) });
+        node = after(id)[0];
+      } else if (node.name === "jumpStep") {
+        seq.push({ jump: node.attrs.targetName! });
+        const conv = after(id).find((c) => /Convergence$/.test(c.name));
+        return conv ? { seq, conv } : { seq };
+      } else if (/Divergence$/.test(node.name)) {
+        const paths = after(id).map(walk);
+        const conv = paths.find((p) => p.conv)?.conv;
+        seq.push(node.name === "selectionDivergence" ? { alternative: paths.map((p) => p.seq) } : { parallel: paths.map((p) => p.seq) });
+        if (!conv) return { seq };
+        // Past the convergence (a path that ended in a jump leads nowhere further).
+        const allJump = node.name === "selectionDivergence" && paths.every((p) => p.seq.length && "jump" in p.seq[p.seq.length - 1]!);
+        node = allJump ? undefined : after(conv.attrs.localId!)[0];
+      } else {
+        notes.add(`${node.name} elements aren't part of the description; read_objects shows the XML`);
+        return { seq };
+      }
+    }
+    return { seq };
+  };
+  const steps = sfc.children.filter((c) => c.name === "step");
+  const first = steps.find((s) => s.attrs.initialStep === "true") ?? steps.find((s) => !ins(s).length) ?? steps[0];
+  const chart = walk(first).seq;
+  return { kind: "sfc", spec: { chart }, notes: [...notes] };
 }

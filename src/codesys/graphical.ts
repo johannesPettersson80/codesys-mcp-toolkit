@@ -46,18 +46,49 @@ export const fbdSchema = z.object({
     .min(1),
 });
 
+const sfcAction = z.object({ name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), qualifier: z.enum(["N", "S", "R", "P", "P0", "P1"]).default("N"), st: z.string() });
+export type SfcAction = z.infer<typeof sfcAction>;
+
+/**
+ * An SFC as IEC draws it, top to bottom: steps and transitions alternate; an
+ * alternative branch (one path is taken) follows a step and each of its paths
+ * starts with a transition; a parallel branch (all paths run) follows a
+ * transition and each path starts with a step; a jump ends a path.
+ */
+export type SfcElement =
+  | { step: string; initial?: boolean; actions?: SfcAction[] }
+  | { when: string }
+  | { alternative: SfcElement[][] }
+  | { parallel: SfcElement[][] }
+  | { jump: string };
+const sfcElement: z.ZodType<SfcElement> = z.lazy(() =>
+  z.union([
+    z.object({ step: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), initial: z.boolean().optional(), actions: z.array(sfcAction).optional() }),
+    z.object({ when: z.string().min(1) }),
+    z.object({ alternative: z.array(z.array(sfcElement).min(1)).min(2) }),
+    z.object({ parallel: z.array(z.array(sfcElement).min(1)).min(2) }),
+    z.object({ jump: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/) }),
+  ]),
+);
+
 export const sfcSchema = z.object({
   steps: z
     .array(
       z.object({
         name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
         initial: z.boolean().optional(),
-        actions: z.array(z.object({ name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), qualifier: z.enum(["N", "S", "R", "P", "P0", "P1"]).default("N"), st: z.string() })).optional(),
+        actions: z.array(sfcAction).optional(),
         next: z.string().describe("Step this one goes to"),
         when: z.string().describe("Transition condition in ST, e.g. 'xStart AND NOT xFault'"),
       }),
     )
-    .min(2),
+    .min(2)
+    .optional(),
+  chart: z
+    .array(sfcElement)
+    .min(2)
+    .optional()
+    .describe("With branches: [{step}, {when}, {alternative: [[{when}, {step}, {when}], [{when}, {jump}]]}, {parallel: [[{step}], [{step}]]}, ...]"),
 });
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -147,57 +178,229 @@ export function fbdXml(name: string, pouType: "program" | "functionBlock", spec:
   return wrap(name, pouType, `<FBD>${parts.join("\n")}</FBD>`);
 }
 
-export function sfcXml(name: string, pouType: "program" | "functionBlock", spec: z.infer<typeof sfcSchema>): string {
-  const steps = spec.steps;
-  const names = new Set(steps.map((s) => s.name));
-  for (const s of steps) if (!names.has(s.next)) throw new Error(`step ${s.name} goes to '${s.next}', which isn't a step`);
-  if (!steps.some((s) => s.initial)) steps[0]!.initial = true;
+/** IEC operators: CODESYS's CFC calls them with CallType 'operator'; other functions are 'function'. */
+const OPERATORS = new Set(["AND", "OR", "XOR", "NOT", "ADD", "SUB", "MUL", "DIV", "MOD", "EXPT", "MOVE", "GT", "GE", "LT", "LE", "EQ", "NE", "SEL", "MAX", "MIN", "LIMIT", "MUX", "SHL", "SHR", "ROL", "ROR", "ABS", "SQRT", "LN", "LOG", "EXP", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "TRUNC"]);
+
+/**
+ * CFC from the same description as FBD. CODESYS stores CFC as an empty ST body
+ * with the elements in addData; every line runs through an unnamed connector
+ * that names the source's output (an input variable's output is its own text),
+ * and each box carries its call type and execution order (taken from CODESYS's
+ * own export; without the connectors its import drops the lines).
+ */
+export function cfcXml(name: string, pouType: "program" | "functionBlock", spec: z.infer<typeof fbdSchema>): string {
   let id = 0;
+  let order = 0;
   const parts: string[] = [];
-  const actionDefs: string[] = [];
-  let y = 0;
-  let prev: number | undefined;
-  steps.forEach((s, k) => {
-    const st = ++id;
-    parts.push(`<step localId="${st}"${s.initial ? ' initialStep="true"' : ""} name="${esc(s.name)}"><position x="0" y="${y}" /><connectionPointIn>${prev ? `<connection refLocalId="${prev}" />` : ""}</connectionPointIn><connectionPointOut formalParameter="sfc" /></step>`);
-    if (s.actions?.length) {
-      const blk = ++id;
-      const acts = s.actions.map((a) => {
-        actionDefs.push(`<action name="${esc(a.name)}"><body><ST><xhtml xmlns="http://www.w3.org/1999/xhtml">${esc(a.st)}</xhtml></ST></body></action>`);
-        return `<action localId="${++id}" qualifier="${a.qualifier}"><relPosition x="0" y="0" /><reference name="${esc(a.name)}" /><connectionPointOut /></action>`;
-      });
-      parts.push(`<actionBlock localId="${blk}"><position x="150" y="${y}" /><connectionPointIn><connection refLocalId="${st}" /></connectionPointIn>${acts.join("")}</actionBlock>`);
-    }
-    y += 40;
-    const cond = ++id;
-    parts.push(`<inVariable localId="${cond}"><position x="0" y="${y}" /><connectionPointOut /><expression>${esc(s.when)}</expression></inVariable>`);
-    const tr = ++id;
-    parts.push(`<transition localId="${tr}"><position x="0" y="${y}" /><connectionPointIn><connection refLocalId="${st}" formalParameter="sfc" /></connectionPointIn><connectionPointOut /><condition><connectionPointIn><connection refLocalId="${cond}" /></connectionPointIn></condition></transition>`);
-    y += 40;
-    const following = steps[k + 1];
-    if (following && following.name === s.next) prev = tr;
-    else {
-      parts.push(`<jumpStep localId="${++id}" targetName="${esc(s.next)}"><position x="0" y="${y}" /><connectionPointIn><connection refLocalId="${tr}" /></connectionPointIn></jumpStep>`);
-      y += 40;
-      prev = undefined;
+  const callType = (b: string) => `<addData><data name="http://www.3s-software.com/plcopenxml/cfccalltype" handleUnknown="implementation"><CallType xmlns="">${b}</CallType></data></addData>`;
+  /** A connector from a source output; returns the connector's id, which the consumer connects to. */
+  const line = (src: number, param: string) => {
+    const c = ++id;
+    parts.push(`<connector localId="${c}" name=""><position x="0" y="0" /><connectionPointIn><connection refLocalId="${src}" formalParameter="${esc(param)}" /></connectionPointIn></connector>`);
+    return c;
+  };
+  spec.networks.forEach((net, n) => {
+    const y = n * 12;
+    let x = 0;
+    const build = (e: Fbd): { id: number; param: string } => {
+      if (typeof e === "string") {
+        const v = ++id;
+        parts.push(`<inVariable localId="${v}"><position x="${x}" y="${y}" /><connectionPointOut><expression /></connectionPointOut><expression>${esc(e)}</expression></inVariable>`);
+        return { id: v, param: e };
+      }
+      const isFn = "fn" in e;
+      const ins: [string, { id: number; param: string }][] = isFn ? e.args.map((a, k) => [`In${k + 1}`, build(a)]) : Object.entries(e.inputs ?? {}).map(([k, v]) => [k, build(v)]);
+      const conns = ins.map(([k, s]) => [k, line(s.id, s.param)] as const);
+      const b = ++id;
+      x += 10;
+      // A function's or operator's result is the output with no name (checked on SP22).
+      const outs = isFn ? [""] : [...new Set([e.output ?? "Q", ...Object.keys(net.assign ?? {})])];
+      const op = isFn && OPERATORS.has(e.fn.toUpperCase());
+      const type = isFn ? (op ? e.fn.toUpperCase() : e.fn) : e.fb;
+      const kind = isFn ? (op ? "operator" : "function") : "functionblock";
+      const inst = isFn ? "" : ` instanceName="${esc(e.instance)}"`;
+      parts.push(
+        `<block localId="${b}" executionOrderId="${order++}" typeName="${esc(type)}"${inst}><position x="${x}" y="${y}" />` +
+          `<inputVariables>${conns.map(([k, c], i) => `<variable formalParameter="${esc(k)}"><connectionPointIn><relPosition x="0" y="${i}" /><connection refLocalId="${c}" /></connectionPointIn></variable>`).join("")}</inputVariables><inOutVariables />` +
+          `<outputVariables>${outs.map((o, i) => `<variable formalParameter="${esc(o)}"><connectionPointOut><relPosition x="0" y="${i}" /><expression /></connectionPointOut></variable>`).join("")}</outputVariables>${callType(kind)}</block>`,
+      );
+      return { id: b, param: isFn ? "" : (e.output ?? "Q") };
+    };
+    const out = build(net.expr);
+    const targets: [string, string][] = [];
+    if (net.to) targets.push([out.param, net.to]);
+    for (const [param, v] of Object.entries(net.assign ?? {})) targets.push([param, v]);
+    for (const [param, v] of targets) {
+      const c = line(out.id, param);
+      x += 10;
+      parts.push(`<outVariable localId="${++id}" executionOrderId="${order++}"><position x="${x}" y="${y}" /><connectionPointIn><connection refLocalId="${c}" /></connectionPointIn><expression>${esc(v)}</expression></outVariable>`);
     }
   });
+  const body = `<ST><xhtml xmlns="http://www.w3.org/1999/xhtml" /></ST><addData><data name="http://www.3s-software.com/plcopenxml/cfc" handleUnknown="implementation"><CFC>${parts.join("\n")}</CFC></data></addData>`;
+  return wrap(name, pouType, body);
+}
+
+/** The steps format (one sequence, the last step jumps back) as a chart. */
+export function stepsToChart(steps: NonNullable<z.infer<typeof sfcSchema>["steps"]>): SfcElement[] {
+  const chart: SfcElement[] = [];
+  steps.forEach((s, k) => {
+    chart.push({ step: s.name, ...(s.initial ? { initial: true } : {}), ...(s.actions?.length ? { actions: s.actions } : {}) }, { when: s.when });
+    if (k === steps.length - 1) chart.push({ jump: s.next });
+  });
+  return chart;
+}
+
+export function chartOf(spec: z.infer<typeof sfcSchema>): SfcElement[] {
+  if (spec.chart && spec.steps) throw new Error("Give sfc.steps or sfc.chart, not both.");
+  if (spec.chart) return spec.chart;
+  if (spec.steps) return stepsToChart(spec.steps);
+  throw new Error("Give sfc.steps (one sequence) or sfc.chart (with branches).");
+}
+
+const stepNames = (seq: SfcElement[]): string[] =>
+  seq.flatMap((e) => ("step" in e ? [e.step] : "alternative" in e ? e.alternative.flatMap(stepNames) : "parallel" in e ? e.parallel.flatMap(stepNames) : []));
+
+type Ends = "start" | "par-start" | "alt-start" | "step" | "transition" | "jump";
+
+/** What is wrong with a chart: steps and transitions must alternate, branches start and end right. */
+export function chartProblems(chart: SfcElement[]): string[] {
+  const out: string[] = [];
+  const names = stepNames(chart);
+  const seen = new Set<string>();
+  for (const n of names) {
+    if (seen.has(n.toLowerCase())) out.push(`step ${n} appears twice; step names must be unique`);
+    seen.add(n.toLowerCase());
+  }
+  const check = (seq: SfcElement[], prev: Ends, where: string): Ends => {
+    for (const e of seq) {
+      const at = `${where}${"step" in e ? ` at step ${e.step}` : ""}`;
+      if (prev === "jump") {
+        out.push(`${where}: nothing can follow a jump`);
+        return "jump";
+      }
+      if ("step" in e) {
+        if (prev === "step") out.push(`${at}: two steps in a row need a {when} between them`);
+        else if (prev === "alt-start") out.push(`${at}: each path of an alternative branch starts with a {when}`);
+        prev = "step";
+      } else if ("when" in e) {
+        if (prev === "transition") out.push(`${where}: two transitions in a row ('${e.when}') need a step between them`);
+        else if (prev === "start" || prev === "par-start") out.push(`${where}: '${e.when}' must follow a step`);
+        prev = "transition";
+      } else if ("jump" in e) {
+        if (!seen.has(e.jump.toLowerCase())) out.push(`${where}: jump to '${e.jump}', which isn't a step`);
+        if (prev !== "transition" && prev !== "alt-start") out.push(`${where}: a jump must follow a {when}`);
+        prev = "jump";
+      } else if ("alternative" in e) {
+        if (prev !== "step") out.push(`${where}: an alternative branch must follow a step (its paths start with their conditions)`);
+        const ends = e.alternative.map((b, i) => check(b, "alt-start", `${where} > alternative path ${i + 1}`));
+        ends.forEach((end, i) => {
+          if (end !== "transition" && end !== "jump") out.push(`${where} > alternative path ${i + 1} must end with a {when} or a {jump}`);
+        });
+        prev = ends.every((x) => x === "jump") ? "jump" : "transition";
+      } else {
+        if (prev !== "transition" && prev !== "start") out.push(`${where}: a parallel branch must follow a {when}`);
+        const ends = e.parallel.map((b, i) => check(b, "par-start", `${where} > parallel path ${i + 1}`));
+        ends.forEach((end, i) => {
+          if (end !== "step") out.push(`${where} > parallel path ${i + 1} must end with a step (paths of a parallel branch join before the next {when})`);
+        });
+        prev = "step";
+      }
+    }
+    return prev;
+  };
+  if (!chart.length || !("step" in chart[0]!)) out.push("the chart starts with its initial step");
+  const end = check(chart, "start", "chart");
+  if (end === "step") out.push("the chart ends with a step: add a {when} and a {jump} back");
+  return out;
+}
+
+export function sfcXml(name: string, pouType: "program" | "functionBlock", spec: z.infer<typeof sfcSchema>): string {
+  const chart = chartOf(spec);
+  const p = chartProblems(chart);
+  if (p.length) throw new Error(p.join("\n"));
+  const first = chart[0] as { step: string; initial?: boolean };
+  const hasInitial = (seq: SfcElement[]): boolean => seq.some((e) => ("step" in e ? !!e.initial : "alternative" in e ? e.alternative.some(hasInitial) : "parallel" in e ? e.parallel.some(hasInitial) : false));
+  const initialAll = !hasInitial(chart);
+  let id = 0;
+  let y = 0;
+  const parts: string[] = [];
+  const actionDefs: string[] = [];
+  type Conn = { id: number; param?: string };
+  const conns = (ins: Conn[]) => ins.map((c) => `<connection refLocalId="${c.id}"${c.param ? ` formalParameter="${c.param}"` : ""} />`).join("");
+  // A path that ends in a jump still feeds its branch's convergence, through the
+  // jumpStep: that is how CODESYS exports it, and its import drops the path otherwise.
+  let jumped = false;
+  const emit = (seq: SfcElement[], ins: Conn[]): Conn[] => {
+    let cur = ins;
+    jumped = false;
+    for (const e of seq) {
+      if ("step" in e) {
+        const st = ++id;
+        const initial = e.initial || (initialAll && e === first);
+        parts.push(`<step localId="${st}"${initial ? ' initialStep="true"' : ""} name="${esc(e.step)}"><position x="0" y="${y}" /><connectionPointIn>${conns(cur)}</connectionPointIn><connectionPointOut formalParameter="sfc" /></step>`);
+        if (e.actions?.length) {
+          const blk = ++id;
+          const acts = e.actions.map((a) => {
+            actionDefs.push(`<action name="${esc(a.name)}"><body><ST><xhtml xmlns="http://www.w3.org/1999/xhtml">${esc(a.st)}</xhtml></ST></body></action>`);
+            return `<action localId="${++id}" qualifier="${a.qualifier}"><relPosition x="0" y="0" /><reference name="${esc(a.name)}" /><connectionPointOut /></action>`;
+          });
+          parts.push(`<actionBlock localId="${blk}"><position x="150" y="${y}" /><connectionPointIn><connection refLocalId="${st}" /></connectionPointIn>${acts.join("")}</actionBlock>`);
+        }
+        y += 40;
+        cur = [{ id: st, param: "sfc" }];
+      } else if ("when" in e) {
+        const cond = ++id;
+        parts.push(`<inVariable localId="${cond}"><position x="0" y="${y}" /><connectionPointOut /><expression>${esc(e.when)}</expression></inVariable>`);
+        const tr = ++id;
+        parts.push(`<transition localId="${tr}"><position x="0" y="${y}" /><connectionPointIn>${conns(cur)}</connectionPointIn><connectionPointOut /><condition><connectionPointIn><connection refLocalId="${cond}" /></connectionPointIn></condition></transition>`);
+        y += 40;
+        cur = [{ id: tr }];
+      } else if ("jump" in e) {
+        const j = ++id;
+        parts.push(`<jumpStep localId="${j}" targetName="${esc(e.jump)}"><position x="0" y="${y}" /><connectionPointIn>${conns(cur)}</connectionPointIn></jumpStep>`);
+        y += 40;
+        cur = [{ id: j, param: "sfc" }];
+        jumped = true;
+      } else {
+        const alt = "alternative" in e;
+        const paths = alt ? e.alternative : e.parallel;
+        const div = ++id;
+        const tag = alt ? "selection" : "simultaneous";
+        parts.push(`<${tag}Divergence localId="${div}"><position x="0" y="${y}" /><connectionPointIn>${conns(cur)}</connectionPointIn>${paths.map(() => `<connectionPointOut formalParameter="sfc" />`).join("")}</${tag}Divergence>`);
+        y += 20;
+        // CODESYS tells the paths apart by their order: every output of a divergence is 'sfc'.
+        const results = paths.map((path) => ({ out: emit(path, [{ id: div, param: alt ? "sfc" : undefined }]), jumped }));
+        const ends = results.map((r) => r.out);
+        const conv = ++id;
+        parts.push(`<${tag}Convergence localId="${conv}"><position x="0" y="${y}" />${ends.map((c) => `<connectionPointIn>${conns(c.map((x) => ({ ...x, param: "sfc" })))}</connectionPointIn>`).join("")}<connectionPointOut /></${tag}Convergence>`);
+        y += 20;
+        cur = [{ id: conv }];
+        jumped = results.every((r) => r.jumped);
+      }
+    }
+    return cur;
+  };
+  const tail = emit(chart, []);
+  // A chart that ends with a transition goes back to its initial step.
+  if (!jumped) parts.push(`<jumpStep localId="${++id}" targetName="${esc(first.step)}"><position x="0" y="${y}" /><connectionPointIn>${conns(tail)}</connectionPointIn></jumpStep>`);
   const sfcSettings = `<addData><data name="http://www.3s-software.com/plcopenxml/sfcsettings" handleUnknown="implementation"><SFCSettings><LibTitle>IecSfc</LibTitle><LibCompany>System</LibCompany><LibVersion>4.4.0.0</LibVersion><LibNamespace>IecSfc</LibNamespace><CalcActiveTransOnly>false</CalcActiveTransOnly><UseDefaults>false</UseDefaults></SFCSettings></data></addData>`;
   return wrap(name, pouType, `<SFC>${parts.join("\n")}</SFC>`, actionDefs.length ? `<actions>${actionDefs.join("")}</actions>\n      ` : "", sfcSettings);
 }
 
 /**
- * The SFCs this generator makes are one sequence: each step goes to the next one
- * listed, and the last step jumps back (to any step). Branches aren't supported yet.
+ * The steps format is one sequence: each step goes to the next one listed, and
+ * the last step jumps back (to any step). Branches use the chart format.
  */
 export function sfcProblems(spec: z.infer<typeof sfcSchema>): string[] {
+  if (spec.chart) return spec.steps ? ["Give sfc.steps or sfc.chart, not both."] : chartProblems(spec.chart);
+  if (!spec.steps) return ["Give sfc.steps (one sequence) or sfc.chart (with branches)."];
   const out: string[] = [];
   const names = new Set(spec.steps.map((s) => s.name));
   if (names.size !== spec.steps.length) out.push("step names must be unique");
   spec.steps.forEach((s, k) => {
-    const following = spec.steps[k + 1];
+    const following = spec.steps![k + 1];
     if (!names.has(s.next)) out.push(`step ${s.name} goes to '${s.next}', which isn't a step`);
-    else if (following && s.next !== following.name) out.push(`step ${s.name} must go to the next step listed (${following.name}); only the last step can jump back. Branches aren't supported yet: write the sequence in ST instead.`);
+    else if (following && s.next !== following.name) out.push(`step ${s.name} must go to the next step listed (${following.name}); only the last step can jump back. For branches use sfc.chart.`);
   });
   return out;
 }
@@ -207,16 +410,19 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
     "create_graphical",
     {
       description:
-        "Create a ladder (LD), function block diagram (FBD) or sequential function chart (SFC) program or function block from a structured description; CODESYS draws it. " +
+        "Create a ladder (LD), function block diagram (FBD), continuous function chart (CFC) or sequential function chart (SFC) program or function block from a structured description; CODESYS draws it. " +
         "ladder: {rungs: [{when: 'xStart' | 'NOT xStop' | {and: [...]} (series) | {or: [...]} (parallel), then: [{coil: 'xMotor', kind: 'coil'|'set'|'reset'|'negated'}]}]}. " +
         "fbd: {networks: [{expr: 'xA' | {fn: 'AND', args: [...]} | {fb: 'TON', instance: 'tonDelay', inputs: {IN: ..., PT: 'T#2S'}, output: 'Q'}, to: 'xOut', assign: {ET: 'tEt'}}]}. " +
+        "cfc: the same description as fbd, drawn as CFC (boxes run in the order listed, inputs first). " +
         "sfc: {steps: [{name, initial?, actions?: [{name, qualifier: 'N'|'S'|'R'|'P', st: 'ST code'}], next: 'NextStep', when: 'ST condition'}]}, one sequence: each step goes to the next listed, the last jumps back. " +
+        "sfc with branches: {chart: [...]}, top to bottom: {step: 'Idle', actions?}, {when: 'xStart'}, {alternative: [[{when: 'xA'}, {step: 'A'}, {when: 'xDoneA'}], [{when: 'NOT xA'}, {jump: 'Idle'}]]} (one path is taken), {parallel: [[{step: 'Fill'}], [{step: 'Heat'}]]} (all paths run, after a {when}; they join before the next {when}), {jump: 'Idle'}. Steps and transitions alternate; a chart ending with a {when} goes back to its first step. " +
         "declaration is the POU's ST declaration (PROGRAM or FUNCTION_BLOCK with its variables, FB instances included). Compile afterwards.",
       inputSchema: z.object({
         name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
         declaration: z.string().describe("e.g. 'PROGRAM LD_Motor\nVAR\n    xStart, xStop, xMotor : BOOL;\nEND_VAR'"),
         ladder: ladderSchema.optional(),
         fbd: fbdSchema.optional(),
+        cfc: fbdSchema.optional(),
         sfc: sfcSchema.optional(),
         parent: z.string().optional().describe("Folder or object to create it under (default: the application)"),
         replace: z.boolean().optional().describe("Replace an existing POU of this name (read it with read_objects, edit the description, send it back). The old one is deleted first; revert_object brings it back from a checkpoint"),
@@ -224,8 +430,8 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
     },
     async (a) =>
       run(async () => {
-        const kinds = [a.ladder && "ladder", a.fbd && "fbd", a.sfc && "sfc"].filter(Boolean);
-        if (kinds.length !== 1) throw new Error("Give exactly one of ladder, fbd or sfc.");
+        const kinds = [a.ladder && "ladder", a.fbd && "fbd", a.cfc && "cfc", a.sfc && "sfc"].filter(Boolean);
+        if (kinds.length !== 1) throw new Error("Give exactly one of ladder, fbd, cfc or sfc.");
         const head = /^\s*(?:\{[^}]*\}\s*)*(PROGRAM|FUNCTION_BLOCK)\s+([A-Za-z_][A-Za-z0-9_]*)/i.exec(a.declaration);
         if (!head) throw new Error("The declaration must start with PROGRAM or FUNCTION_BLOCK and the name.");
         if (head[2]!.toLowerCase() !== a.name.toLowerCase()) throw new Error(`The declaration names ${head[2]}, not ${a.name}.`);
@@ -234,7 +440,7 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
           const p = sfcProblems(a.sfc);
           if (p.length) throw new Error(p.join("\n"));
         }
-        const xml = a.ladder ? ladderXml(a.name, pouType, a.ladder) : a.fbd ? fbdXml(a.name, pouType, a.fbd) : sfcXml(a.name, pouType, a.sfc!);
+        const xml = a.ladder ? ladderXml(a.name, pouType, a.ladder) : a.fbd ? fbdXml(a.name, pouType, a.fbd) : a.cfc ? cfcXml(a.name, pouType, a.cfc) : sfcXml(a.name, pouType, a.sfc!);
         let replaced = false;
         if (a.replace) {
           try {
@@ -247,7 +453,7 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
         const r = await ctx.bridge.call<{ added: string[] }>("object.import_xml", { parent: a.parent, xml, save: false }, { timeoutMs: 120_000 });
         const path = r.added[0]!;
         await ctx.bridge.call("object.write", { path, declaration: a.declaration, save: ctx.autosave });
-        return `${replaced ? "Replaced" : "Created"} ${path} in ${kinds[0] === "ladder" ? "ladder (LD)" : kinds[0] === "fbd" ? "FBD" : "SFC"}${a.sfc ? ` with ${a.sfc.steps.length} steps` : ""}. Compile to check it, and call it from a task (configure_task) or another POU.`;
+        return `${replaced ? "Replaced" : "Created"} ${path} in ${kinds[0] === "ladder" ? "ladder (LD)" : kinds[0] === "fbd" ? "FBD" : kinds[0] === "cfc" ? "CFC" : "SFC"}${a.sfc ? ` with ${a.sfc.steps ? a.sfc.steps.length : stepNames(a.sfc.chart ?? []).length} steps` : ""}. Compile to check it, and call it from a task (configure_task) or another POU.`;
       }),
   );
 }

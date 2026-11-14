@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fbdSchema, fbdXml, ladderSchema, ladderXml, sfcSchema, sfcXml } from "../src/codesys/graphical.js";
+import { cfcXml, fbdSchema, fbdXml, ladderSchema, ladderXml, sfcSchema, sfcXml } from "../src/codesys/graphical.js";
 import { describeGraphical, parseXml } from "../src/codesys/graphical-read.js";
 
 const fixture = (n: string) => readFileSync(join(import.meta.dirname, "fixtures", "graphical", `${n}.xml`), "utf8");
@@ -67,8 +67,51 @@ describe("round trips through create_graphical's generator", () => {
     expect(describeGraphical(sfcXml("SFC_X", "program", spec))!.spec).toEqual(spec);
   });
 
-  it("reports SFC branches instead of hiding them", () => {
-    const xml = `<project><types><pous><pou name="S"><body><SFC><step localId="1" name="A" initialStep="true"/><selectionDivergence localId="2"><connectionPointIn><connection refLocalId="1"/></connectionPointIn></selectionDivergence></SFC></body></pou></pous></types></project>`;
-    expect(describeGraphical(xml)!.notes.join(" ")).toMatch(/selectionDivergence \(a branch\)/);
+  it("SFC with branches as a chart, round trip included", () => {
+    const chart = [
+      { step: "Idle", initial: true },
+      { when: "xStart" },
+      { step: "Check", actions: [{ name: "ACT_Check", qualifier: "N", st: "nChecks := nChecks + 1;" }] },
+      { alternative: [[{ when: "xFault" }, { step: "Alarm", actions: [{ name: "ACT_Alarm", qualifier: "N", st: "xAlarm := TRUE;" }] }, { when: "NOT xFault" }, { jump: "Idle" }], [{ when: "NOT xFault" }]] },
+      { parallel: [[{ step: "Fill", actions: [{ name: "ACT_Fill", qualifier: "N", st: "nLevel := nLevel + 1;" }] }], [{ step: "Heat", actions: [{ name: "ACT_Heat", qualifier: "N", st: "nTemp := nTemp + 2;" }] }]] },
+      { when: "nLevel >= 10 AND nTemp >= 20" },
+      { step: "Done" },
+      { when: "NOT xStart" },
+      { jump: "Idle" },
+    ];
+    // CODESYS SP22's own export of the chart create_graphical made.
+    const d = describeGraphical(fixture("SFC_Branches"))!;
+    expect(d.notes).toEqual([]);
+    expect(d.spec).toEqual({ chart });
+    const spec = sfcSchema.parse({ chart });
+    expect(describeGraphical(sfcXml("SFC_X", "program", spec))!.spec).toEqual({ chart });
+  });
+
+  it("an alternative whose paths all jump", () => {
+    const chart = [{ step: "Idle", initial: true }, { when: "xGo" }, { step: "Check" }, { alternative: [[{ when: "xOk" }, { step: "Run" }, { when: "NOT xGo" }, { jump: "Idle" }], [{ when: "xFault" }, { jump: "Check" }]] }];
+    const x = sfcXml("SFC_J", "program", sfcSchema.parse({ chart }));
+    // The jumps feed the convergence (CODESYS drops the paths otherwise), and no jump is added after it.
+    expect(x.match(/<jumpStep /g)).toHaveLength(2);
+    expect(x).toMatch(/<selectionConvergence localId="\d+"><position x="0" y="\d+" \/><connectionPointIn><connection refLocalId="\d+" formalParameter="sfc" \/><\/connectionPointIn><connectionPointIn>/);
+    expect(describeGraphical(x)!.spec).toEqual({ chart });
+  });
+
+  it("CFC: CODESYS's export read back through its connectors, round trip included", () => {
+    const networks = [
+      { expr: { fn: "AND", args: ["xA", { fn: "NOT", args: ["xB"] }] }, to: "xOut" },
+      { expr: { fn: "LIMIT", args: ["0", { fn: "ADD", args: ["nIn", "5"] }, "100"] }, to: "nOut" },
+      { expr: { fb: "TON", instance: "tonDelay", inputs: { IN: "xOut", PT: "T#300MS" }, output: "Q" }, to: "xLate", assign: { ET: "tEt" } },
+    ];
+    // CODESYS SP22's own export of the CFC create_graphical made (checked in the simulation).
+    const d = describeGraphical(fixture("CFC_Logic"))!;
+    expect(d.kind).toBe("cfc");
+    expect(d.notes).toEqual([]);
+    expect(d.spec).toEqual({ networks });
+    const spec = fbdSchema.parse({ networks });
+    const x = cfcXml("CFC_X", "program", spec);
+    expect(x).toContain('<CallType xmlns="">operator</CallType>');
+    expect(x).toContain('<CallType xmlns="">functionblock</CallType>');
+    expect(x).toMatch(/<connector localId="\d+" name=""><position x="0" y="0" \/><connectionPointIn><connection refLocalId="\d+" formalParameter="" \/>/);
+    expect(describeGraphical(x)!.spec).toEqual({ networks });
   });
 });

@@ -124,7 +124,7 @@ operation. [The reference](docs/reference.md) describes each one.
 | **Debug** | `breakpoint_set` `breakpoint_on_change` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` `watch` |
 | **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` `hmi_translate` |
 | **Alarms** | `alarm_list` `alarm_status` `alarm_acknowledge` |
-| **Handover** | `project_report` `export_sources` `create_recipes` |
+| **Handover** | `project_report` `export_sources` `compare_sources` `create_recipes` |
 | **Helpers** | `batch` `wait` `help` `open_workspace` `show_in_codesys` |
 
 `batch` runs up to 50 actions in one call, which is much faster than separate
@@ -139,12 +139,12 @@ They are **experimental**: checked on CODESYS V3.5 SP21 and SP22 as noted in
 the [changelog](CHANGELOG.md). On another version they may report that the
 feature isn't available, or not work.
 
-Claude writes Structured Text, and creates ladder (LD), FBD and SFC programs
-and function blocks with `create_graphical` from a simple description of rungs,
-networks or steps; CODESYS draws them. Reading an LD, FBD or SFC POU gives the
+Claude writes Structured Text, and creates ladder (LD), FBD, CFC and SFC
+programs and function blocks with `create_graphical` from a simple description
+of rungs, networks or steps; CODESYS draws them. SFC charts can have alternative
+and parallel branches and jumps. Reading an LD, FBD, CFC or SFC POU gives the
 same description, so Claude can change existing graphical code too: it edits the
-description and sends it back with `replace: true`. CFC isn't supported, and
-stays read-only as PLCopenXML.
+description and sends it back with `replace: true`.
 
 ## Live panel
 
@@ -289,6 +289,9 @@ project tree, ladder/FBD/SFC bodies as PLCopenXML, a `project.txt` with tasks,
 libraries, devices and alarms, and the HMI screens. A `.project` file is
 binary; this folder is what makes a change reviewable as a diff. Exporting
 again rewrites only what changed and removes the files of deleted objects.
+`compare_sources` compares the open project with such a folder or with another
+`.project` file: the objects only in one of them, and a line diff of each
+changed one.
 
 ## Other clients and models
 

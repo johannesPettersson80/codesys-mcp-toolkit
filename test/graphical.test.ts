@@ -1,6 +1,6 @@
 /** Ladder, FBD and SFC as PLCopenXML (the import rules CODESYS needs). */
 import { describe, expect, it } from "vitest";
-import { fbdXml, ladderXml, sfcProblems, sfcXml } from "../src/codesys/graphical.js";
+import { chartProblems, fbdXml, ladderXml, sfcProblems, sfcXml, type SfcElement } from "../src/codesys/graphical.js";
 
 describe("graphical code as PLCopenXML", () => {
   it("ladder: series and parallel contacts feed every coil", () => {
@@ -38,8 +38,22 @@ describe("graphical code as PLCopenXML", () => {
     expect(x).toMatch(/<action name="ACT_Fill"><body><ST><xhtml xmlns="http:\/\/www.w3.org\/1999\/xhtml">iLevel := iLevel \+ 1;/);
   });
 
-  it("refuses SFC branches it can't draw yet", () => {
+  it("the steps format stays one sequence and points to the chart for branches", () => {
     const p = sfcProblems({ steps: [{ name: "A", next: "C", when: "x" }, { name: "B", next: "A", when: "y" }, { name: "C", next: "A", when: "z" }] });
-    expect(p[0]).toMatch(/step A must go to the next step listed \(B\)/);
+    expect(p[0]).toMatch(/step A must go to the next step listed \(B\).*sfc.chart/);
+  });
+
+  it("checks a chart's structure", () => {
+    const problems = (chart: unknown[]) => chartProblems(chart as SfcElement[]);
+    expect(problems([{ step: "A" }, { when: "x" }])).toEqual([]);
+    expect(problems([{ step: "A" }, { step: "B" }, { when: "x" }])[0]).toMatch(/two steps in a row/);
+    expect(problems([{ step: "A" }, { when: "x" }, { when: "y" }])[0]).toMatch(/two transitions in a row/);
+    expect(problems([{ step: "A" }, { when: "x" }, { jump: "Nowhere" }])[0]).toMatch(/isn't a step/);
+    expect(problems([{ step: "A" }, { when: "x" }, { step: "A" }, { when: "y" }])[0]).toMatch(/appears twice/);
+    expect(problems([{ step: "A" }, { alternative: [[{ step: "B" }, { when: "x" }], [{ when: "y" }]] }, { step: "C" }, { when: "z" }]).join()).toMatch(/starts with a \{when\}/);
+    expect(problems([{ step: "A" }, { when: "x" }, { parallel: [[{ step: "B" }, { when: "y" }], [{ step: "C" }]] }, { when: "z" }]).join()).toMatch(/parallel path 1 must end with a step/);
+    expect(problems([{ step: "A" }, { parallel: [[{ step: "B" }], [{ step: "C" }]] }, { when: "z" }]).join()).toMatch(/must follow a \{when\}/);
+    expect(problems([{ step: "A" }, { when: "x" }, { step: "B" }]).join()).toMatch(/ends with a step/);
+    expect(problems([{ step: "A" }, { when: "x" }, { jump: "A" }, { step: "B" }]).join()).toMatch(/nothing can follow a jump/);
   });
 });

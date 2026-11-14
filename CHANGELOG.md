@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Checked in the SP22 simulation: the call stack, step into, over and out, a
   data breakpoint with and without a condition, and the watch list.
 
+- SFC with branches: `create_graphical` takes `sfc.chart`, with alternative
+  and parallel branches and jumps; `read_objects` describes a branched SFC as
+  such a chart, so it can be edited and sent back. Checked in the SP22
+  simulation (both paths of an alternative, a parallel branch).
+- CFC: `create_graphical` takes `cfc` (the same description as `fbd`), and
+  `read_objects` reads CFC bodies as that description. Checked in the SP22
+  simulation with operators, a function and a TON.
+- `compare_sources`: the open project compared with an `export_sources` folder
+  or another `.project` file, with a line diff per changed object.
+
 ### Fixed
 - `debug_continue` no longer fails when the simulation is already running.
 

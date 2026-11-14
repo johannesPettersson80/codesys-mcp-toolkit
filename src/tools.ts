@@ -11,6 +11,7 @@ import { condition, listAlarms, registerAlarmActions } from "./codesys/alarm-too
 import { projectReport } from "./codesys/report.js";
 import { registerRecipeAction } from "./codesys/recipes.js";
 import { describeGraphical } from "./codesys/graphical-read.js";
+import { compareSources, describeComparison, readSourceDir } from "./codesys/compare.js";
 import { screenVariables } from "./hmi/spec.js";
 import { reportProgress } from "./progress.js";
 import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
@@ -257,9 +258,9 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   };
   const cache = ctx.cache;
   /** Export all ST (and keep the workspace cache current). */
-  const exportNodes = async (): Promise<TreeNode[]> => {
+  const exportNodes = async (keep = true): Promise<TreeNode[]> => {
     const nodes = (await b.call<{ nodes: TreeNode[] }>("export", {}, { timeoutMs: 120_000 })).nodes;
-    cache?.setAll(nodes);
+    if (keep) cache?.setAll(nodes);
     return nodes;
   };
   /** Re-read one object into the cache after a change (best effort). */
@@ -463,7 +464,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
                 const xml = compactPlcOpen(o.xml) + (o.truncated ? "\n(truncated)" : "");
                 const d = o.truncated ? undefined : describeGraphical(o.xml);
                 if (d) {
-                  const label = d.kind === "ladder" ? "ladder (LD)" : d.kind === "fbd" ? "FBD" : "SFC";
+                  const label = d.kind === "ladder" ? "ladder (LD)" : d.kind === "fbd" ? "FBD" : d.kind === "cfc" ? "CFC" : "SFC";
                   const how = `To change it: edit this and call create_graphical with name, declaration, ${d.kind}: <this> and replace: true.`;
                   graphicalBodies.set(
                     o.path,
@@ -850,6 +851,53 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
       }),
   );
 
+  /** The project as the text files export_sources writes: relative path -> text. */
+  const sourceFiles = async (hmi: boolean, keep = true): Promise<{ info: ProjectInfo; files: Map<string, string> }> => {
+    const info = await b.call<ProjectInfo>("project.info", {}, { timeoutMs: 30_000 });
+    reportProgress("exporting the objects");
+    const nodes = await exportNodes(keep);
+    const files = new Map<string, string>();
+    const safe = (s: string) => s.replace(/[<>:"\\|?*]/g, "_");
+    const KINDS = new Set(["pou", "method", "property", "accessor", "action", "dut", "gvl", "interface", "interface_method"]);
+    const nl = (s: string) => s.replace(/\r\n/g, "\n").trimEnd();
+    for (const n of nodes) {
+      if (!KINDS.has(n.kind)) continue;
+      const rel = n.path.split("/").map(safe).join("/");
+      const text = [n.declaration ? nl(n.declaration) : "", n.implementation && n.st !== false ? nl(n.implementation) : ""].filter(Boolean).join("\n\n");
+      if (text) files.set(`${rel}.st`, `${text}\n`);
+      // The export stamps the time into the XML header: leave it out, or every export is a change.
+      if (n.st === false && n.xml) files.set(`${rel}.xml`, `${nl(n.xml).replace(/\s(?:creationDateTime|modificationDateTime)="[^"]*"/g, "")}\n`);
+    }
+    reportProgress("tasks, libraries, devices and alarms");
+    const tasks = (await b.call<{ tasks: TaskInfo[] }>("tasks.list")).tasks;
+    const libraries = (await b.call<{ libraries: { name: string; effective_resolution?: string }[] }>("libraries.list").catch(() => ({ libraries: [] }))).libraries;
+    const devices = (await b.call<{ devices: DeviceInfo[] }>("devices.list", { io: false }, { timeoutMs: 180_000 }).catch(() => ({ devices: [] as DeviceInfo[] }))).devices;
+    const alarms = await listAlarms(ctx).catch(() => []);
+    files.set(
+      "project.txt",
+      [
+        `Project: ${info.path.replace(/\\/g, "/").split("/").pop()}`,
+        `Application: ${info.application ?? "?"}${info.compiler_version ? `\nCompiler: ${info.compiler_version}` : ""}`,
+        "",
+        "[Tasks]",
+        ...tasks.map(describeTask),
+        "",
+        "[Libraries]",
+        ...libraries.map((l) => `${l.name}${l.effective_resolution ? ` -> ${l.effective_resolution}` : ""}`),
+        "",
+        "[Devices]",
+        describeDevices(devices),
+        "",
+        "[Alarms]",
+        ...alarms.flatMap((g) => g.alarms.map((a) => `${g.name}/${a.id} [${a.cls}] ${a.text} :: ${condition(a)}`)),
+        "",
+      ].join("\n"),
+    );
+    const hmiFile = hmi ? ctx.hmi?.file() : undefined;
+    if (hmiFile && existsSync(hmiFile)) files.set("hmi.json", readFileSync(hmiFile, "utf8"));
+    return { info, files };
+  };
+
   reg(
     "export_sources",
     {
@@ -860,49 +908,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     async ({ dir }) =>
       run(ctx, async () => {
         if (!ctx.project) throw new Error("No project is open.");
-        const info = await b.call<ProjectInfo>("project.info", {}, { timeoutMs: 30_000 });
-        reportProgress("exporting the objects");
-        const nodes = await exportNodes();
+        const { info, files } = await sourceFiles(true);
         const root = dir ? absPath(ctx, dir) : `${info.path.replace(/\.project$/i, "")}_src`;
-        const files = new Map<string, string>();
-        const safe = (s: string) => s.replace(/[<>:"\\|?*]/g, "_");
-        const KINDS = new Set(["pou", "method", "property", "accessor", "action", "dut", "gvl", "interface", "interface_method"]);
-        const nl = (s: string) => s.replace(/\r\n/g, "\n").trimEnd();
-        for (const n of nodes) {
-          if (!KINDS.has(n.kind)) continue;
-          const rel = n.path.split("/").map(safe).join("/");
-          const text = [n.declaration ? nl(n.declaration) : "", n.implementation && n.st !== false ? nl(n.implementation) : ""].filter(Boolean).join("\n\n");
-          if (text) files.set(`${rel}.st`, `${text}\n`);
-          // The export stamps the time into the XML header: leave it out, or every export is a change.
-          if (n.st === false && n.xml) files.set(`${rel}.xml`, `${nl(n.xml).replace(/\s(?:creationDateTime|modificationDateTime)="[^"]*"/g, "")}\n`);
-        }
-        reportProgress("tasks, libraries, devices and alarms");
-        const tasks = (await b.call<{ tasks: TaskInfo[] }>("tasks.list")).tasks;
-        const libraries = (await b.call<{ libraries: { name: string; effective_resolution?: string }[] }>("libraries.list").catch(() => ({ libraries: [] }))).libraries;
-        const devices = (await b.call<{ devices: DeviceInfo[] }>("devices.list", { io: false }, { timeoutMs: 180_000 }).catch(() => ({ devices: [] as DeviceInfo[] }))).devices;
-        const alarms = await listAlarms(ctx).catch(() => []);
-        files.set(
-          "project.txt",
-          [
-            `Project: ${info.path.replace(/\\/g, "/").split("/").pop()}`,
-            `Application: ${info.application ?? "?"}${info.compiler_version ? `\nCompiler: ${info.compiler_version}` : ""}`,
-            "",
-            "[Tasks]",
-            ...tasks.map(describeTask),
-            "",
-            "[Libraries]",
-            ...libraries.map((l) => `${l.name}${l.effective_resolution ? ` -> ${l.effective_resolution}` : ""}`),
-            "",
-            "[Devices]",
-            describeDevices(devices),
-            "",
-            "[Alarms]",
-            ...alarms.flatMap((g) => g.alarms.map((a) => `${g.name}/${a.id} [${a.cls}] ${a.text} :: ${condition(a)}`)),
-            "",
-          ].join("\n"),
-        );
-        const hmiFile = ctx.hmi?.file();
-        if (hmiFile && existsSync(hmiFile)) files.set("hmi.json", readFileSync(hmiFile, "utf8"));
         // Write, then remove what an earlier export wrote and this one didn't.
         const MANIFEST = ".codesys-export.json";
         const manifestPath = join(root, MANIFEST);
@@ -922,6 +929,52 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         const st = [...files.keys()].filter((f) => f.endsWith(".st")).length;
         const xml = [...files.keys()].filter((f) => f.endsWith(".xml")).length;
         return `Exported to ${root}: ${st} .st file(s)${xml ? `, ${xml} graphical body(ies) as .xml` : ""}, project.txt${files.has("hmi.json") ? ", hmi.json" : ""}. ${changed} file(s) written or changed${gone.length ? `, ${gone.length} removed (deleted objects)` : ""}; the rest were unchanged. Commit the folder to see each change as a text diff.`;
+      }),
+  );
+
+  reg(
+    "compare_sources",
+    {
+      description:
+        "Compare the open project with another: a folder export_sources wrote (an older export, another branch's checkout) or another .project file (opened read-only for the comparison, then the open project is opened again; save first). Lists the objects only in one of them and the changed ones with a line diff; tasks, libraries, devices and alarms are compared through project.txt. path limits it to one object or folder, e.g. 'PLC_PRG'.",
+      inputSchema: z.object({
+        with: z.string().describe("Folder from export_sources, or a .project file"),
+        path: z.string().optional().describe("Only this object or folder, as the export names it, e.g. 'PLC_PRG' or 'Motors'"),
+        max_lines: z.number().int().min(20).max(5000).default(400).describe("Diff lines to show in all"),
+      }),
+    },
+    async (a) =>
+      run(ctx, async () => {
+        if (!ctx.project) throw new Error("No project is open.");
+        const target = absPath(ctx, a.with);
+        const isProject = /\.project(archive)?$/i.test(target);
+        reportProgress("exporting the open project");
+        // A .project has no HMI file next to this server's, so the HMI is compared only with a folder.
+        const mine = await sourceFiles(!isProject);
+        const here = mine.info.path.replace(/\\/g, "/").split("/").pop()!;
+        let other: Map<string, string>;
+        let otherName = target.replace(/\\/g, "/").split("/").slice(-2).join("/");
+        if (isProject) {
+          if (!existsSync(target)) throw new Error(`${target} doesn't exist.`);
+          if (ctx.codesysSim) throw new Error("The simulation is running: call codesys_sim_stop before comparing with another project (it is opened for the comparison).");
+          if (target.toLowerCase() === mine.info.path.toLowerCase()) throw new Error("That is the open project: compare it with an export or another project file.");
+          reportProgress(`opening ${otherName}`);
+          await b.call("project.open", { path: target }, { timeoutMs: 300_000 });
+          try {
+            other = (await sourceFiles(false, false)).files;
+          } finally {
+            reportProgress(`opening ${here} again`);
+            await b.call("project.open", { path: mine.info.path, discard_changes: true }, { timeoutMs: 300_000 });
+          }
+          otherName = target.replace(/\\/g, "/").split("/").pop()!;
+          // project.txt names the project file: the same line differs in every comparison.
+          for (const m of [mine.files, other]) {
+            const t = m.get("project.txt");
+            if (t) m.set("project.txt", t.replace(/^Project: .*\n/, ""));
+          }
+        } else other = readSourceDir(target);
+        const c = compareSources(other, mine.files, a.path);
+        return describeComparison(c, otherName, `${here} (open)`, a.max_lines);
       }),
   );
 

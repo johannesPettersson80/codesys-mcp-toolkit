@@ -226,7 +226,8 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 `export_sources` 把项目导出为纯文本以便用 git 管理：每个 POU、方法、属性、动作、DUT、GVL 和接口一个
 `.st` 文件，按项目树的结构放在文件夹中；梯形图、FBD 和 SFC 以 PLCopenXML 保存；`project.txt` 包含任务、
 库、设备和报警；以及 HMI 画面。`.project` 文件是二进制的，这个文件夹让每次改动都能以差异的形式审阅。
-再次导出时只重写有变化的文件，并删除已删除对象的文件。
+再次导出时只重写有变化的文件，并删除已删除对象的文件。`compare_sources` 将当前打开的项目与这样的文件夹或另一个
+`.project` 文件进行比较：列出只存在于其中一方的对象，并给出每个有变化对象的逐行差异。
 
 ## 可用操作
 
@@ -247,7 +248,7 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 | **跟踪（Trace）** | `trace_setup` `trace_record` |
 | **调试** | `breakpoint_set` `breakpoint_on_change` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` `watch` |
 | **报警** | `alarm_list` `alarm_status` `alarm_acknowledge` |
-| **交接** | `project_report` `export_sources` `create_recipes` |
+| **交接** | `project_report` `export_sources` `compare_sources` `create_recipes` |
 | **HMI 画面** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` `hmi_translate` |
 | **辅助** | `batch` `wait` `help` `open_workspace` `show_in_codesys` |
 
@@ -259,8 +260,8 @@ V3.5 SP21 的仿真中验证。可视化需要 CODESYS 库存储库中有 `Float
 验证（见[更新日志](CHANGELOG.md)），在其他版本上可能提示功能不可用，或无法正常工作。
 
 Claude 编写结构化文本，并可用 `create_graphical` 根据梯级、网络或步骤的简单描述创建梯形图（LD）、
-FBD 和 SFC 程序及功能块，由 CODESYS 绘制。读取 LD、FBD 或 SFC POU 时会得到同样的描述，因此 Claude
-也能修改已有的图形化代码：修改描述后用 `replace: true` 发回即可。不支持 CFC，CFC 仍以 PLCopenXML 只读显示。
+FBD、CFC 和 SFC 程序及功能块，由 CODESYS 绘制。SFC 可以包含选择分支、并行分支和跳转。读取 LD、FBD、CFC
+或 SFC POU 时会得到同样的描述，因此 Claude 也能修改已有的图形化代码：修改描述后用 `replace: true` 发回即可。
 
 ## 安全
 
