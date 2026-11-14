@@ -4,7 +4,7 @@ import { currentCodesysSim } from "./codesys/simulation.js";
 import { registerTools, revertObject, versionLine, type AppContext } from "./tools.js";
 import { registerPanel } from "./panel.js";
 
-export const VERSION = "2.1.2";
+export const VERSION = "2.2.0";
 
 const INSTRUCTIONS = `CODESYS V3.5 automation through a persistent CODESYS session.
 Everything goes through the one tool named codesys, as {"action": "<name>", "args": {...}}. The names below are its actions; {"action": "help"} lists them all with their arguments.

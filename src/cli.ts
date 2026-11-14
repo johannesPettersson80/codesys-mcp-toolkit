@@ -16,6 +16,8 @@
  *   --attach <dir>            work in a window you already have open instead of starting CODESYS: the
  *                             server writes <dir>\scripts\start_attach.py, which you run there with
  *                             Tools > Scripting > Execute Script File (a UI timer, so the window stays usable)
+ *   --show-window             start CODESYS with its window instead of headless, to watch the work.
+ *                             The toolkit never closes that window itself.
  *
  * By default every process started with the same options shares one session
  * (one CODESYS, one viewer): see daemon.ts.
@@ -57,6 +59,7 @@ async function main() {
       "no-viewer": { type: "boolean" },
       "no-shared": { type: "boolean" },
       attach: { type: "string" },
+      "show-window": { type: "boolean" },
       "trust-runtime": { type: "string" },
       "mirror-dir": { type: "string" },
       "no-sim": { type: "boolean" },
@@ -73,7 +76,7 @@ async function main() {
   }
   if (values.help) {
     process.stdout.write(
-      "codesys-mcp-tool [--codesys-path <CODESYS.exe>] [--codesys-profile <name>] [--codesys-additional-folder <dir>] [--workspace <dir>] [--project <file>] [--session-dir <dir>] [--no-autostart] [--no-autosave] [--viewer-port <port>] [--no-viewer] [--no-shared] [--attach <dir>]\n",
+      "codesys-mcp-tool [--codesys-path <CODESYS.exe>] [--codesys-profile <name>] [--codesys-additional-folder <dir>] [--workspace <dir>] [--project <file>] [--session-dir <dir>] [--no-autostart] [--no-autosave] [--viewer-port <port>] [--no-viewer] [--no-shared] [--attach <dir>] [--show-window]\n",
     );
     return;
   }
@@ -131,9 +134,11 @@ async function main() {
     additionalFolder: codesys.install.additionalFolder,
     watcherSource,
     sessionRoot,
+    noUI: !values["show-window"],
     ...(attachDir ? { attachDir, startupTimeoutMs: 120_000 } : {}),
     log,
   });
+  if (values["show-window"] && attachDir) log("--show-window has no effect with --attach: the window is already open");
   const ctx: AppContext = {
     bridge,
     autosave: !values["no-autosave"],

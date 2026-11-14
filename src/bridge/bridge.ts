@@ -25,7 +25,11 @@ export interface BridgeOptions {
   profile?: string;
   /** CODESYS's additional folder (SP22 keeps its add-ons there, e.g. Scripting). */
   additionalFolder?: string;
-  /** Run CODESYS without UI (default true). */
+  /**
+   * Run CODESYS without UI (default true). false (--show-window) starts it with its window,
+   * which keeps painting while the watcher waits (system.delay serves the message loop). The
+   * bridge never closes that window itself (not on a hang, not on stop) unless it never got ready.
+   */
   noUI?: boolean;
   /** Folder that holds watcher.py and its modules (copied into the session). */
   watcherSource: string;
@@ -161,6 +165,16 @@ export class CodesysBridge {
     return this.state;
   }
 
+  /** CODESYS runs with its window, which the user may be working in (--show-window). */
+  get visible(): boolean {
+    return !this.opts.noUI && !this.opts.attachDir;
+  }
+
+  /** The window or watcher belongs to the user, so it is never closed on a hang. */
+  private get keepsWindow(): boolean {
+    return this.visible || !!this.opts.attachDir;
+  }
+
   /** Start CODESYS + watcher (idempotent). Resolves when the watcher is ready. */
   start(): Promise<void> {
     if (this.state === "ready") return Promise.resolve();
@@ -191,7 +205,10 @@ export class CodesysBridge {
     this.startedAt = Date.now();
     this.readyAt = undefined;
     if (this.opts.attachDir) return this.doAttach(this.opts.attachDir);
-    const id = `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}-${randomBytes(3).toString("hex")}`;
+    // A window that stopped answering (busy with the user, or a dialog) is still there:
+    // wait for its watcher again rather than start a second CODESYS.
+    if (this.visible && this.child && this.sessionDir) return this.rejoinWindow();
+    const id =`${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}-${randomBytes(3).toString("hex")}`;
     const dir = join(this.opts.sessionRoot, id);
     const scripts = join(dir, "scripts");
     mkdirSync(join(dir, "requests"), { recursive: true });
@@ -218,14 +235,20 @@ export class CodesysBridge {
         CODESYS_MCP_DIR: dir,
         CODESYS_MCP_SCRIPTS: scripts,
         CODESYS_MCP_PARENT_PID: String(process.pid),
+        ...(this.visible ? { CODESYS_MCP_UI: "1" } : {}),
       },
-      // stdout/stderr are kept (the last 4 KB) so a failed start can say why.
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
+      // stdout/stderr are kept (the last 4 KB) so a failed start can say why. A window
+      // (--show-window) is the user's and outlives the server: detached, with no pipes that
+      // tie the two together; CODESYS shows its start-up errors in the window itself.
+      stdio: this.visible ? "ignore" : ["ignore", "pipe", "pipe"],
+      detached: this.visible,
+      // windowsHide also hides a program's first window, so only without UI.
+      windowsHide: !this.visible,
       // CODESYS wants --option="value with spaces"; pass our own quoting through.
       windowsVerbatimArguments: !this.opts.args,
     });
     this.child = child;
+    if (this.visible) child.unref(); // the server may exit while the window stays open
     this.output = "";
     const keep = (d: Buffer) => {
       this.output = (this.output + d.toString()).slice(-4096);
@@ -271,7 +294,7 @@ export class CodesysBridge {
       }
       await sleep(100);
     }
-    await this.kill("startup timeout");
+    await this.kill("startup timeout", true);
     const msg = `CODESYS did not start the watcher within ${Math.round(this.opts.startupTimeoutMs / 1000)}s. ${startupHint(this.output)}${this.consoleTail()}${this.logTail()}`;
     this.lastError = msg;
     throw new BridgeError("startup_timeout", msg);
@@ -280,6 +303,30 @@ export class CodesysBridge {
   /** Path of the script the user runs in their own window to start the watcher (attach mode). */
   get attachScript(): string | undefined {
     return this.opts.attachDir ? join(this.opts.attachDir, "scripts", "start_attach.py") : undefined;
+  }
+
+  /** Wait until the watcher in the window we started answers again (--show-window). */
+  private async rejoinWindow(): Promise<void> {
+    const deadline = Date.now() + this.opts.startupTimeoutMs;
+    while (Date.now() < deadline && this.child) {
+      const hb = this.readHeartbeat();
+      // A busy op past its own deadline is the one that just failed: still stuck. (No grace
+      // here, or a call that timed out a few ms before deadline + grace would count as working.)
+      const working = hb?.state === "busy" && !(hb.deadline && Date.now() > hb.deadline * 1000);
+      if (hb && hb.ageMs < this.opts.staleHeartbeatMs && (hb.state === "idle" || working)) {
+        this.state = "ready";
+        this.readyAt = Date.now();
+        this.log(`the CODESYS window (pid ${this.child.pid}) answers again`);
+        return;
+      }
+      if (hb && (hb.state === "stopped" || hb.state === "crashed")) break; // its watcher is gone for good
+      await sleep(250);
+    }
+    if (!this.child) return this.doStart(); // the window was closed meanwhile: start a new one
+    this.state = "dead";
+    const msg = `The CODESYS window (pid ${this.child.pid}) doesn't answer: a dialog may be open there, or its watcher stopped. Nothing was closed. Answer or close the dialog, or close the window so the next call starts a new one.`;
+    this.lastError = msg;
+    throw new BridgeError("window_unresponsive", msg);
   }
 
   /** Prepare the session folder and wait for a watcher the user started in an open window. */
@@ -414,7 +461,9 @@ export class CodesysBridge {
         const dialog = this.pendingDialog();
         if (dialog) {
           await this.kill(`dialog "${dialog}" during '${op}'`);
-          const msg = `CODESYS opened a dialog ("${dialog}") during '${op}' and is waiting for an answer, which a session without a window can't give. CODESYS was stopped and will restart on the next call; unsaved changes are lost. Do the same step once in the CODESYS window and answer the dialog there, then try again.`;
+          const msg = this.visible
+            ? `CODESYS opened a dialog ("${dialog}") during '${op}' and is waiting for an answer. Nothing was closed: answer it in the CODESYS window, then check the result and retry if needed.`
+            : `CODESYS opened a dialog ("${dialog}") during '${op}' and is waiting for an answer, which a session without a window can't give. CODESYS was stopped and will restart on the next call; unsaved changes are lost. Do the same step once in the CODESYS window and answer the dialog there, then try again.`;
           this.lastError = msg;
           throw new BridgeError("dialog", msg);
         }
@@ -423,18 +472,20 @@ export class CodesysBridge {
           await this.kill(`hung during '${op}'`);
           const msg = this.opts.attachDir
             ? `The open window stopped responding during '${op}' (a dialog may be waiting, or the watcher script was stopped). Nothing was closed. Check the window, run ${this.attachScript} again if needed, then retry.`
-            : `CODESYS stopped responding during '${op}' and was restarted on the next call. Unsaved changes are lost.`;
-          if (this.opts.attachDir) await unlink(reqPath).catch(() => undefined);
+            : this.visible
+              ? `The CODESYS window stopped responding during '${op}' (a dialog may be waiting there). Nothing was closed. Check the window, then retry.`
+              : `CODESYS stopped responding during '${op}' and was restarted on the next call. Unsaved changes are lost.`;
+          if (this.keepsWindow) await unlink(reqPath).catch(() => undefined);
           this.lastError = msg;
           throw new BridgeError("hung", msg);
         }
       }
       if (now - started > timeoutMs + this.opts.hungGraceMs) {
         await this.kill(`timeout in '${op}'`);
-        const msg = this.opts.attachDir
-          ? `'${op}' took longer than ${Math.round(timeoutMs / 1000)}s in the open window. Nothing was closed; check the window, then retry.`
+        const msg = this.keepsWindow
+          ? `'${op}' took longer than ${Math.round(timeoutMs / 1000)}s in the ${this.visible ? "CODESYS" : "open"} window. Nothing was closed; check the window, then retry.`
           : `'${op}' took longer than ${Math.round(timeoutMs / 1000)}s; CODESYS was stopped and will restart on the next call.`;
-        if (this.opts.attachDir) await unlink(reqPath).catch(() => undefined);
+        if (this.keepsWindow) await unlink(reqPath).catch(() => undefined);
         this.lastError = msg;
         throw new BridgeError("timeout", msg);
       }
@@ -508,6 +559,15 @@ export class CodesysBridge {
       this.state = "stopped";
       return;
     }
+    if (this.visible) {
+      // The user may be working in the window: stop its watcher and leave the window open.
+      const pid = this.child?.pid;
+      if (this.state === "ready" && this.child) await this.exchange("shutdown", {}, 5_000).catch(() => undefined);
+      if (pid) this.log(`stopped; the CODESYS window (pid ${pid}) stays open`);
+      this.child = undefined;
+      this.state = "stopped";
+      return;
+    }
     if (this.state === "ready" && this.child) {
       try {
         await this.exchange("shutdown", {}, 5_000);
@@ -521,10 +581,17 @@ export class CodesysBridge {
     this.state = "stopped";
   }
 
-  private async kill(reason: string): Promise<void> {
+  /** `force` closes even a visible window (one that never got ready). */
+  private async kill(reason: string, force = false): Promise<void> {
     if (this.opts.attachDir) {
       // Never close the user's window; just forget the watcher until it answers again.
       this.log(`attach: ${reason}; the window is left open`);
+      this.state = "dead";
+      return;
+    }
+    if (this.visible && !force && this.child) {
+      // The window may be busy with the user or a dialog: keep it, and wait for it on the next call.
+      this.log(`${reason}; the CODESYS window (pid ${this.child.pid}) is left open`);
       this.state = "dead";
       return;
     }

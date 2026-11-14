@@ -2,7 +2,9 @@
 
 # CODESYS MCP Toolkit
 
-**Let Claude read, write, compile and simulate Structured Text in your CODESYS V3.5 projects.**
+**Let Claude, or any MCP client, read, write, compile and simulate Structured Text in your CODESYS V3.5 projects.**
+
+English | [简体中文](README.zh-CN.md)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![npm](https://img.shields.io/npm/v/@codesys/mcp-toolkit)](https://www.npmjs.com/package/@codesys/mcp-toolkit)
@@ -18,7 +20,7 @@ open in the background and gives Claude, or any MCP client, direct access to
 it. Claude works on your real project with the real CODESYS compiler, and you
 can watch the code change as it happens.
 
-![The live workspace, showing a sample project with a change waiting for review](docs/images/workspace.png)
+![Claude builds a tank level controller in CODESYS: the live panel in the chat, the code compiled with 0 errors and five simulation tests passed, and the same function block in the CODESYS-style workspace, ready to review](docs/images/claude-and-codesys.png)
 
 ## Highlights
 
@@ -79,6 +81,9 @@ Claude Desktop:
 `--codesys-path` and `--codesys-profile` are optional. Without them the server
 uses the newest CODESYS install under Program Files and its newest profile.
 
+Using OpenCode, Cursor, Cline or another client, or a model such as DeepSeek or
+Qwen? See [Other clients and models](#other-clients-and-models).
+
 ### Try it
 
 > Create a project called `BlinkDemo.project`. Add a function block that toggles
@@ -125,6 +130,8 @@ the project tree, editor tabs, compile problems and a review list.
 From the panel you can **Accept** or **Revert** each change, compare it with
 the version you last reviewed, and **Pause Claude** while you look around.
 
+![The workspace: a PI controller function block with properties and an interface, changed by Claude and waiting for review](docs/images/workspace.png)
+
 The card needs a client that supports
 [MCP Apps](https://modelcontextprotocol.io/extensions/apps). In our testing
 Claude Desktop draws it in the Code tab but not in a normal chat
@@ -133,6 +140,56 @@ Ask Claude to open the workspace in your browser if you'd rather have it there;
 the browser never opens by itself.
 
 [More about the panel](docs/reference.md#live-panel)
+
+## Other clients and models
+
+The server works with any MCP client, not only Claude. For
+[OpenCode](https://opencode.ai), put this in `opencode.json` in your project
+folder (or in `~/.config/opencode/opencode.json`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "codesys": {
+      "type": "local",
+      "command": [
+        "codesys-mcp-tool",
+        "--codesys-path", "C:\\Program Files\\CODESYS 3.5.22.40\\CODESYS\\Common\\CODESYS.exe",
+        "--codesys-profile", "CODESYS V3.5 SP22 Patch 4",
+        "--workspace", "C:\\PLC\\Projects"
+      ],
+      "enabled": true
+    }
+  }
+}
+```
+
+`opencode mcp list` should then show `codesys` as connected. Clients that read
+an `mcpServers` file (Cursor, Cline, VS Code and others) take the same
+`command` and `args` as the Claude Desktop example above.
+
+Tested on 13 November 2026 with OpenCode 1.19.5 and CODESYS V3.5 SP22: each of
+these models created a project, read and changed `PLC_PRG`, compiled, listed
+libraries and devices, and ran the simulation, without help.
+
+| Model | Result |
+| --- | --- |
+| DeepSeek V4.1 Flash | All steps passed |
+| Qwen 3.6 Plus | All steps passed |
+| GLM 5.3 | All steps passed |
+| MiniMax M3 | All steps passed |
+
+![OpenCode with DeepSeek V4.1 Flash: a pump function block written, compiled and tested in CODESYS's simulation](docs/images/opencode-session.png)
+
+The live panel needs a client that shows MCP Apps cards (see
+[Live panel](#live-panel)). In other clients `open_sim_panel` does nothing
+visible; ask the model to open the workspace (`open_workspace`) to get the same
+view in your browser, or start the server with
+[`--show-window`](#watch-it-in-the-codesys-window) to watch the CODESYS window
+itself.
+
+![The workspace in the browser after the OpenCode session: PLC_PRG's changes, and the review list with Accept and Revert for each object](docs/images/workspace-review.png)
 
 ## Safety
 
@@ -166,6 +223,27 @@ the browser never opens by itself.
 | `--no-viewer` | Don't serve the browser workspace |
 | `--no-shared` | Run CODESYS in this process instead of the shared session |
 | `--attach <dir>` | Experimental: work in a CODESYS / Machine Expert window you already have open, instead of starting one. See [Working in an open window](#work-in-a-window-you-already-have-open-experimental) |
+| `--show-window` | Start CODESYS with its window instead of headless. See [Watch it in the CODESYS window](#watch-it-in-the-codesys-window) |
+
+### Watch it in the CODESYS window
+
+By default CODESYS runs headless. With `--show-window` the server starts it with
+its normal window, so you can see the project take shape (objects appear in the
+tree as the model creates them) in any MCP client.
+
+![CODESYS started with --show-window, after an OpenCode session created PumpDemo with FB_Pump](docs/images/codesys-window.png)
+
+While the server is connected, the window is for watching: the toolkit's script
+keeps running in it (that is what lets it answer CODESYS's prompts, such as a
+storage-format upgrade, the same way as headless), so CODESYS treats it as one
+long operation. The status bar says "Executing script"; its **Click here to
+CANCEL** link stops the toolkit's script, so leave it alone while you work with
+the model. When the server stops, the script ends and the window is yours to
+work in.
+
+The toolkit never closes the window: not when a call hangs or a dialog waits
+for an answer (answer it in the window), and not when the server stops. Close it
+yourself when you're done; the next call then starts a new one.
 
 ### Several CODESYS versions
 
@@ -221,6 +299,8 @@ MCP client ── stdio ──▶ codesys-mcp-tool (Node.js)
                             └─ fixed operation handlers (IronPython 2.7)
 ```
 
+With `--show-window`, CODESYS starts without `--noUI` and runs the same watcher.
+
 - **No generated code.** Requests are an operation name plus JSON arguments,
   handled by fixed functions in `watcher/mcp_ops.py`.
 - **Hang detection.** The watcher reports `busy` with a deadline. If CODESYS
@@ -238,8 +318,8 @@ MCP client ── stdio ──▶ codesys-mcp-tool (Node.js)
 | **CODESYS is still starting** | The first start after boot can take minutes. Check `codesys_status`, then try again. |
 | **`startup_failed`** or **`startup_timeout`** | Check the profile name and that CODESYS starts by hand. The error includes the last lines of `watcher.log`. |
 | **Library errors after `create_project`** ([#4](https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues/4)) | The default template is brought up to the running CODESYS, so its libraries should resolve. A template you pass yourself is used as it is. If libraries are still missing, install them with the CODESYS Library Repository. |
-| **`hung`** or **`timeout`** | CODESYS was restarted. Re-open the project. |
-| **`dialog`** | CODESYS opened a dialog, named in the error, that a session without a window can't answer. CODESYS was stopped and restarts on the next call. Do the same step once in the CODESYS window, answer the dialog there, and try again. |
+| **`hung`** or **`timeout`** | CODESYS was restarted. Re-open the project. With `--show-window` nothing is closed: check the window. |
+| **`dialog`** | CODESYS opened a dialog, named in the error, that a session without a window can't answer. CODESYS was stopped and restarts on the next call. Do the same step once in the CODESYS window, answer the dialog there, and try again. With `--show-window`, answer it in the window. |
 
 Each session folder keeps a `watcher.log`.
 

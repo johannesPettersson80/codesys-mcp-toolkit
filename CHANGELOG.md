@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-11-14
+
+### Added
+- `--show-window`: start CODESYS with its window instead of headless, to watch
+  the work in clients without the live panel (such as OpenCode). Prompts are
+  answered as when headless, and the toolkit never closes the window: not on a
+  hang, not when the server stops.
+- README: setup for OpenCode and other MCP clients, and the models tested with
+  OpenCode 1.19.5 on CODESYS SP22 (DeepSeek V4.1 Flash, Qwen 3.6 Plus, GLM 5.3,
+  MiniMax M3: all passed). New screenshots: Claude building and testing a
+  tank level controller next to the workspace (top of the README), an OpenCode
+  session, the browser workspace and the CODESYS window.
+- A Simplified Chinese README (`README.zh-CN.md`): setup for OpenCode and other
+  clients that work in China, an npmmirror install line, and the tested models.
+
 ## [2.1.2] - 2026-11-13
 
 ### Fixed

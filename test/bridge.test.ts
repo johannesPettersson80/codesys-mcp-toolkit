@@ -148,6 +148,59 @@ describe("CodesysBridge with the real watcher (fake scriptengine)", () => {
   });
 });
 
+describe("--show-window (CODESYS with its window)", () => {
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it("never closes the window on a hang, and says so when it stays unresponsive", async () => {
+    bridge = fakeBridge({ noUI: false, startupTimeoutMs: 5_000 });
+    expect(bridge.visible).toBe(true);
+    await bridge.call("project.open", { path: fakeProjectFile() });
+    const pid = bridge.health().pid!;
+    try {
+      const err = await bridge.call("object.write", { path: "PLC_PRG", implementation: "__HANG__" }, { timeoutMs: 800 }).catch((e) => e);
+      expect(["hung", "timeout"]).toContain((err as BridgeError).code);
+      expect((err as BridgeError).message).toMatch(/Nothing was closed/);
+      expect(alive(pid)).toBe(true);
+      // The next call waits for the same window instead of starting a second CODESYS.
+      const again = await bridge.call("ping").catch((e) => e);
+      expect(again).toMatchObject({ code: "window_unresponsive" });
+      expect(alive(pid)).toBe(true);
+      expect(bridge.health().pid).toBe(pid);
+    } finally {
+      try {
+        process.kill(pid);
+      } catch {
+        /* already gone */
+      }
+    }
+  }, 30_000);
+
+  it("stops the watcher but leaves the window to the user", async () => {
+    const logs: string[] = [];
+    bridge = fakeBridge({ noUI: false, log: (m) => logs.push(m) });
+    await bridge.start();
+    expect(await bridge.call<{ engine: string }>("ping")).toMatchObject({ engine: "fake" });
+    await bridge.stop();
+    expect(bridge.health().state).toBe("stopped");
+    expect(logs.join("\n")).toMatch(/stays open/);
+    expect(logs.join("\n")).not.toMatch(/killing CODESYS/);
+  });
+
+  it("still closes a window that never got ready", async () => {
+    const logs: string[] = [];
+    bridge = fakeBridge({ noUI: false, args: () => ["-c", "import time; time.sleep(30)"], startupTimeoutMs: 1_000, log: (m) => logs.push(m) });
+    await expect(bridge.start()).rejects.toMatchObject({ code: "startup_timeout" });
+    expect(logs.join("\n")).toMatch(/killing CODESYS \d+: startup timeout/);
+  }, 15_000);
+});
+
 describe("start-up hints", () => {
   it("explain a CODESYS install without the scripting add-on", () => {
     expect(startupHint("The command line option 'runscript' has been set. However, there is no script engine implementation available.")).toMatch(/add the "CODESYS Scripting" add-on/);

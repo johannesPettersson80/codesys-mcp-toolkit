@@ -2,6 +2,10 @@
 # codesys-mcp-toolkit v2 watcher.
 #
 # Started by the MCP server as:  CODESYS.exe --profile="..." --noUI --runscript="<dir>/watcher.py"
+# (with --show-window: no --noUI and CODESYS_MCP_UI=1. The same blocking loop runs: CODESYS
+# applies script_prompt_handling only while a script runs, so a timer that runs requests after
+# the script returned would show every prompt as a dialog. system.delay() serves the window's
+# message loop, so the window keeps painting while the loop waits.)
 # Environment (inherited from the server):
 #   CODESYS_MCP_DIR         session folder (requests/, results/, heartbeat.json, ready.json, watcher.log)
 #   CODESYS_MCP_SCRIPTS     folder holding this file and its modules
@@ -97,20 +101,24 @@ def scripting_version():
     return m.group(1) if m else None
 
 
-def find_dialog():
+def find_dialog(ui=False):
     # A session without a UI has no open forms and no main window (checked on SP21 and
     # SP22), so a modal form or a main window means CODESYS is waiting for an answer.
+    # With a window (ui), only a modal form counts.
     from System.Windows.Forms import Application
     from System.Diagnostics import Process
     for f in Application.OpenForms:
         if f.Modal:
             return to_text(f.Text) or "(untitled)"
+    if ui:
+        return None
     return to_text(Process.GetCurrentProcess().MainWindowTitle) or None
 
 
-def watch_dialogs():
+def watch_dialogs(ui=False):
     # Runs beside the request loop. A dialog blocks that loop for good and nobody can
     # answer it in a session without a window, so tell the server (dialog.json).
+    # With a window the user can answer it; the server is still told, so the call ends.
     import clr
     clr.AddReference("System.Windows.Forms")
     title, since, reported, failed = None, 0.0, False, False
@@ -120,7 +128,7 @@ def watch_dialogs():
         current = None
         if busy is not None and now() - busy > 2.0:
             try:
-                current = find_dialog()
+                current = find_dialog(ui)
             except Exception as e:  # e.g. the form list changed while it was read
                 if not failed:
                     log("dialog check failed: %s" % to_text(e))
@@ -137,12 +145,12 @@ def watch_dialogs():
             reported = True
 
 
-def start_dialog_watch():
+def start_dialog_watch(ui=False):
     import threading
 
     def run():
         try:
-            watch_dialogs()
+            watch_dialogs(ui)
         except BaseException as e:
             log("dialog watch stopped: %s" % to_text(e))
     t = threading.Thread(target=run)
@@ -216,20 +224,20 @@ def handle(ops_mod, fname):
     return not stop
 
 
-def main():
+def main(ui=False):
     for d in (REQ_DIR, RES_DIR):
         if not os.path.isdir(d):
             os.makedirs(d)
-    log("watcher starting pid=%s parent=%s python=%s" % (PID, PARENT_PID, sys.version.split()[0]))
+    log("watcher starting pid=%s parent=%s python=%s%s" % (PID, PARENT_PID, sys.version.split()[0], " (window shown)" if ui else ""))
     import scriptengine as se
     import mcp_ops
     import mcp_sim  # noqa: F401 (adds its operations to mcp_ops.OPS)
     prompts = setup_prompts(se)
     log(prompts)
     if not hasattr(se, "FAKE"):
-        start_dialog_watch()
+        start_dialog_watch(ui)
     beat("idle")
-    write_json_atomic(READY, {"pid": PID, "ts": now(), "python": sys.version.split()[0], "prompts": prompts, "scripting": scripting_version()})
+    write_json_atomic(READY, {"pid": PID, "ts": now(), "python": sys.version.split()[0], "prompts": prompts, "scripting": scripting_version(), "window": ui})
     last_parent_check = 0.0
     while True:
         t = now()
@@ -317,7 +325,7 @@ try:
     if os.environ.get("CODESYS_MCP_ATTACH") == "1":
         main_attach()
     else:
-        main()
+        main(ui=os.environ.get("CODESYS_MCP_UI") == "1")
 except BaseException:
     log("watcher crashed: " + traceback.format_exc())
     try:
