@@ -84,6 +84,26 @@ Then try these in order, on a copy of a project, and note which work:
 for CODESYS's `Standard.project`. Pass `template` as the path of a project to
 copy instead.
 
+## 5. The features beyond plain ST
+
+The toolkit's newer features (HMI export, alarms, signatures, cross-references,
+debugging, trace, device parameters, library pinning) use CODESYS's own .NET
+services, and Machine Expert may ship a different set of them. `codesys_status`
+checks which ones this program has: after a project is open, it lists them under
+"Features", with what a missing one affects. Please send that list.
+
+Then, on a copy of a project, try what the list says is there:
+
+| Step | Action | What it tells us |
+| --- | --- | --- |
+| 8 | `get_signature` on a library FB you use | Library interfaces can be read |
+| 9 | `find_references` on a variable | Cross-references work |
+| 10 | `find_library` with part of a library name, then `pin_library` on a reference | The library repository is readable, and references can be pinned |
+| 11 | `breakpoint_set`, `debug_status`, `debug_step`, `watch` (simulation running) | Debugging works on this controller |
+| 12 | `device_parameters` on a device | Device parameters can be read |
+| 13 | `hmi_save_screen`, then `hmi_export_codesys` | Native visualizations can be built (needs CODESYS Visualization) |
+| 14 | `project_report`, `export_sources` | The handover report and the text export work |
+
 ## What to send back
 
 - Machine Expert version, and the program path (and profile name, if any) you used.
