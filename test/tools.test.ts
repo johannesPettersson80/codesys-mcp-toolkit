@@ -86,6 +86,7 @@ describe("MCP tools over the real watcher", () => {
         "hmi_delete_symbol",
         "hmi_export_codesys",
         "hmi_list",
+        "hmi_pid",
         "hmi_save_screen",
         "hmi_save_symbol",
         "hmi_screenshot",

@@ -11,7 +11,8 @@ import { currentCodesysSim } from "../codesys/simulation.js";
 import { HISTORY, historyCode, installHistory } from "../codesys/alarm-history.js";
 import { listAlarms } from "../codesys/alarm-tools.js";
 import type { AppContext } from "../tools.js";
-import { findBrowser, hmiScript, previewValues, screenshot, staticPage, symbolSheet, type HmiService } from "./service.js";
+import { findBrowser, hmiScript, previewValues, printPdf, screenshot, staticPage, symbolSheet, type HmiService } from "./service.js";
+import { PID_SIZE, pidSheet, processOf } from "./pid.js";
 import { BUILTIN_SYMBOLS, importSvg, svgProblems, symbolSchema, type SymbolDef } from "./symbols.js";
 import { nativePlan } from "./native.js";
 import { canvasOf, tileBox } from "./render.js";
@@ -34,6 +35,7 @@ Variables are full instance paths: 'PLC_PRG.fbPump.xRunning', 'GVL.rLevel'. band
 Look: a calm, flat design system shared by the browser and CODESYS: colour means state (running, warning, alarm, manual) or what the operator can act on, never decoration. theme 'light' (default), 'dark' or 'contrast' (black and white, strong colours: bright light, poor eyesight), the same on every page; accent: '#e30613' puts the company colour on the current page, set-points and primary buttons (text on it turns black or white to stay readable). Every card can have an icon before its title (icon: 'temperature', 'pressure', 'flow', 'level', 'speed', 'power', 'energy', 'time', 'count', 'pump', 'valve', 'heater', 'tank', 'machine', 'alarm', 'info', 'settings', 'recipe', 'trend', ...); titles in sentence case (cards show them in small capitals). The top bar shows the screen's title and info: up to 4 fields such as {label: 'Order', text: '4711'} or {label: 'Produced', value: 'PLC_PRG.rLitres', unit: 'l'}. With more than one page a navigation rail on the left links them, each with the page's icon (screen icon: 'home', 'process', 'trend', 'alarm', 'recipe', 'settings'). Equipment state is three separate things, each with its own sign (never a coloured or grey-filled symbol, never words): the run state before the name (▶ running, ■ stopped; driven equipment: running on pumps and fans, on on symbols and stations), a valve's position as its fill (closed filled, open hollow, as on a P&ID), the mode after the name (manual: a hand in Manual, nothing in Auto) and the condition at the symbol's corner (warning: an amber triangle, fault: a red alarm circle, which wins; nothing when OK). Station tiles use the same signs and turn their top edge amber or red for a warning or alarm. A value that belongs to the equipment (a control valve's opening, a pump's speed) goes on it as value/unit/decimals, shown under its name, not as a separate sensor. Pipes with flow turn darker; nothing moves.
 access: {min: 'Maintenance'} on a tile lets only that group and up operate it in CODESYS (after Login; lower groups and nobody logged in see it greyed out, or not at all with below: 'hide'). Groups: Operator, Maintenance, Admin.
 Make the diagram a process: every piece of equipment on a pipe (in and out), tanks fed and emptied, a heat exchanger with both circuits (product in/out, heating medium top/bottom), instruments on the line or vessel they measure (a pressure switch through a short pipe to a junction), a motor's shaft against the machine it drives, line ends at the diagram's edge with a label (Feed, Steam, To filling); hmi_save_screen lists what doesn't fit.
+For documentation, hmi_pid exports a screen's process diagram as an engineering P&ID sheet (PDF, SVG or PNG).
 Good screens: the machine's state and commands in the frame (machine), an overview with the line of stations across the top and key values (with their scale and set-point) in a row of equal cards, alarms and status below; the process diagram large on its own page; titles short; tag names on symbols (P-101, T-101).`;
 
 export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: HmiService, run: (fn: () => Promise<string>) => Promise<ActionResult>): void {
@@ -107,6 +109,49 @@ export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: Hm
         return { content: [{ type: "image", data: png.toString("base64"), mimeType: "image/png" }, { type: "text", text: `Screen '${s.name}' (${s.size}) with ${source}.` }] };
       } catch (e) {
         return text(`Screenshot failed: ${(e as Error).message}`, true);
+      }
+    },
+  );
+
+  reg(
+    "hmi_pid",
+    {
+      description:
+        "Export a screen's process diagram as an engineering P&ID drawing for documentation: the same diagram drawn black on white (ISO 10628-2 symbols, ISA-5.1 instruments, line names, nothing live) on an A3 sheet with a frame, a legend of the symbols it uses and a title block. Saved next to the project as <project>.<screen>.pid.pdf (or .svg, .png); a picture of it comes back to check.",
+      inputSchema: z.object({
+        screen: z.string().optional().describe("Screen name (default: the first)"),
+        diagram: z.string().optional().describe("The process card's title, when the screen has more than one"),
+        drawing: z.string().optional().describe("Drawing number for the title block, e.g. 'PID-200-01'"),
+        revision: z.string().optional().describe("Revision, e.g. 'B' (default A)"),
+        date: z.string().optional().describe("Date in the title block (default today)"),
+        format: z.enum(["pdf", "svg", "png"]).default("pdf"),
+      }),
+    },
+    async ({ screen: name, diagram, drawing, revision, date, format }) => {
+      const s = hmi.screen(name);
+      if (!s) return text(name ? `No screen named '${name}'. Screens: ${hmi.screens().map((x) => x.name).join(", ") || "none"}.` : "This project has no HMI screens yet: create one with hmi_save_screen.", true);
+      const w = processOf(s, diagram);
+      if (!w) return text(`Screen '${s.name}' has no process diagram${diagram ? ` titled '${diagram}'` : ""}.`, true);
+      const file = hmi.file();
+      if (!file) return text("Open a project first: the drawing is saved next to it.", true);
+      const { svg, symbols } = pidSheet(s, w, hmi.library(), { drawing, revision, date });
+      const base = file.replace(/\.hmi\.json$/, `.${s.name}.pid`);
+      const page = (paper: boolean) => `<!doctype html><html><head><meta charset="utf-8"><style>${paper ? "@page{size:420mm 297mm;margin:0}svg{width:420mm;height:297mm}" : ""}html,body{margin:0}svg{display:block}</style></head><body>${svg}</body></html>`;
+      const out = `${base}.${format}`;
+      try {
+        if (format === "svg") writeFileSync(out, svg, "utf8");
+        else if (!findBrowser()) return text("PDF and PNG need Microsoft Edge or Google Chrome, and neither was found: use format 'svg'.", true);
+        else writeFileSync(out, format === "pdf" ? await printPdf(page(true)) : await screenshot(page(false), undefined, PID_SIZE));
+      } catch (e) {
+        return text(`The P&ID export failed: ${(e as Error).message}`, true);
+      }
+      const note = `Saved the P&ID of '${s.name}' as ${out} (A3; legend: ${symbols.join(", ")}).`;
+      if (!findBrowser()) return text(note);
+      try {
+        const png = await screenshot(page(false), undefined, PID_SIZE);
+        return { content: [{ type: "image", data: png.toString("base64"), mimeType: "image/png" }, { type: "text", text: note }] };
+      } catch {
+        return text(note);
       }
     },
   );

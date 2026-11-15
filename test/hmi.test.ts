@@ -10,6 +10,7 @@ import { renderScreen } from "../src/hmi/render.js";
 import { accessRights, GAUGE_STEPS, nativePlan, onColor, paletteFor, type NativeElement } from "../src/hmi/native.js";
 import { connectionWarnings, labelSpots, meaningWarnings, overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
 import { TEMPLATES } from "../src/hmi/templates.js";
+import { BUILTIN_SYMBOLS } from "../src/hmi/symbols.js";
 import { canvasOf, tileBox } from "../src/hmi/render.js";
 import type { ProcessItem } from "../src/hmi/spec.js";
 import { findBrowser } from "../src/hmi/service.js";
@@ -291,6 +292,46 @@ describe("texts on a process diagram", () => {
     expect(railLines("Alarms", 64, 11)).toEqual([[0, "Alarms", 11]]);
     const [, , fs] = railLines("Wärmebehandlungslinie", 64, 11)[0]!;
     expect(fs).toBeLessThan(11);
+  });
+});
+
+describe("P&ID sheet (hmi_pid)", () => {
+  const s = screenSchema.parse({
+    name: "Process",
+    title: "Heat treatment",
+    subtitle: "Line B",
+    widgets: [
+      {
+        type: "process",
+        title: "Process",
+        at: [1, 1, 12, 8],
+        items: [
+          { type: "tank", x: 10, y: 20, w: 12, h: 50, level: "PLC_PRG.rLevel", label: "T-1" },
+          { type: "pump", x: 40, y: 75, size: 8, running: "PLC_PRG.xRun", label: "P-1" },
+          { type: "symbol", symbol: "control_valve", x: 70, y: 75, size: 8, on: "PLC_PRG.xOpen", value: "PLC_PRG.rPos", unit: "%", label: "TCV-1" },
+          { type: "sensor", x: 55, y: 60, value: "PLC_PRG.rTemp", label: "TT-1" },
+          { type: "pipe", from: "T-1.right", to: "P-1.in" },
+          { type: "pipe", from: "P-1.out", to: "TCV-1.in" },
+          { type: "pipe", from: "TCV-1.out", to: [100, 75], label: "Out" },
+          { type: "pipe", from: "TT-1.c", to: "TCV-1.actuator", signal: true },
+        ],
+      },
+    ],
+  });
+
+  it("draws the diagram on an A3 sheet with a legend of what it uses and a title block, nothing live", async () => {
+    const { pidSheet, processOf, PID_SIZE } = await import("../src/hmi/pid.js");
+    const w = processOf(s)!;
+    expect(processOf(s, "process")).toBe(w);
+    expect(processOf(s, "Other")).toBeUndefined();
+    const { svg, symbols } = pidSheet(s, w, BUILTIN_SYMBOLS, { drawing: "PID-1", revision: "B", date: "2026-11-15" });
+    expect(symbols).toEqual(["Vessel", "Centrifugal pump", "Control valve", "Instrument (ISA-5.1)", "Process line", "Signal line"]);
+    expect(svg).toMatch(new RegExp(`^<svg xmlns="http://www.w3.org/2000/svg" class="pid" width="${PID_SIZE.w}" height="${PID_SIZE.h}"`));
+    for (const t of ["Heat treatment", "Line B", "PID-1", ">B<", "2026-11-15", "HMI screen &#39;Process&#39;", "LEGEND"]) expect(svg).toContain(t);
+    // A drawing, not an HMI: values, state signs and levels are hidden, valves hollow.
+    expect(svg).toMatch(/\.pid \.tank-liq,[^{]*\.pid \.rs,[^{]*\.pid \.p-val[^{]*\{display:none\}/);
+    expect(svg).toContain(".pid .sym.vlv{--state:#fff}");
+    expect(svg).not.toContain("data-b=");
   });
 });
 
@@ -578,6 +619,17 @@ describe("HMI actions over MCP (fake CODESYS)", () => {
     expect(Buffer.from(r.images[0]!.data!, "base64").subarray(1, 4).toString()).toBe("PNG");
     expect(r.text).toMatch(/example values/);
   }, 90_000);
+
+  it("exports the process diagram as a P&ID sheet next to the project", async () => {
+    const r = await call("hmi_pid", { screen: "Overview", drawing: "PID-100-01", format: "svg" });
+    expect(r.isError).toBe(false);
+    const file = /as (.+\.pid\.svg) \(A3/.exec(r.text)![1]!;
+    expect(file).toMatch(/\.Overview\.pid\.svg$/);
+    const svg = readFileSync(file, "utf8");
+    expect(svg).toContain("PID-100-01");
+    expect(svg).toContain("Centrifugal pump");
+    expect((await call("hmi_pid", { screen: "Overview", diagram: "Nope" })).text).toMatch(/has no process diagram titled 'Nope'/);
+  });
 
   it("saves the project's own symbol, refuses unsafe SVG, and uses it on a screen", async () => {
     const bad = await call("hmi_save_symbol", { name: "centrifuge", svg: `<circle r="4" onclick="x()"/><script>1</script>` });

@@ -296,6 +296,28 @@ export function findBrowser(): string | undefined {
   return cands.find((c) => existsSync(c));
 }
 
+/** Prints a page to PDF with a headless browser (the page sets its paper size with CSS @page); returns the PDF bytes. */
+export async function printPdf(html: string, browser = findBrowser()): Promise<Buffer> {
+  if (!browser) throw new Error("No Edge or Chrome found to print a PDF.");
+  const dir = mkdtempSync(join(tmpdir(), "cmcp-pdf-"));
+  try {
+    const page = join(dir, "page.html");
+    const pdf = join(dir, "page.pdf");
+    writeFileSync(page, html, "utf8");
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        browser,
+        ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", `--user-data-dir=${join(dir, "profile")}`, "--no-pdf-header-footer", "--virtual-time-budget=4000", `--print-to-pdf=${pdf}`, `file:///${page.replace(/\\/g, "/")}`],
+        { timeout: 40_000, windowsHide: true },
+        (err) => (existsSync(pdf) ? resolve() : reject(err ?? new Error("the browser wrote no PDF"))),
+      );
+    });
+    return readFileSync(pdf);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** Renders a page to PNG with a headless browser; returns the PNG bytes. */
 export async function screenshot(html: string, browser = findBrowser(), size: { w: number; h: number } = { w: 1280, h: 720 }): Promise<Buffer> {
   if (!browser) throw new Error("No Edge or Chrome found for screenshots.");

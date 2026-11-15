@@ -400,6 +400,13 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
   }
 }
 
+/** A process diagram's SVG alone, without live bindings or faceplates (for the P&ID sheet), for a body of width x height pixels. */
+export function processDrawing(w: Extract<Widget, { type: "process" }>, width: number, height: number, lib: SymbolLib): string {
+  let uid = 0;
+  // The body as the card would give it (widget() takes the card's padding off again).
+  return widget({ ...w, title: undefined, icon: undefined }, { w: width + 32, h: height + 28 }, 1, () => "", (p) => `pid${p}${++uid}`, () => "", lib);
+}
+
 type Station = Extract<Widget, { type: "line" }>["stations"][number];
 
 /** Where a line widget's tiles go, in pixels of the card body (shared with the CODESYS export). */
