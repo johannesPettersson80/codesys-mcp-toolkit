@@ -119,6 +119,56 @@ describe("HMI structure", () => {
   });
 });
 
+describe("station line (process overview)", () => {
+  const LINE = {
+    name: "Overview",
+    title: "Line",
+    widgets: [
+      {
+        type: "line",
+        at: [1, 1, 12, 4],
+        stations: [
+          { name: "Feed", tag: "T-201", symbol: "tank", value: "PLC_PRG.rLevel", unit: "%", screen: "Process" },
+          { name: "Pump", symbol: "pump", on: "PLC_PRG.xPump", fault: "PLC_PRG.xFault" },
+          { name: "Heating", symbol: "heat_exchanger", on: "PLC_PRG.xHeat", feed: { name: "Steam", symbol: "control_valve", on: "PLC_PRG.xSteam" } },
+          { name: "Filling", symbol: "valve", on: "PLC_PRG.xFill" },
+        ],
+      },
+    ],
+  };
+
+  it("lists the stations' and feeds' variables", () => {
+    expect(screenVariables(screenSchema.parse(LINE)).sort()).toEqual(["PLC_PRG.rLevel", "PLC_PRG.xFault", "PLC_PRG.xFill", "PLC_PRG.xHeat", "PLC_PRG.xPump", "PLC_PRG.xSteam"]);
+  });
+
+  it("draws a tile per station on the product path, the feed above, state in words, a tap to the page", () => {
+    const { html, bindings } = renderScreen(screenSchema.parse(LINE));
+    expect(html.match(/class="stn[ "]/g)).toHaveLength(5);
+    expect(html).toContain('data-nav="Process"');
+    expect(html).toContain('class="ln-arrow"');
+    // A valve says OPEN/CLOSED, the rest RUNNING/STOPPED; a station without a state has no word.
+    expect(html).toContain(">OPEN<");
+    expect(html).toContain(">RUNNING<");
+    expect(html.match(/class="stn-st"/g)).toHaveLength(4);
+    expect(bindings).toContainEqual({ kind: "fault", v: "PLC_PRG.xFault" });
+    expect(bindings).toContainEqual({ kind: "text", v: "PLC_PRG.rLevel", decimals: 1 });
+    // Pictograms: the built-in tank and the library's heat exchanger.
+    expect(html).toContain("M30 22Q30 10 50 10");
+    expect(html).toContain("M10 50H30L50 30V70L70 50H90");
+  });
+
+  it("keeps the tiles inside the card on every panel size", async () => {
+    const { lineLayout } = await import("../src/hmi/render.js");
+    for (const [w, h, n] of [[1216, 220, 8], [600, 160, 12], [760, 120, 4]] as const) {
+      const L = lineLayout({ stations: Array.from({ length: n }, (_, i) => (i === 1 ? { feed: {} } : {})) }, w, h, 1);
+      expect(L.xs[0]!).toBeGreaterThanOrEqual(0);
+      expect(L.xs[n - 1]! + L.tw).toBeLessThanOrEqual(w);
+      expect(L.fy).toBeGreaterThanOrEqual(-0.01);
+      expect(L.y + L.th).toBeLessThanOrEqual(h + 0.01);
+    }
+  });
+});
+
 describe("process checks: is the diagram a process?", () => {
   const P = (items: unknown[]) => items as ProcessItem[];
   it("reports floating equipment, missing inlets and outlets, a one-circuit heat exchanger and stray instruments", () => {

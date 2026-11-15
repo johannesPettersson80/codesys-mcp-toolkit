@@ -103,6 +103,19 @@ const processItem = z.discriminatedUnion("type", [
   z.object({ type: z.literal("label"), x: num, y: num, text: z.string() }),
 ]);
 
+/** A station on a line widget. */
+const station = z.object({
+  name: z.string().describe("Short name, e.g. 'Heating'"),
+  tag: z.string().optional().describe("Equipment tag, e.g. 'E-201'"),
+  symbol: z.string().optional().describe("Pictogram: 'tank', 'pump', 'valve', 'fan' or a symbol from the library, e.g. 'heat_exchanger'"),
+  on: v.optional().describe("BOOL: running (or open, for a valve)"),
+  fault: v.optional().describe("BOOL: the station has an alarm"),
+  value: v.optional().describe("The station's key value"),
+  unit: z.string().optional(),
+  decimals: z.number().int().optional(),
+  screen: z.string().optional().describe("The page a tap opens (its name)"),
+});
+
 export const widgetSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("value"),
@@ -185,6 +198,13 @@ export const widgetSchema = z.discriminatedUnion("type", [
     })
     .describe("Recipes made with create_recipes: the active one, and Apply / Save per recipe"),
   z.object({ type: z.literal("process"), ...base, items: z.array(processItem).min(1) }),
+  z
+    .object({
+      type: z.literal("line"),
+      ...base,
+      stations: z.array(station.extend({ feed: station.optional().describe("A supply joining this station from above, e.g. steam or a feeder") })).min(2).max(12).describe("The stations in the product's order, left to right"),
+    })
+    .describe("The process as station tiles on a product path (an overview, not a P&ID): each tile shows its pictogram, key value and state in words, and opens its page when tapped"),
 ]);
 
 const modeOf = {
@@ -297,6 +317,9 @@ export function screenVariables(s: Screen): string[] {
         break;
       case "recipe":
         for (const m of ["iApply", "iSave", "sActive"]) add(`PRG_Recipe_${w.recipe}.${m}`);
+        break;
+      case "line":
+        for (const s of w.stations) for (const x of [s, s.feed]) if (x) [x.on, x.fault, x.value].forEach(add);
         break;
       case "process":
         for (const p of w.items) {

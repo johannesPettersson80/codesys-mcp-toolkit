@@ -366,6 +366,8 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
         .join("");
       return `<div class="rcp"><div class="rcp-active">Active <b ${bind({ kind: "text", v: `${prg}.sActive` })}>–</b></div><ul class="rcp-list">${rows}</ul></div>`;
     }
+    case "line":
+      return lineHtml(w, bodyW, bodyH, k, bind, lib);
     case "process": {
       const vw = 100;
       const vh = r1((100 * Math.max(60, bodyH)) / Math.max(60, box.w - 24));
@@ -396,6 +398,68 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
       return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id, face, lib, spots, all)).join("")}${names.join("")}</svg>`;
     }
   }
+}
+
+type Station = Extract<Widget, { type: "line" }>["stations"][number];
+
+/** Where a line widget's tiles go, in pixels of the card body (shared with the CODESYS export). */
+export function lineLayout(w: { stations: { feed?: unknown }[] }, bodyW: number, bodyH: number, k: number) {
+  const n = w.stations.length;
+  const feeds = w.stations.some((s) => s.feed);
+  const minGap = 14 * k;
+  const tw = Math.min(124 * k, (bodyW - 2 * minGap - (n - 1) * minGap) / n);
+  // Spread the tiles over the width, with the path showing between them (not too far apart).
+  const gap = Math.min(64 * k, (bodyW - 2 * minGap - n * tw) / Math.max(1, n - 1));
+  const x0 = (bodyW - n * tw - (n - 1) * gap) / 2;
+  const conn = 16 * k;
+  const room = feeds ? (bodyH - conn) / 1.52 : bodyH;
+  const th = Math.min(156 * k, room);
+  const fh = feeds ? th * 0.52 : 0;
+  const top = (bodyH - th - (feeds ? fh + conn : 0)) / 2;
+  const y = top + (feeds ? fh + conn : 0);
+  return { tw, th, fh, gap, x0, y, fy: top, conn, pathY: y + th * 0.5, xs: w.stations.map((_, i) => x0 + i * (tw + gap)) };
+}
+
+/** A station's pictogram in a 100x100 box: tank, pump, valve or fan, or a symbol from the library. */
+function pictogram(name: string | undefined, lib: SymbolLib): string {
+  if (!name) return "";
+  const body = `fill="var(--state)" stroke="var(--line)"`;
+  const builtin: Record<string, string> = {
+    // ISO 10628-2: a vessel with dished ends, the centrifugal pump (2322), the valve (2101), the fan (X8164).
+    tank: `<path d="M30 22Q30 10 50 10Q70 10 70 22V78Q70 90 50 90Q30 90 30 78Z" ${body}/>`,
+    pump: `<circle cx="50" cy="50" r="36" ${body}/><path d="M50 14L86 50L50 86M14 50H86" fill="none" stroke="var(--line)" stroke-linejoin="round"/>`,
+    valve: `<path d="M12 31L50 50L12 69ZM88 31L50 50L88 69Z" ${body} stroke-linejoin="round"/>`,
+    fan: `<circle cx="50" cy="50" r="36" ${body}/><path d="M24.5 24.5L50 50L24.5 75.5M50 50H86" fill="none" stroke="var(--line)" stroke-linejoin="round"/>`,
+  };
+  const b = builtin[name.toLowerCase()];
+  if (b) return b;
+  const f = findSymbol(lib, name);
+  if (!f) return "";
+  const [key, d] = f;
+  const [vw, vh] = d.viewBox;
+  return `<g transform="translate(50 50)">${symbolMarkup(key, d, vw >= vh ? 84 : (84 * vw) / vh)}</g>`;
+}
+
+/** The process as station tiles on a product path (Coperion, Kiefel): name, pictogram, key value, state in words. */
+function lineHtml(w: Extract<Widget, { type: "line" }>, bodyW: number, bodyH: number, k: number, bind: Bind, lib: SymbolLib): string {
+  const L = lineLayout(w, bodyW, bodyH, k);
+  const tile = (s: Station, x: number, y: number, h: number, small: boolean) => {
+    const valve = /valve/i.test(s.symbol ?? "");
+    const pic = pictogram(s.symbol, lib);
+    const word = s.on ? `<span class="stn-st"><span class="w-on">${valve ? "OPEN" : "RUNNING"}</span><span class="w-off">${valve ? "CLOSED" : "STOPPED"}</span></span>` : "";
+    const value = small ? "" : `<span class="stn-v">${s.value ? `<b ${bind({ kind: "text", v: s.value, decimals: s.decimals ?? 1 })}>–</b>${s.unit ? `<span class="stn-u">${esc(s.unit)}</span>` : ""}` : ""}</span>`;
+    const inner = `<span class="stn-name">${esc(s.name)}</span>${s.tag && !small ? `<span class="stn-tag">${esc(s.tag)}</span>` : ""}${pic ? `<svg class="stn-pic" viewBox="0 0 100 100">${pic}</svg>` : ""}${value}${word}<span class="stn-fault">1</span>`;
+    const run = s.on ? ` ${bind({ kind: "on", v: s.on })}` : "";
+    const nav = s.screen ? ` data-nav="${esc(s.screen)}"` : "";
+    const st = `<div class="stn${s.on ? "" : " nostat"}${small ? " small" : ""}${s.screen ? " link" : ""}"${run}${nav} style="left:${r1(x)}px;top:${r1(y)}px;width:${r1(L.tw)}px;height:${r1(h)}px"${s.screen ? ` title="Open ${esc(s.screen)}"` : ""}>${inner}</div>`;
+    return s.fault ? `<div class="stn-al" ${bind({ kind: "fault", v: s.fault })}>${st}</div>` : st;
+  };
+  // The product path: in at the left edge, through every tile, out with an arrow at the right.
+  const py = r1(L.pathY), end = r1(bodyW - 2 * k);
+  const path = `<path class="ln-path" d="M0 ${py}H${end}"/><path class="ln-arrow" d="M${end} ${py}l${r1(-9 * k)} ${r1(-5 * k)}v${r1(10 * k)}z"/>`;
+  const feeds = w.stations.map((s, i) => (s.feed ? `<path class="ln-path" d="M${r1(L.xs[i]! + L.tw / 2)} ${r1(L.fy + L.fh)}V${r1(L.y)}"/>` : "")).join("");
+  const tiles = w.stations.map((s, i) => tile(s, L.xs[i]!, L.y, L.th, false) + (s.feed ? tile(s.feed, L.xs[i]!, L.fy, L.fh, true) : "")).join("");
+  return `<div class="ln"><svg class="ln-svg" width="${r1(bodyW)}" height="${r1(bodyH)}">${path}${feeds}</svg>${tiles}</div>`;
 }
 
 /** An ISA-5.1 tag: function letters and a loop number, e.g. 'TT-201', 'LSH201'. */
@@ -750,6 +814,20 @@ export const HMI_CSS = String.raw`
 .st-word{font-size:1.5px;font-weight:700;letter-spacing:.06em;fill:var(--text2)}.st-word .w-on{display:none}.on .st-word .w-on,.on.st-word .w-on{display:inline}.on .st-word .w-off,.on.st-word .w-off{display:none}
 .sym .spin{transform-box:fill-box;transform-origin:center}.sym.on .spin{animation:spin 1.2s linear infinite}
 .clickable:hover .sym{filter:drop-shadow(0 0 1.5px var(--accent))}
+.ln{position:absolute;inset:0}.ln-svg{position:absolute;left:0;top:0;overflow:visible}
+.ln-path{fill:none;stroke:var(--pipe);stroke-width:calc(3px*var(--k))}.ln-arrow{fill:var(--pipe)}
+.stn{position:absolute;display:flex;flex-direction:column;align-items:center;gap:calc(1px*var(--k));padding:calc(8px*var(--k)) calc(6px*var(--k)) calc(7px*var(--k));background:var(--surface2);border:1px solid var(--line);border-top:calc(3px*var(--k)) solid var(--ctl);border-radius:calc(3px*var(--k));text-align:center;overflow:hidden}
+.stn.on{border-top-color:var(--accent)}.stn-pic{--state:var(--equip);--line:var(--equip-line);--body:var(--surface)}.stn.on .stn-pic{--state:var(--equip-on);--line:var(--equip-line-on)}.stn.nostat .stn-pic{--state:var(--surface)}
+.stn-al.fault .stn{border-top-color:var(--alarm)}
+.stn.link{cursor:pointer}.stn.link:hover{border-color:var(--accent);border-top-color:var(--accent)}
+.stn-name{font-size:var(--f-small);font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.stn-tag{font-size:var(--f-tiny);color:var(--muted);line-height:1}
+.stn>*{flex-shrink:0}.stn-pic{flex:0 1 auto;min-height:0;width:100%;height:calc(38px*var(--k));margin:calc(4px*var(--k)) 0 calc(2px*var(--k));overflow:visible}.stn-pic *{stroke-width:2px;vector-effect:non-scaling-stroke}
+.stn-v{display:flex;align-items:baseline;min-height:calc(24px*var(--k));gap:calc(3px*var(--k));font-variant-numeric:tabular-nums}.stn-v b{font-size:calc(18px*var(--k));font-weight:400}.stn-u{font-size:var(--f-tiny);color:var(--muted)}
+.stn-st{margin-top:auto;font-size:calc(10px*var(--k));font-weight:700;letter-spacing:.06em;color:var(--text2)}.stn-st .w-on{display:none}.stn.on .stn-st .w-on{display:inline}.stn.on .stn-st .w-off{display:none}
+.stn-fault{display:none;position:absolute;right:calc(4px*var(--k));top:calc(4px*var(--k));width:calc(16px*var(--k));height:calc(16px*var(--k));background:var(--alarm);color:var(--on-alarm);font-size:calc(11px*var(--k));font-weight:700;line-height:calc(16px*var(--k));border-radius:2px}
+.stn-al.fault .stn-fault{display:block;animation:blink 1s steps(2,jump-none) infinite}
+.stn.small{padding-top:calc(5px*var(--k));padding-bottom:calc(5px*var(--k))}.stn.small .stn-pic{height:calc(24px*var(--k));margin:calc(2px*var(--k)) 0}
 .valve-body{fill:var(--equip);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke;stroke-linejoin:round;transition:fill .3s}
 .valve.on .valve-body{fill:var(--equip-on)}
 .sen-box{fill:var(--surface);stroke:var(--line);stroke-width:1px;vector-effect:non-scaling-stroke}
