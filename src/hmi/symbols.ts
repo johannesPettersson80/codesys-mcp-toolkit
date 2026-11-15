@@ -163,6 +163,31 @@ BUILTIN_SYMBOLS.pressure_switch = def(
   "Pressure switch or gauge as an ISA-5.1 instrument bubble; its label is the tag (e.g. 'PSH-201'). Better: {type: 'instrument', tag: 'PSH-201', at: [x, y] on the line}",
 );
 
+/**
+ * Station pictograms (line widget) for the process items that aren't library symbols: a vessel
+ * with dished ends, the centrifugal pump (ISO 10628-2 2322), the valve (2101) and the fan (X8164).
+ */
+export const PICTOGRAMS: SymbolLib = {
+  tank: def(`<path d="M30 22Q30 10 50 10Q70 10 70 22V78Q70 90 50 90Q30 90 30 78Z" fill="var(--state)" ${OUT}/>`),
+  pump: def(`<circle cx="50" cy="50" r="36" fill="var(--state)" ${OUT}/><path d="M50 14L86 50L50 86M14 50H86" ${LN}/>`),
+  valve: def(`<path d="M12 31L50 50L12 69ZM88 31L50 50L88 69Z" fill="var(--state)" ${OUT} stroke-linejoin="round"/>`),
+  fan: def(`<circle cx="50" cy="50" r="36" fill="var(--state)" ${OUT}/><path d="M24.5 24.5L50 50L24.5 75.5M50 50H86" ${LN}/>`),
+};
+
+/** A station's pictogram: a built-in pictogram or a library symbol, by name. */
+export function findPictogram(lib: SymbolLib, name: string | undefined): [string, SymbolDef] | undefined {
+  if (!name) return undefined;
+  const k = name.toLowerCase();
+  return PICTOGRAMS[k] ? [`pic_${k}`, PICTOGRAMS[k]] : findSymbol(lib, name);
+}
+
+/** A pictogram's drawn size in pixels in a box ph pixels high (84 % of it, the longer side). */
+export function pictogramSize(d: SymbolDef, ph: number): { w: number; h: number } {
+  const [vw, vh] = d.viewBox;
+  const w = vw >= vh ? 0.84 * ph : (0.84 * ph * vw) / vh;
+  return { w, h: (w * vh) / vw };
+}
+
 /** Symbols that are instruments: drawn as ISA-5.1 bubbles (the label is the tag, e.g. 'LSH-201'). */
 export const INSTRUMENT_SYMBOLS: Record<string, string> = { level_switch: "LS", pressure_switch: "PI" };
 

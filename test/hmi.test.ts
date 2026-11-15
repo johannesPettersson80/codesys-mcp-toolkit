@@ -8,7 +8,7 @@ import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { ProjectCache } from "../src/codesys/cache.js";
 import { renderScreen } from "../src/hmi/render.js";
 import { accessRights, GAUGE_STEPS, nativePlan, onColor, paletteFor, type NativeElement } from "../src/hmi/native.js";
-import { connectionWarnings, labelSpots, overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
+import { connectionWarnings, labelSpots, meaningWarnings, overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
 import { TEMPLATES } from "../src/hmi/templates.js";
 import { canvasOf, tileBox } from "../src/hmi/render.js";
 import type { ProcessItem } from "../src/hmi/spec.js";
@@ -129,7 +129,7 @@ describe("station line (process overview)", () => {
         at: [1, 1, 12, 4],
         stations: [
           { name: "Feed", tag: "T-201", symbol: "tank", value: "PLC_PRG.rLevel", unit: "%", screen: "Process" },
-          { name: "Pump", symbol: "pump", on: "PLC_PRG.xPump", fault: "PLC_PRG.xFault" },
+          { name: "Pump", symbol: "pump", on: "PLC_PRG.xPump", fault: "PLC_PRG.xFault", warning: "PLC_PRG.xWarn", manual: "PLC_PRG.xHand" },
           { name: "Heating", symbol: "heat_exchanger", on: "PLC_PRG.xHeat", feed: { name: "Steam", symbol: "control_valve", on: "PLC_PRG.xSteam" } },
           { name: "Filling", symbol: "valve", on: "PLC_PRG.xFill" },
         ],
@@ -138,23 +138,74 @@ describe("station line (process overview)", () => {
   };
 
   it("lists the stations' and feeds' variables", () => {
-    expect(screenVariables(screenSchema.parse(LINE)).sort()).toEqual(["PLC_PRG.rLevel", "PLC_PRG.xFault", "PLC_PRG.xFill", "PLC_PRG.xHeat", "PLC_PRG.xPump", "PLC_PRG.xSteam"]);
+    expect(screenVariables(screenSchema.parse(LINE)).sort()).toEqual(["PLC_PRG.rLevel", "PLC_PRG.xFault", "PLC_PRG.xFill", "PLC_PRG.xHand", "PLC_PRG.xHeat", "PLC_PRG.xPump", "PLC_PRG.xSteam", "PLC_PRG.xWarn"]);
   });
 
-  it("draws a tile per station on the product path, the feed above, state in words, a tap to the page", () => {
+  it("draws a tile per station on the product path, the feed above, the state signs, a tap to the page", () => {
     const { html, bindings } = renderScreen(screenSchema.parse(LINE));
     expect(html.match(/class="stn[ "]/g)).toHaveLength(5);
     expect(html).toContain('data-nav="Process"');
     expect(html).toContain('class="ln-arrow"');
-    // A valve says OPEN/CLOSED, the rest RUNNING/STOPPED; a station without a state has no word.
-    expect(html).toContain(">OPEN<");
-    expect(html).toContain(">RUNNING<");
-    expect(html.match(/class="stn-st"/g)).toHaveLength(4);
+    // No words: the run sign before the name (driven equipment, not valves), the hand in Manual, the condition badge.
+    expect(html).not.toMatch(/RUNNING|STOPPED|>OPEN<|CLOSED/);
+    expect(html.match(/<svg class="rs"/g)).toHaveLength(2);
+    expect(bindings).toContainEqual({ kind: "on", v: "PLC_PRG.xHand" });
+    expect(html).toContain('class="stn-wn"');
     expect(bindings).toContainEqual({ kind: "fault", v: "PLC_PRG.xFault" });
+    // A valve pictogram is filled while closed.
+    expect(html).toContain('class="stn-pic vlv"');
     expect(bindings).toContainEqual({ kind: "text", v: "PLC_PRG.rLevel", decimals: 1 });
     // Pictograms: the built-in tank and the library's heat exchanger.
     expect(html).toContain("M30 22Q30 10 50 10");
     expect(html).toContain("M10 50H30L50 30V70L70 50H90");
+  });
+
+  it("sizes diagram texts as the browser does and marks line ends with an arrow in CODESYS", () => {
+    const s = screenSchema.parse({
+      name: "P",
+      title: "P",
+      widgets: [
+        {
+          type: "process",
+          at: [1, 1, 12, 8],
+          items: [
+            { type: "pump", x: 50, y: 50, size: 10, running: "PLC_PRG.x", label: "P-1" },
+            { type: "pipe", from: [0, 50], to: "P-1.in", label: "Feed" },
+            { type: "pipe", from: "P-1.out", to: [100, 50], label: "Out" },
+          ],
+        },
+      ],
+    });
+    const plan = nativePlan(s);
+    const body = tileBox(s, [1, 1, 12, 8]).w - 32;
+    const label = plan.elements.find((e) => e.text === "P-1")!;
+    // .p-label is 1.75 diagram units, a unit being a hundredth of the card's body.
+    expect(label.font![1]).toBeCloseTo((1.75 * body) / 100, 0);
+    expect(plan.elements.find((e) => e.text === "Feed")!.font![1]).toBeCloseTo((1.9 * body) / 100, 0);
+    expect(plan.images.filter((i) => i.id.startsWith("arrow_r_"))).toHaveLength(1);
+    expect(plan.elements.filter((e) => e.kind === "image" && String(e.props?.["Static ID"]).includes(".arrow_r_"))).toHaveLength(2);
+  });
+
+  it("draws the same line in CODESYS: tiles, pictograms, the state signs, a tap to the page", () => {
+    const plan = nativePlan(screenSchema.parse(LINE), [{ name: "Overview", title: "Overview" }, { name: "Process", title: "Process" }]);
+    const ids = plan.images.map((i) => i.id);
+    // The pump and the heat exchanger have an off and an on picture; the tank, without a state, one.
+    expect(ids.filter((i) => i.startsWith("stn_pic_pump_"))).toHaveLength(2);
+    expect(ids.filter((i) => i.startsWith("stn_heat_exchanger_"))).toHaveLength(2);
+    expect(ids.filter((i) => i.startsWith("stn_pic_tank_nostat"))).toHaveLength(1);
+    expect(ids.some((i) => i.startsWith("arrow_r_"))).toBe(true);
+    expect(plan.elements.find((e) => e.goto === "Visu_Process" && e.name?.startsWith("Station_"))).toBeDefined();
+    expect(plan.elements.some((e) => e.text === "RUNNING" || e.text === "STOPPED" || e.text === "OPEN")).toBe(false);
+    const signs = (kind: string) => plan.elements.filter((e) => String(e.props?.["Static ID"]).includes(`.sign_${kind}_`));
+    // ▶ shows while running, ■ while stopped (the pump and the heat exchanger; valves have none).
+    expect(signs("run").map((e) => e.invisible).sort()).toEqual(["NOT (PLC_PRG.xHeat)", "NOT (PLC_PRG.xPump)"]);
+    expect(signs("stop").map((e) => e.invisible).sort()).toEqual(["PLC_PRG.xHeat", "PLC_PRG.xPump"]);
+    // The alarm badge while faulted; the warning only without an alarm.
+    expect(signs("alarm").map((e) => e.invisible)).toEqual(["NOT (PLC_PRG.xFault)"]);
+    expect(signs("warning").map((e) => e.invisible)).toEqual(["NOT ((PLC_PRG.xWarn) AND NOT (PLC_PRG.xFault))"]);
+    expect(plan.elements.some((e) => String(e.props?.["Static ID"]).includes(".ic_manual_") && e.invisible === "NOT (PLC_PRG.xHand)")).toBe(true);
+    // The top edge shows the condition only: amber and red bars over the neutral one.
+    expect(plan.elements.filter((e) => e.fill === paletteFor({}).tones.warn && e.invisible === "NOT (PLC_PRG.xWarn)")).toHaveLength(1);
   });
 
   it("keeps the tiles inside the card on every panel size", async () => {
@@ -166,6 +217,80 @@ describe("station line (process overview)", () => {
       expect(L.fy).toBeGreaterThanOrEqual(-0.01);
       expect(L.y + L.th).toBeLessThanOrEqual(h + 0.01);
     }
+  });
+});
+
+describe("texts on a process diagram", () => {
+  const items = (list: unknown[]) => (screenSchema.parse({ name: "P", title: "P", widgets: [{ type: "process", at: [1, 1, 12, 8], items: list }] }).widgets[0] as { items: ProcessItem[] }).items;
+
+  it("puts a label clear of pipes and inside the diagram, and says when there is no room", async () => {
+    const { placeTexts, textWarnings } = await import("../src/hmi/labels.js");
+    const { routed } = await import("../src/hmi/route.js");
+    const { BUILTIN_SYMBOLS } = await import("../src/hmi/symbols.js");
+    // A pump near the bottom edge with a pipe leaving downwards: its name goes beside, not off the diagram.
+    const list = items([
+      { type: "pump", x: 50, y: 92, size: 8, running: "PLC_PRG.x", label: "P-1" },
+      { type: "pipe", from: [0, 92], to: "P-1.in" },
+      { type: "pipe", from: "P-1.out", to: [100, 92] },
+    ]);
+    const all = routed(list, 0.5, BUILTIN_SYMBOLS);
+    const pl = placeTexts(all, 0.5, BUILTIN_SYMBOLS).labels.get("p-1")!;
+    expect(pl.y + 1.2).toBeLessThanOrEqual(0.5 * 100 + 1);
+    expect(Math.abs(pl.y - 92 * 0.5)).toBeGreaterThan(1.2); // not on the pipe's line
+    // Two pumps squeezed together: hmi_save_screen names the label without room.
+    const tight = items([
+      { type: "pump", x: 50, y: 50, size: 8, running: "a", label: "P-1" },
+      { type: "pump", x: 50, y: 58, size: 8, running: "b", label: "P-2" },
+      { type: "pump", x: 42, y: 54, size: 8, running: "c", label: "P-3" },
+      { type: "pump", x: 58, y: 54, size: 8, running: "d", label: "P-4" },
+      { type: "pump", x: 50, y: 66, size: 8, running: "e", label: "P-5" },
+    ]);
+    expect(textWarnings(tight, 0.5, BUILTIN_SYMBOLS).join(" ")).toMatch(/has no free place/);
+  });
+
+  it("shows an equipment's own value under its name, as plain text, in the browser and CODESYS", () => {
+    const s = screenSchema.parse({ name: "P", title: "P", widgets: [{ type: "process", at: [1, 1, 12, 8], items: [{ type: "symbol", symbol: "control_valve", x: 50, y: 40, size: 8, on: "PLC_PRG.xOpen", manual: "PLC_PRG.xHand", value: "PLC_PRG.rOpening", unit: "%", decimals: 0, label: "TCV-1" }, { type: "pipe", from: [0, 40], to: "TCV-1.in" }, { type: "pipe", from: "TCV-1.out", to: [100, 40] }] }] });
+    expect(screenVariables(s)).toEqual(expect.arrayContaining(["PLC_PRG.rOpening", "PLC_PRG.xHand"]));
+    const { html, bindings } = renderScreen(s);
+    expect(html).toContain('class="p-val"');
+    expect(bindings).toContainEqual({ kind: "text", v: "PLC_PRG.rOpening", decimals: 0, unit: "%" });
+    // A valve has no run sign: its position is its fill (closed filled).
+    expect(html).not.toMatch(/<g class="rs"/);
+    expect(html).toContain('class="sym sym-control_valve vlv"');
+    const plan = nativePlan(s);
+    expect(plan.elements.some((e) => e.text === "%.0f %" && String(e.props?.["Text variables.Text variable"]).startsWith("PRG_HMI_P.rV"))).toBe(true);
+  });
+
+  it("catches mistakes of meaning: an equipment's value drawn as a sensor, a run state on passive equipment", () => {
+    const list = items([
+      { type: "symbol", symbol: "control_valve", x: 40, y: 40, size: 7, on: "PLC_PRG.xHeat", label: "TCV-201" },
+      { type: "sensor", x: 30, y: 20, value: "PLC_PRG.rOpening", unit: "%", decimals: 0, label: "TCV-201 opening" },
+      { type: "symbol", symbol: "filter", x: 60, y: 60, size: 7, on: "PLC_PRG.xRun", label: "F-201" },
+      { type: "symbol", symbol: "motor", x: 80, y: 60, size: 6, on: "PLC_PRG.xMotor", label: "M-1" },
+      { type: "sensor", x: 70, y: 20, value: "PLC_PRG.rTemp", label: "TT-201" },
+    ]);
+    const w = meaningWarnings(list);
+    expect(w).toHaveLength(2);
+    expect(w[0]).toMatch(/sensor 'TCV-201 opening' is a value of TCV-201: put it on TCV-201 instead \(\{value: 'PLC_PRG.rOpening', unit: '%', decimals: 0\}\)/);
+    expect(w[1]).toMatch(/^filter F-201 has on, but it has no drive/);
+    // A real instrument (TT-201) and a driven motor are fine; connectionWarnings carries these notes too.
+    expect(connectionWarnings(list, 0.5).some((m) => m.includes("TCV-201 opening"))).toBe(true);
+  });
+
+  it("gives an alarm's message room in a narrow alarms card in CODESYS (time and state on a second line)", () => {
+    const s = screenSchema.parse({ name: "A", title: "A", widgets: [{ type: "alarms", at: [10, 1, 3, 4], items: [{ active: "PLC_PRG.xClog", text: "Filter F-201 clogged", severity: "warning" }] }] });
+    const plan = nativePlan(s, [], {}, { "PLC_PRG.xClog": 1 });
+    const msg = plan.elements.filter((e) => e.text === "Filter F-201 clogged");
+    expect(msg.length).toBeGreaterThan(0);
+    for (const m of msg) expect(m.w).toBeGreaterThan(120);
+  });
+
+  it("splits a long page title over two lines that fit the CODESYS rail", async () => {
+    const { railLines } = await import("../src/hmi/native.js");
+    expect(railLines("Heat treatment line", 64, 11).map((l) => l[1])).toEqual(["Heat", "treatment line"]);
+    expect(railLines("Alarms", 64, 11)).toEqual([[0, "Alarms", 11]]);
+    const [, , fs] = railLines("Wärmebehandlungslinie", 64, 11)[0]!;
+    expect(fs).toBeLessThan(11);
   });
 });
 

@@ -7,12 +7,13 @@
  */
 import { darkTextOn } from "./color.js";
 import { iconPicture, type IconName } from "./icons.js";
-import { ALARM_COUNTERS, buttonIcon, buttonKind, buttonLayout, canvasOf, isTag, machineStates, modeIcon, modeValues, pageIcon, stateButtonFit, stateTextSize, tileBox, type ButtonKind } from "./render.js";
+import { ALARM_COUNTERS, buttonIcon, buttonKind, buttonLayout, canvasOf, isTag, lineLayout, machineStates, modeIcon, modeValues, pageIcon, stateButtonFit, stateTextSize, tileBox, type ButtonKind } from "./render.js";
 import { routed, itemKey, instrumentTap, labelSpots, lineEnds, nearestOnLine, PUMP_CASING, type LabelSpot } from "./route.js";
 import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
 import { hasDock, screenVariables, USER_GROUPS } from "./spec.js";
-import { BUILTIN_SYMBOLS, findSymbol, INSTRUMENT_SYMBOLS, symbolPicture, symbolSize, type SymbolColors, type SymbolLib } from "./symbols.js";
+import { BUILTIN_SYMBOLS, findPictogram, findSymbol, INSTRUMENT_SYMBOLS, pictogramSize, symbolPicture, symbolSize, type SymbolColors, type SymbolLib } from "./symbols.js";
 import { PT, softOf, SPACE, textOn, themeFor, TYPE, type ThemeName } from "./theme.js";
+import { nameParts, textKey, placeTexts, READING, readingSpot, SIGN, tapY, type PlacedLabel } from "./labels.js";
 
 type Argb = number;
 export interface NativeElement {
@@ -186,7 +187,7 @@ export function symbols(p: Palette, px = 100): { id: string; svg: string }[] {
     wrap(`<circle cx="50" cy="50" r="${50 - u}" fill="${fill(on)}" ${lnOf(on)}/>
 <path d="M${50 - k} ${50 - k}L50 50L${50 - k} ${50 + k}M50 50H${100 - u}" fill="none" ${lnOf(on)} stroke-linejoin="round"/>`);
   const valve = (open: boolean) =>
-    wrap(`<path d="M${u} 25L50 50L${u} 75ZM${100 - u} 25L50 50L${100 - u} 75Z" fill="${fill(open)}" ${lnOf(open)} stroke-linejoin="round"/>`);
+    wrap(`<path d="M${u} 25L50 50L${u} 75ZM${100 - u} 25L50 50L${100 - u} 75Z" fill="${open ? fill(true) : hex(p.equipLine)}" ${lnOf(open)} stroke-linejoin="round"/>`);
   const turn = (svg: string) => svg.replace(/(<svg[^>]*>)([\s\S]*)(<\/svg>)/, '$1<g transform="rotate(90 50 50)">$2</g>$3');
   return [
     { id: "pump_on", svg: pump(true) },
@@ -335,12 +336,33 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     });
     return h;
   };
-  /** The fault marker (red square with !) at an item's corner, as in the browser; the state itself is the fill. */
-  const markers = (x: number, y: number, _on?: string, fault?: string) => {
-    if (fault) {
-      els.push({ kind: "rect", x: r(x - 6), y: r(y - 14), w: 20, h: 20, fill: p.tones.alarm, frame: null, invisible: `NOT (${fault})` });
-      els.push(text(x - 6, y - 14, 20, 20, "1", [SEMI, 12], p.onTone.alarm, "HCENTER", { invisible: `NOT (${fault})` }));
+  /** A sign as a picture (the image pool keeps one per kind and size): the run sign's triangle and square, the condition badges. */
+  const sign = (kind: "run" | "stop" | "alarm" | "warning", px: number) => {
+    const s0 = Math.max(6, r(px));
+    const id = `sign_${kind}_${s0}`;
+    if (!needed.has(id)) {
+      const body =
+        kind === "run" ? `<path d="M10 5L90 50L10 95Z" fill="${hex(p.tones.accent)}"/>`
+        : kind === "stop" ? `<rect x="8" y="8" width="84" height="84" rx="8" fill="${hex(p.muted)}"/>`
+        : kind === "alarm" ? `<circle cx="50" cy="50" r="48" fill="${hex(p.tones.alarm)}"/><path d="M50 24V56M50 74V75" stroke="${hex(p.onTone.alarm)}" stroke-width="12" stroke-linecap="round"/>`
+        : `<path d="M50 6L95 88H5Z" fill="${hex(p.tones.warn)}" stroke="${hex(p.tones.warn)}" stroke-width="8" stroke-linejoin="round"/><path d="M50 38V62M50 76V77" stroke="#1a232d" stroke-width="10" stroke-linecap="round"/>`;
+      needed.set(id, `<svg xmlns="http://www.w3.org/2000/svg" width="${s0}" height="${s0}" viewBox="0 0 100 100">${body}</svg>`);
     }
+    return { id: `${pool}.${id}`, s: s0 };
+  };
+  const signAt = (kind: "run" | "stop" | "alarm" | "warning", cx: number, cy: number, px: number, invisible: string): NativeElement => {
+    const g = sign(kind, px);
+    return { kind: "image", x: r(cx - g.s / 2), y: r(cy - g.s / 2), w: g.s, h: g.s, props: { "Static ID": g.id }, invisible };
+  };
+  /** The condition badge centred at (x, y), d pixels across: the alarm while `fault`, else the warning while `warning`. */
+  const condBadge = (x: number, y: number, d: number, fault?: string, warning?: string) => {
+    if (warning) els.push(signAt("warning", x, y, d * 1.1, fault ? `NOT ((${warning}) AND NOT (${fault}))` : `NOT (${warning})`));
+    if (fault) els.push(signAt("alarm", x, y, d, `NOT (${fault})`));
+  };
+  /** The run sign (▶ running, ■ stopped) centred at (x, y). */
+  const runSign = (x: number, y: number, px: number, v: string) => {
+    els.push(signAt("run", x, y, px, `NOT (${v})`));
+    els.push(signAt("stop", x, y, px * 0.85, v));
   };
   /** An ISA-5.1 instrument bubble (radius rr px) with its tag: function letters over the loop number. */
   const bubble = (cx: number, cy: number, rr: number, tag: string, on?: string) => {
@@ -350,8 +372,8 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     els.push(text(cx - rr, cy + rr * 0.08, 2 * rr, rr * 0.6, num0, [FONT, ptPx(Math.max(7, rr * 0.45))], p.muted, "HCENTER"));
   };
   /** A reading box beside a bubble (or alone): the value with its unit. */
-  const reading = (x: number, cy: number, v: string, decimals?: number, unit?: string) =>
-    els.push({ kind: "round", x: r(x), y: r(cy - 15), w: 104, h: 30, text: `%.${decimals ?? 1}f${unit ? ` ${unit}` : ""}`, font: [SEMI, 10], color: p.text, fill: p.tile, frame: p.border, radius: 15, props: { "Text variables.Text variable": real(v) } });
+  const reading = (x: number, cy: number, v: string, decimals: number | undefined, unit: string | undefined, u: number) =>
+    els.push({ kind: "round", x: r(x), y: r(cy - (READING.h / 2) * u), w: r(READING.w * u), h: r(READING.h * u), text: `%.${decimals ?? 1}f${unit ? ` ${unit}` : ""}`, font: [SEMI, ptPx(READING.text * u)], color: p.text, align: "HCENTER", fill: p.tile, frame: p.border, radius: r((READING.h / 2) * u), props: { "Text variables.Text variable": real(v) } });
   /** A thin line between two points with one bend (process connection of an instrument). */
   const leader = (ax: number, ay: number, bx: number, by: number, vertFirst: boolean) => {
     const seg = (x1: number, y1: number, x2: number, y2: number) => {
@@ -495,7 +517,8 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
       }
       const col = cur ? p.tones.accent : p.text2;
       els.push(icon(pageIcon(pg, i), x + w / 2 - 11 * k, y + 10 * k, 22 * k, col));
-      els.push(text(x + 2 * k, y + 35 * k, w - 4 * k, 23 * k, pg.title, cur ? F.tinyB : F.tiny, col, "HCENTER", { valign: "TOP", linebreak: true }));
+      // The title on up to two lines that fit the rail (CODESYS centres a wrapped text and cuts what's wider), smaller if a word is too long.
+      for (const [j, line, size] of railLines(pg.title, w - 4 * k, TYPE.tiny * k)) els.push(text(x + 2 * k, y + 34 * k + j * size * 1.15, w - 4 * k, size * 1.2, line, [cur ? SEMI : FONT, ptPx(size)], col, "HCENTER"));
       if (!cur) els.push({ kind: "rect", name: `Nav_${pg.name}`, x: r(x), y: r(y), w: r(w), h: r(itemH), fill: null, frame: null, goto: `Visu_${pg.name}` });
     });
   }
@@ -671,11 +694,13 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         // With the actual value: it stands large in the accent at the left, the set value with − and + at the right (Koch).
         const total = 16 * k + 6 * k + 44 * k + 6 * k + 14 * k;
         const y0 = box.y + Math.max(0, (box.h - total) / 2);
-        const colW = w.actual ? (box.w - 20 * k) / 2 : box.w;
-        const sx0 = box.x + (w.actual ? colW + 20 * k : 0);
+        // As the browser: the set group (- value +) takes the room it needs, the actual value the rest.
+        const colW = w.actual ? Math.min(box.w - 80 * k, 2 * 44 * k + 16 * k + 96 * k) : box.w;
+        const actW = box.w - colW - 12 * k;
+        const sx0 = box.x + (w.actual ? actW + 12 * k : 0);
         if (w.actual) {
-          els.push(text(box.x, y0, colW, 16 * k, "Actual", F.small, p.text2));
-          const af = Math.min(TYPE.value * k, colW / 4.2);
+          els.push(text(box.x, y0, actW, 16 * k, "Actual", F.small, p.text2));
+          const af = Math.min(TYPE.value * k, actW / 2.8);
           number(box.x, y0 + total - 14 * k - af * 1.1, af, w.actual, w.decimals ?? Math.max(dec, 1), w.unit, undefined, w.min, w.max);
         }
         els.push(text(sx0, y0, colW, 16 * k, "Set", F.small, p.text2));
@@ -713,7 +738,9 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
       case "alarms": {
         // Active rows (CODESYS alarms with their time, state and acknowledge), then the last
         // events from the PLC's alarm history (GVL_AlarmHistory, which the export adds).
-        const ROW = 38 * k, GAP = 0, HROW = 25 * k;
+        // A narrow card (no room for the message beside the time, state and acknowledge) puts the time and state on a second line.
+        const narrow = box.w < 366 * k;
+        const ROW = (narrow ? 54 : 38) * k, GAP = 0, HROW = 25 * k;
         const histTop = box.y + w.items.length * (ROW + GAP) + 2 * k;
         const room = Math.floor((box.y + box.h - histTop - 34 * k) / HROW);
         const histN = w.history && alarmIndex ? Math.max(0, Math.min(w.history, room)) : 0;
@@ -727,8 +754,17 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
           const row = (hide: string, timeVar?: string, stateVar?: string, ack?: { show: string; code: string }) => {
             // A plain row: only the icon has the severity's colour, a hairline under it.
             els.push({ kind: "rect", x: r(box.x), y: r(y + ROW - 1), w: r(box.w), h: 1, fill: p.border, frame: null, invisible: hide });
-            els.push(icon(ic, box.x + 12 * k, y + ROW / 2 - 9 * k, 18 * k, p.tones[tone], hide));
+            els.push(icon(ic, box.x + 12 * k, y + (narrow ? 17 * k : ROW / 2) - 9 * k, 18 * k, p.tones[tone], hide));
             let tx = box.x + 40 * k;
+            if (narrow) {
+              // Two lines: the message, then the time and state small under it.
+              const mw = box.x + box.w - (ack ? 46 * k : 8 * k) - tx;
+              els.push(text(tx, y + 5 * k, mw, 24 * k, a.text, F.body, p.text, "LEFT", { invisible: hide }));
+              if (timeVar) els.push(text(tx, y + 29 * k, 64 * k, 18 * k, "%s", F.tiny, p.text2, "LEFT", { invisible: hide, props: { "Text variables.Text variable": timeVar } }));
+              if (stateVar) els.push(text(tx + (timeVar ? 66 * k : 0), y + 29 * k, mw - (timeVar ? 66 * k : 0), 18 * k, "%s", F.tiny, p.text2, "LEFT", { invisible: hide, props: { "Text variables.Text variable": stateVar } }));
+              if (ack) button(els, box.x + box.w - 42 * k, y + (ROW - 36 * k) / 2, 36 * k, 36 * k, "Acknowledge", "neutral", "check", { click: ack.code }, true, ack.show);
+              return;
+            }
             if (timeVar) {
               els.push(text(tx, y, 64 * k, ROW, "%s", F.small, p.text2, "LEFT", { invisible: hide, props: { "Text variables.Text variable": timeVar } }));
               tx += 68 * k;
@@ -813,54 +849,145 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         });
         break;
       }
+      case "line": {
+        // As in the browser (render.ts lineHtml and its CSS): the product path, the feeds, then the tiles over them.
+        const L = lineLayout(w, box.w, box.h, k);
+        const lw = Math.max(2, r(3 * k));
+        const py = box.y + L.pathY, end = box.x + box.w - 2 * k;
+        els.push({ kind: "rect", x: r(box.x), y: r(py - lw / 2), w: r(end - box.x - 8 * k), h: lw, fill: p.pipe, frame: null });
+        els.push(arrow(end, py, 1, 0, 9 * k, 5 * k, p.pipe));
+        w.stations.forEach((s, j) => {
+          if (s.feed) els.push({ kind: "rect", x: r(box.x + L.xs[j]! + L.tw / 2 - lw / 2), y: r(box.y + L.fy + L.fh), w: lw, h: r(L.conn), fill: p.pipe, frame: null });
+        });
+        type St = (typeof w.stations)[number];
+        const tile = (s: St, x: number, y: number, h: number, small: boolean) => {
+          const tw = L.tw, cx = x + tw / 2, edge = Math.max(2, r(3 * k));
+          els.push({ kind: "round", x: r(x), y: r(y), w: r(tw), h: r(h), fill: p.tile2, frame: p.border, lineWidth: 1, radius: Math.max(1, r(3 * k)) });
+          // The top edge shows the condition: neutral, amber on a warning, red on an alarm (the alarm wins).
+          els.push({ kind: "rect", x: r(x), y: r(y), w: r(tw), h: edge, fill: p.ctl, frame: null });
+          if (s.warning) els.push({ kind: "rect", x: r(x), y: r(y), w: r(tw), h: edge, fill: p.tones.warn, frame: null, invisible: `NOT (${s.warning})` });
+          if (s.fault) els.push({ kind: "rect", x: r(x), y: r(y), w: r(tw), h: edge, fill: p.tones.alarm, frame: null, invisible: `NOT (${s.fault})` });
+          const pad = (small ? 5 : 8) * k;
+          // The contents centred in the tile, as the browser's flex column (name, tag, pictogram, value).
+          const content = small ? 45 * k : (s.tag ? 98 : 86) * k;
+          let ty = y + edge + pad + Math.max(0, (h - edge - pad - (small ? 5 : 7) * k - 1 - content) / 2);
+          // The name line: the run sign (driven equipment), the name, the mode hand, centred together.
+          const valveS = /valve/i.test(s.symbol ?? "");
+          const runV = s.on && !valveS ? s.on : undefined;
+          const nameW = s.name.length * TYPE.small * k * 0.68;
+          const lead = runV ? 14 * k : 0, tail = s.manual ? 19 * k : 0;
+          const nx0 = cx - (lead + nameW + tail) / 2, ncy = ty + 8 * k;
+          if (runV) runSign(nx0 + 5 * k, ncy, 10 * k, runV);
+          els.push(text(nx0 + lead - 2 * k, ty, nameW + 8 * k, 16 * k, s.name.toUpperCase(), F.smallB, p.text, "LEFT"));
+          if (s.manual) els.push(icon("manual", nx0 + lead + nameW + 4 * k, ncy - 7.5 * k, 15 * k, p.tones.accent, `NOT (${s.manual})`));
+          ty += 17 * k;
+          if (s.tag && !small) {
+            els.push(text(x + 4 * k, ty - 2 * k, tw - 8 * k, 14 * k, s.tag, F.tiny, p.muted, "HCENTER"));
+            ty += 12 * k;
+          }
+          const ph = (small ? 24 : 38) * k;
+          ty += (small ? 2 : 4) * k;
+          const f = findPictogram(lib, s.symbol);
+          if (f) {
+            const [name, d] = f;
+            const sz = pictogramSize(d, ph);
+            const wpx = Math.max(4, r(sz.w)), hpx = Math.max(4, r(sz.h));
+            const pic = (state: "off" | "on") => {
+              const id = `stn_${name}_${s.on ? state : "nostat"}_${wpx}x${hpx}`;
+              const closed = /valve/i.test(name) && state === "off" && !!s.on;
+              if (!needed.has(id)) needed.set(id, symbolPicture(d, name, closed ? { ...symColors("off"), state: hex(p.equipLine) } : { ...symColors(state), state: hex(p.tile) }, 0, wpx, hpx));
+              return `${pool}.${id}`;
+            };
+            els.push({ kind: "image", x: r(cx - wpx / 2), y: r(ty + ph / 2 - hpx / 2), w: wpx, h: hpx, props: { "Static ID": pic("off"), ...(s.on ? { "Bitmap ID variable.Bitmap ID": `SEL(${s.on}, '${pic("off")}', '${pic("on")}')` } : {}) } });
+          }
+          ty += ph + 3 * k;
+          if (s.value && !small) {
+            // The number and its smaller unit, centred together (the number's width estimated from its decimals).
+            const fs = 18 * k, d = s.decimals ?? 1;
+            const nw = (4 + (d ? d + 1 : 0)) * fs * 0.55, uw = s.unit ? s.unit.length * TYPE.tiny * k * 0.6 + 3 * k : 0;
+            const nx = cx - (nw + uw) / 2;
+            els.push(text(nx - 20 * k, ty, nw + 20 * k, 24 * k, `%.${d}f`, [FONT, ptPx(fs)], p.text, "RIGHT", { props: { "Text variables.Text variable": real(s.value) } }));
+            if (s.unit) els.push(text(nx + nw + 3 * k, ty + 6 * k, uw + 20 * k, 16 * k, s.unit, F.tiny, p.muted));
+          }
+          condBadge(x + tw - 14 * k, y + 15 * k, 18 * k, s.fault, s.warning);
+          if (s.screen) els.push({ kind: "rect", name: `Station_${s.screen}_${j2++}`, x: r(x), y: r(y), w: r(tw), h: r(h), fill: null, frame: null, goto: `Visu_${s.screen}` });
+        };
+        let j2 = 1;
+        w.stations.forEach((s, j) => {
+          tile(s, box.x + L.xs[j]!, box.y + L.y, L.th, false);
+          if (s.feed) tile(s.feed, box.x + L.xs[j]!, box.y + L.fy, L.fh, true);
+        });
+        break;
+      }
       case "process": {
         const sx = box.w / 100;
         const sy = box.h / 100;
         const X = (x: number) => box.x + x * sx;
         const Y = (y: number) => box.y + y * sy;
         const aspect = box.h / box.w;
-        const spots = labelSpots(w.items, aspect, lib);
         const ends = lineEnds(w.items);
         const all = routed(w.items, aspect, lib);
+        // Every text's place, clear of the rest (labels.ts, as in the browser); in x-units, a hundredth of the width.
+        const placed = placeTexts(all, aspect, lib, ends);
         const items = [...all].sort((a, b2) => (a.type === "pipe" ? -1 : 0) - (b2.type === "pipe" ? -1 : 0));
-        for (const it of items) processItem(it, X, Y, sx, spots, all, aspect);
-        // Line names at the diagram's edge.
+        for (const it of items) processItem(it, X, Y, sx, placed.labels, all, aspect);
+        // Line names at the diagram's edge (1.9 units, as the browser), each with a flow arrow on the line near its free end.
+        const lf: Font = [SEMI, ptPx(1.9 * sx)], lh = 2.6 * sx, lw2 = 24 * sx;
         all.forEach((it, k) => {
           const e = ends[k];
           if (it.type !== "pipe" || !e || !it.points?.length) return;
           const [x, y] = e.at === "start" ? it.points[0]! : it.points[it.points.length - 1]!;
           const px = X(x), py = Y(y);
+          {
+            const pts = it.points;
+            const [a, b2] = e.at === "start" ? [pts[0]!, pts[1] ?? pts[0]!] : [pts[pts.length - 2] ?? pts[0]!, pts[pts.length - 1]!];
+            const ux = X(b2[0]) - X(a[0]), uy = Y(b2[1]) - Y(a[1]);
+            // Pipes run at right angles: the arrow takes the segment's main direction.
+            const [dx, dy] = Math.abs(ux) >= Math.abs(uy) ? [Math.sign(ux) || 1, 0] : [0, Math.sign(uy) || 1];
+            const [tx, ty] = e.at === "start" ? [X(a[0]) + dx * 3.2 * sx, Y(a[1]) + dy * 3.2 * sx] : [X(b2[0]) - dx * 0.4 * sx, Y(b2[1]) - dy * 0.4 * sx];
+            els.push(arrow(tx, ty, dx, dy, 1.8 * sx, 0.95 * sx, p.muted));
+          }
           // Top and bottom first (a corner point on the top line is a top end), then left and right.
           const top = y <= 1 || (y <= 5 && x > 5 && x < 95), bottom = y >= 99 || (y >= 95 && x > 5 && x < 95);
-          if (top) els.push(x > 75 ? text(px - 170, py + 2, 160, 18, e.label, [SEMI, 9], p.muted, "RIGHT") : text(px + 10, py + 2, 160, 18, e.label, [SEMI, 9], p.muted, "LEFT"));
-          // At the bottom edge the item's own label is usually right of the pipe: the line's name goes left.
-          else if (bottom) els.push(x < 25 ? text(px + 10, py - 20, 160, 18, e.label, [SEMI, 9], p.muted, "LEFT") : text(px - 170, py - 20, 160, 18, e.label, [SEMI, 9], p.muted, "RIGHT"));
-          else if (x <= 5) els.push(text(px + 4, py - 24, 160, 18, e.label, [SEMI, 9], p.muted, "LEFT"));
-          else els.push(text(px - 164, py - 24, 160, 18, e.label, [SEMI, 9], p.muted, "RIGHT"));
+          // Where placeTexts put it (as in the browser): its anchor point and centre line.
+          void top, void bottom;
+          const pl = placed.lines.get(k)!;
+          const lx = box.x + pl.x * sx, ly = box.y + pl.y * sx - lh / 2;
+          els.push(pl.anchor === "start" ? text(lx, ly, lw2, lh, e.label, lf, p.muted, "LEFT") : text(lx - lw2, ly, lw2, lh, e.label, lf, p.muted, "RIGHT"));
         });
         break;
       }
     }
   }
 
-  function processItem(it: ProcessItem, X: (x: number) => number, Y: (y: number) => number, sx: number, spots: Map<string, LabelSpot> = new Map(), all: ProcessItem[] = [], aspect = 0.5) {
-    // The label centred below the item, unless something takes that place (see labelSpots).
-    const spot = spots.get((itemKey(it) ?? "").toLowerCase());
+  function processItem(it: ProcessItem, X: (x: number) => number, Y: (y: number) => number, sx: number, placed: Map<string, PlacedLabel> = new Map(), all: ProcessItem[] = [], aspect = 0.5) {
+    // The label's place (labels.ts placeTexts, as in the browser), in x-units from the diagram's corner.
+    const pl = placed.get(textKey(it));
+    const spot = undefined as { side: string; x: number } | undefined;
+    const ox = X(0), oy = Y(0);
+    // Sizes in diagram units, as the browser's SVG (1 unit = sx pixels).
+    const LF: Font = [SEMI, ptPx(1.75 * sx)], LH = 2.4 * sx, LW = Math.max(120, 22 * sx), HW = LW / 2;
     const label = (cx: number, y: number, t?: string, bx?: { x0: number; x1: number; y0: number; cy: number }) => {
+      if (pl) {
+        // The name line, as the browser: the run sign, the name, the mode hand.
+        const parts = nameParts(it);
+        const ly = oy + pl.y * sx;
+        if (parts.run) runSign(ox + (pl.x0 + SIGN.run / 2) * sx, ly, SIGN.run * 1.15 * sx, parts.run);
+        if (t) els.push(text(ox + pl.textX * sx, ly - LH / 2, LW, LH, t, LF, p.muted, "LEFT"));
+        if (parts.manual) els.push(icon("manual", ox + (pl.textEnd + 0.5) * sx, ly - (SIGN.hand / 2) * sx, SIGN.hand * sx, p.tones.accent, `NOT (${parts.manual})`));
+        // The equipment's own value under the name, as plain text.
+        if (parts.value) {
+          const d = "decimals" in it ? (it.decimals ?? 1) : 1, u = "unit" in it ? it.unit : undefined;
+          els.push(text(ox + pl.x0 * sx, oy + pl.valueY * sx - 1.2 * sx, LW, 2.4 * sx, `%.${d}f${u ? ` ${u}` : ""}`, [SEMI, ptPx(1.8 * sx)], p.text, "LEFT", { props: { "Text variables.Text variable": real(parts.value) } }));
+        }
+        return;
+      }
       if (!t) return;
-      if (spot?.side === "below-left") els.push(text(X(spot.x) - 126, y, 120, 18, t, [SEMI, 8.5], p.muted, "RIGHT"));
-      else if (spot?.side === "below-right") els.push(text(X(spot.x) + 6, y, 120, 18, t, [SEMI, 8.5], p.muted, "LEFT"));
-      else if (spot?.side === "beside" && bx) els.push(bx.x1 > X(85) ? text(cx - 60, bx.y0 - 20, 120, 18, t, [SEMI, 8.5], p.muted, "HCENTER") : text(bx.x1 + 6, bx.cy - 9, 120, 18, t, [SEMI, 8.5], p.muted, "LEFT"));
-      else if (spot?.side === "above" && bx) els.push(text(cx - 60, bx.y0 - 20, 120, 18, t, [SEMI, 8.5], p.muted, "HCENTER"));
-      else els.push(text(cx - 60, y, 120, 18, t, [SEMI, 8.5], p.muted, "HCENTER"));
-    };
-    /** The state in words beside the label just drawn (away from the item): two texts, one shown at a time. */
-    const word = (v: string | undefined, on: string, off: string, itemY: number) => {
-      const lab = els[els.length - 1];
-      if (!v || !lab || lab.kind !== "rect" || !lab.text) return;
-      const dy = lab.y < itemY ? -15 : 15;
-      els.push({ ...lab, y: lab.y + dy, text: on, font: [SEMI, 7.5], color: p.text2, invisible: `NOT (${v})` });
-      els.push({ ...lab, y: lab.y + dy, text: off, font: [SEMI, 7.5], color: p.text2, invisible: v });
+      if (spot?.side === "below-left") els.push(text(X(spot.x) - 1.4 * sx - LW, y, LW, LH, t, LF, p.muted, "RIGHT"));
+      else if (spot?.side === "below-right") els.push(text(X(spot.x) + 1.4 * sx, y, LW, LH, t, LF, p.muted, "LEFT"));
+      else if (spot?.side === "beside" && bx) els.push(bx.x1 > X(85) ? text(cx - HW, bx.y0 - 0.6 * sx - LH, LW, LH, t, LF, p.muted, "HCENTER") : text(bx.x1 + 1 * sx, bx.cy - LH / 2, LW, LH, t, LF, p.muted, "LEFT"));
+      else if (spot?.side === "above" && bx) els.push(text(cx - HW, bx.y0 - 0.6 * sx - LH, LW, LH, t, LF, p.muted, "HCENTER"));
+      else els.push(text(cx - HW, y, LW, LH, t, LF, p.muted, "HCENTER"));
     };
     switch (it.type) {
       case "symbol": {
@@ -875,21 +1002,22 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         // One picture per state; the bitmap ID expression picks it (fault wins over on).
         const pic = (state: "off" | "on") => {
           const id = `sym_${name}_${state}${rot ? `_r${rot}` : ""}_${wpx}x${hpx}`;
-          if (!needed.has(id)) needed.set(id, symbolPicture(d, name, symColors(state), rot, wpx, hpx));
+          // A valve is filled in the line colour while closed (as on a P&ID).
+          const closed = /valve/i.test(name) && state === "off" && !!it.on;
+          if (!needed.has(id)) needed.set(id, symbolPicture(d, name, closed ? { ...symColors("off"), state: hex(p.equipLine) } : symColors(state), rot, wpx, hpx));
           return `${pool}.${id}`;
         };
         let expr = `'${pic("off")}'`;
         if (it.on) expr = `SEL(${it.on}, ${expr}, '${pic("on")}')`;
         els.push({ kind: "image", x: r(cx - wpx / 2), y: r(cy - hpx / 2), w: wpx, h: hpx, props: { "Static ID": pic("off"), ...(it.on ? { "Bitmap ID variable.Bitmap ID": expr } : {}) } });
-        markers(cx + wpx / 2, cy - hpx / 2, it.on, it.fault);
+        condBadge(cx + wpx / 2 + 0.3 * sx, cy - hpx / 2 - 0.3 * sx, 2.4 * sx, it.fault, it.warning);
         const inst = INSTRUMENT_SYMBOLS[name];
         if (inst) {
           bubble(cx, cy, Math.min(wpx, hpx) * 0.4, isTag(it.label) ? it.label! : inst);
           break;
         }
         if (it.faceplate) els.push({ kind: "rect", x: r(cx - wpx / 2), y: r(cy - hpx / 2), w: wpx, h: hpx, fill: null, frame: null, dialog: { name: dialogFor(it.label ?? name, it.faceplate, it), x: r(cx + wpx / 2 + 10), y: r(cy - 60) } });
-        label(cx, cy + hpx / 2 + 2, it.label, { x0: cx - wpx / 2, x1: cx + wpx / 2, y0: cy - hpx / 2, cy });
-        if (it.label) /valve/.test(name) ? word(it.on, "OPEN", "CLOSED", cy) : word(it.on, "RUNNING", "STOPPED", cy);
+        label(cx, cy + hpx / 2 + 0.8 * sx, it.label, { x0: cx - wpx / 2, x1: cx + wpx / 2, y0: cy - hpx / 2, cy });
         break;
       }
       case "pipe": {
@@ -927,8 +1055,8 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         els.push({ kind: "round", x: r(x), y: r(y), w: r(w), h: r(h), fill: p.tile, frame: null, radius: rad });
         els.push({ kind: "rect", x: r(x + 2), y: r(y + h - rad / 2), w: r(w - 4), h: 1, fill: p.liquid[0], frame: null, props: { "Relative movement.Movement top-left.Y": pixels(it.level, 0, it.max, r(h - rad), true) } });
         els.push({ kind: "round", x: r(x), y: r(y), w: r(w), h: r(h), fill: null, frame: p.equipLine, lineWidth: 2, radius: rad });
-        els.push(text(x, y + h / 2 - 14, w, 28, `%.0f${it.unit ? ` ${it.unit}` : ""}`, [SEMI, 13], p.text, "HCENTER", { props: { "Text variables.Text variable": real(it.level) } }));
-        label(x + w / 2, y + h + 4, it.label);
+        els.push(text(x, y + h / 2 - 2.2 * sx, w, 4.4 * sx, `%.0f${it.unit ? ` ${it.unit}` : ""}`, [SEMI, ptPx(3.2 * sx)], p.text, "HCENTER", { props: { "Text variables.Text variable": real(it.level) } }));
+        label(x + w / 2, y + h + 1 * sx, it.label);
         break;
       }
       case "pump":
@@ -946,16 +1074,16 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         if (it.type === "valve") {
           els.push({ kind: "switcher", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, props: { 'Image settings.Image, if "on"': `${pool}.${image(on, px)}`, 'Image settings.Image, if  "off"': `${pool}.${image(off, px)}`, Variable: v }, ...face });
         } else {
-          // Grey stopped, bright running; no turning impeller (ISA-101: no animation without a reason).
+          // The run state is the sign by the name (no fill, no turning impeller).
           const offId = `${pool}.${image(off, px)}`;
           els.push({ kind: "image", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, props: { "Static ID": offId, "Bitmap ID variable.Bitmap ID": `SEL(${v}, '${offId}', '${pool}.${image(on, px)}')` }, ...face });
-          const rc = it.type === "pump" ? (px / 2) * PUMP_CASING : px / 2;
-          markers(cx + rc, cy - rc, v, it.type === "pump" ? it.fault : undefined);
         }
+        // The condition badge at the item's corner, as the browser.
+        const rc = it.type === "pump" ? (px / 2) * PUMP_CASING : px / 2;
+        if (it.type === "valve") condBadge(cx + (it.vertical ? px / 4 : px / 2), cy - (it.vertical ? px / 2 : px / 4) - 0.4 * sx, 2.4 * sx, it.fault, it.warning);
+        else condBadge(cx + rc * 0.85, cy - rc * 0.85, 2.4 * sx, it.fault, it.warning);
         if (faceDialog) els.push({ kind: "rect", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, fill: null, frame: null, dialog: faceDialog });
-        if (it.type === "valve" && it.label) els.push(text(cx + size / 2 + 6, cy - 9, 120, 18, it.label, [SEMI, 8.5], p.muted));
-        else label(cx, cy + size / 2 + 2, it.label);
-        if (it.label) it.type === "valve" ? word(v, "OPEN", "CLOSED", cy) : word(v, "RUNNING", "STOPPED", cy);
+        label(cx, cy + size / 2 + 0.8 * sx, it.label);
         break;
       }
       case "instrument":
@@ -968,8 +1096,8 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
           // Not an instrument: a plain reading with its label above.
           const at = nearestOnLine(all, it.x, it.y, aspect, 9);
           if (at) leader(X(at[0]), Y(at[1]), cx, cy + (Y(at[1]) < cy ? -15 : 15), true);
-          reading(cx - 52, cy, it.value, it.decimals, it.unit);
-          if (it.label) els.push(text(cx - 80, cy - 33, 160, 16, it.label, [SEMI, 8], p.muted, "HCENTER"));
+          reading(cx - (READING.w / 2) * sx, cy, it.value, it.decimals, it.unit, sx);
+          if (it.label) els.push(text(cx - HW, cy - 2.8 * sx - LH * 0.8, LW, LH, it.label, LF, p.muted, "HCENTER"));
           break;
         }
         const tap = it.type === "instrument" ? instrumentTap(it, all, aspect, lib) : (() => { const at = nearestOnLine(all, it.x, it.y, aspect, 9); return at ? { at, dir: "u" as const } : undefined; })();
@@ -981,20 +1109,9 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         }
         bubble(cx, cy, rr, tag ?? "XI", it.type === "instrument" ? it.on : undefined);
         if (v) {
-          // As in the browser: right of the bubble, else left, else above or below (away from the connection).
-          const boxes = all.flatMap((q) => {
-            if (q.type === "tank") return [{ x0: X(q.x), x1: X(q.x + q.w), y0: Y(q.y), y1: Y(q.y + q.h) }];
-            const f = q.type === "symbol" ? findSymbol(lib, q.symbol) : undefined;
-            if (!f || q.type !== "symbol") return [];
-            const { w: sw, h: sh } = symbolSize(f[1], q.size);
-            const [vw, vh] = (q.rotate ?? 0) % 180 ? [sh, sw] : [sw, sh];
-            return [{ x0: X(q.x) - (vw * sx) / 2, x1: X(q.x) + (vw * sx) / 2, y0: Y(q.y) - (vh * sx) / 2, y1: Y(q.y) + (vh * sx) / 2 }];
-          });
-          const free = (x0: number) => !boxes.some((b) => b.x0 < x0 + 104 && b.x1 > x0 && b.y0 < cy + 15 && b.y1 > cy - 15);
-          const right = cx + rr + 8, left = cx - rr - 112;
-          if (free(right)) reading(right, cy, v, it.decimals, it.unit);
-          else if (free(left)) reading(left, cy, v, it.decimals, it.unit);
-          else reading(cx - 52, tap && Y(tap.at[1]) > cy ? cy - rr - 22 : cy + rr + 22, v, it.decimals, it.unit);
+          // As in the browser (labels.ts readingSpot): right of the bubble, else left, else above or below (away from the connection).
+          const rs = readingSpot(it, all, aspect, lib, tapY(it, all, aspect, lib));
+          reading(X(0) + (rs.x - READING.w / 2) * sx, Y(0) + rs.y * sx, v, it.decimals, it.unit, sx);
         }
         break;
       }
@@ -1012,6 +1129,20 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         els.push({ kind: "circle", x: r(X(it.x) - 6), y: r(Y(it.y) - 6), w: 12, h: 12, fill: p.pipe, frame: null });
         break;
     }
+  }
+
+  /** A filled arrow head with its tip at (x, y), pointing along (dx, dy) (one of the four directions): a picture. */
+  function arrow(x: number, y: number, dx: number, dy: number, len: number, half: number, color: Argb): NativeElement {
+    const s = Math.max(4, r(Math.max(len, 2 * half)));
+    const dir = dx > 0 ? "r" : dx < 0 ? "l" : dy > 0 ? "d" : "u";
+    const id = `arrow_${dir}_${s}_${hex(color).slice(1)}`;
+    const L2 = (len / s) * 100, H = (half / s) * 100;
+    // In a 100 box with the tip at the right-middle, turned to the direction.
+    const rot = { r: 0, d: 90, l: 180, u: 270 }[dir];
+    if (!needed.has(id)) needed.set(id, `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 100 100"><path d="M100 50L${100 - L2} ${50 - H}V${50 + H}Z" fill="${hex(color)}" transform="rotate(${rot} 50 50)"/></svg>`);
+    // The box sits so the tip lands on (x, y).
+    const [bx, by] = dir === "r" ? [x - s, y - s / 2] : dir === "l" ? [x, y - s / 2] : dir === "d" ? [x - s / 2, y - s] : [x - s / 2, y];
+    return { kind: "image", x: r(bx), y: r(by), w: s, h: s, props: { "Static ID": `${pool}.${id}` } };
   }
 
   function image(base: string, px: number): string {
@@ -1088,6 +1219,22 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
       implementation: impl.join("\n") || ";",
     },
   };
+}
+
+/** A rail title on up to two lines of about `width` pixels: [line number, text, font size]; the font shrinks to fit. */
+export function railLines(title: string, width: number, size: number): [number, string, number][] {
+  const fits = (t: string, fs: number) => t.length * fs * 0.56 <= width;
+  const words = title.split(/\s+/).filter(Boolean);
+  // The split into one or two lines whose longer line is shortest.
+  let lines = [title];
+  for (let i = 1; i < words.length; i++) {
+    const two = [words.slice(0, i).join(" "), words.slice(i).join(" ")];
+    if (Math.max(...two.map((l) => l.length)) < Math.max(...lines.map((l) => l.length))) lines = two;
+  }
+  if (lines.length === 2 && fits(title, size)) lines = [title];
+  const longest = Math.max(...lines.map((l) => l.length));
+  const fs = fits("x".repeat(longest), size) ? size : Math.max(size * 0.7, width / (longest * 0.56));
+  return lines.map((l, i) => [i, l, fs]);
 }
 
 /** Pictures per gauge: one every 2.5 % of the range. */

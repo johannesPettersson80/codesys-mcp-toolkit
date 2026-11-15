@@ -114,25 +114,26 @@ describe("symbols on a diagram", () => {
     expect(layoutProblems(screen)).toEqual([]);
   });
 
-  it("render in the browser with on and fault bindings, a faceplate and rotation", () => {
+  it("render in the browser with the state signs, a faceplate and rotation", () => {
     const r = renderScreen(screen);
     expect(r.html).toMatch(/class="sym sym-motor"/);
     expect(r.html).toMatch(/rotate\(90\)/);
     expect(r.html).toMatch(/data-open="fp-1"/);
     expect(r.bindings).toEqual(expect.arrayContaining([{ kind: "on", v: "PLC_PRG.xRun" }, { kind: "fault", v: "PLC_PRG.xTrip" }, { kind: "on", v: "PLC_PRG.xBelt" }]));
-    // Grey off, bright on; a fault is a marker beside the symbol, not a red symbol (ISA-101).
-    expect(r.css).toMatch(/\.sym\.on\{--state:var\(--equip-on\)/);
+    // The run state is the sign before the name, even without a name (the conveyor); the alarm a badge at the corner, not a red symbol (ISA-101).
+    expect(r.html.match(/<g class="rs"/g)).toHaveLength(2);
+    expect(r.html).toMatch(/class="cb"/);
     expect(r.css).not.toMatch(/\.fault \.sym\{/);
-    expect(r.html).toMatch(/class="fault-mark"/);
-    expect(r.html).not.toMatch(/class="run-dot"/); // the state is the fill
+    expect(r.html).not.toMatch(/fault-mark|RUNNING|STOPPED/);
   });
 
-  it("export to CODESYS as one picture per state, picked by the on variable, with the fault as a marker", () => {
+  it("export to CODESYS as one picture per state, picked by the on variable, with the state signs", () => {
     const plan = nativePlan(screen);
     const img = plan.elements.find((e) => e.kind === "image" && String(e.props?.["Static ID"]).includes("sym_motor_off"))!;
     expect(img.props!["Bitmap ID variable.Bitmap ID"]).toBe(`SEL(PLC_PRG.xRun, 'IP_Plant.sym_motor_off_${img.w}x${img.h}', 'IP_Plant.sym_motor_on_${img.w}x${img.h}')`);
-    expect(plan.elements.some((e) => e.text === "1" && e.invisible === "NOT (PLC_PRG.xTrip)")).toBe(true); // priority-1 alarm indicator
-    expect(plan.elements.some((e) => e.text === "RUNNING" && e.invisible === "NOT (PLC_PRG.xRun)")).toBe(true); // the state in words too
+    const sign = (kind: string) => plan.elements.filter((e) => String(e.props?.["Static ID"]).includes(`.sign_${kind}_`));
+    expect(sign("alarm").map((e) => e.invisible)).toEqual(["NOT (PLC_PRG.xTrip)"]);
+    expect(sign("run").map((e) => e.invisible).sort()).toEqual(["NOT (PLC_PRG.xBelt)", "NOT (PLC_PRG.xRun)"]);
     const ids = plan.images.map((i) => i.id);
     expect(ids.filter((i) => i.startsWith("sym_motor_"))).toHaveLength(2);
     // The outline keeps 2 px at any size: the stroke is converted to box units for the picture's size.
@@ -141,7 +142,7 @@ describe("symbols on a diagram", () => {
     expect(motor).toContain(`stroke-width="${Math.round(2 * (100 / img.w) * 100) / 100}"`);
     expect(ids.some((i) => /^sym_conveyor_on_r90_\d+x\d+$/.test(i))).toBe(true);
     for (const i of plan.images.filter((x) => x.id.startsWith("sym_"))) expect(i.svg).not.toMatch(/var\(--/);
-    expect(plan.images.find((i) => i.id.startsWith("sym_motor_on"))!.svg).toMatch(/#ffffff/); // running: white (High Performance HMI Handbook)
+    expect(plan.images.find((i) => i.id.startsWith("sym_motor_on"))!.svg).toMatch(/#ffffff/); // the surface, whatever the state (the sign shows it)
     expect(plan.dialogs.map((d) => d.name)).toEqual(["Dlg_Plant_M_1"]);
     // A conveyor turned upright is taller than wide.
     const belt = plan.elements.find((e) => String(e.props?.["Static ID"]).includes("sym_conveyor"))!;

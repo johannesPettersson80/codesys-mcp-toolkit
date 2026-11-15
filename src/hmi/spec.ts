@@ -50,12 +50,26 @@ const end = z
   .union([z.string().regex(/^[^.]+\.[a-z-]+$/), z.tuple([num, num])])
   .describe("A port 'P-101.out' (see the ports of each symbol) or a point [x, y] at the diagram's edge");
 
+/**
+ * Equipment state, three independent things, each shown in its own place: the run state (or a
+ * valve's position) by the item, the mode only in Manual, the condition only when not OK.
+ */
+const fault = v.optional().describe("BOOL: an alarm on this equipment (a red alarm badge at its corner)");
+const warning = v.optional().describe("BOOL: a warning (an amber badge at its corner; an alarm wins)");
+const manual = v.optional().describe("BOOL: in manual mode (a hand after its name; auto shows nothing)");
+/** A value that belongs to the equipment (a valve's opening, a pump's speed), as plain text under its name. */
+const shown = {
+  value: v.optional().describe("A value of this equipment shown under its name, e.g. a control valve's opening or a pump's speed (not a separate sensor)"),
+  unit: z.string().optional(),
+  decimals: z.number().int().optional(),
+};
+
 /** Things placed on a process (mimic) diagram, in a 0..100 x 0..100 box scaled to the tile. */
 const processItem = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tank"), id, x: num, y: num, w: num, h: num, level: v, max: num.default(100), unit: z.string().optional(), label: z.string().optional(), bands: z.array(band).optional() }),
-  z.object({ type: z.literal("pump"), id, x: num, y: num, size: num.default(12), running: v, fault: v.optional(), label: z.string().optional(), faceplate: faceplate.optional() }),
-  z.object({ type: z.literal("fan"), id, x: num, y: num, size: num.default(12), running: v, label: z.string().optional(), faceplate: faceplate.optional() }),
-  z.object({ type: z.literal("valve"), id, x: num, y: num, size: num.default(8), open: v, vertical: z.boolean().optional(), label: z.string().optional(), faceplate: faceplate.optional() }),
+  z.object({ type: z.literal("pump"), id, x: num, y: num, size: num.default(12), running: v.describe("BOOL: running (▶ before its name; ■ when stopped)"), fault, warning, manual, ...shown, label: z.string().optional(), faceplate: faceplate.optional() }),
+  z.object({ type: z.literal("fan"), id, x: num, y: num, size: num.default(12), running: v.describe("BOOL: running (▶ before its name; ■ when stopped)"), fault, warning, manual, ...shown, label: z.string().optional(), faceplate: faceplate.optional() }),
+  z.object({ type: z.literal("valve"), id, x: num, y: num, size: num.default(8), open: v.describe("BOOL: open (drawn hollow; closed is drawn filled, as on a P&ID)"), fault, warning, manual, ...shown, vertical: z.boolean().optional(), label: z.string().optional(), faceplate: faceplate.optional() }),
   z.object({ type: z.literal("junction"), id: z.string(), x: num, y: num }).describe("A tee or bend that several pipes meet at"),
   z
     .object({
@@ -66,8 +80,11 @@ const processItem = z.discriminatedUnion("type", [
       y: num.describe("Centre"),
       size: num.default(10).describe("Width in diagram units (0..100 across)"),
       rotate: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).optional().describe("Clockwise, in degrees; ports turn with it"),
-      on: v.optional().describe("BOOL: on or running (green)"),
-      fault: v.optional().describe("BOOL: fault (red, wins over on)"),
+      on: v.optional().describe("BOOL: running (▶ before its name, ■ when stopped); for a valve symbol: open (closed is drawn filled)"),
+      fault,
+      warning,
+      manual,
+      ...shown,
       label: z.string().optional(),
       faceplate: faceplate.optional(),
     })
@@ -108,8 +125,10 @@ const station = z.object({
   name: z.string().describe("Short name, e.g. 'Heating'"),
   tag: z.string().optional().describe("Equipment tag, e.g. 'E-201'"),
   symbol: z.string().optional().describe("Pictogram: 'tank', 'pump', 'valve', 'fan' or a symbol from the library, e.g. 'heat_exchanger'"),
-  on: v.optional().describe("BOOL: running (or open, for a valve)"),
-  fault: v.optional().describe("BOOL: the station has an alarm"),
+  on: v.optional().describe("BOOL: running (▶ before its name, ■ when stopped)"),
+  fault: v.optional().describe("BOOL: the station has an alarm (red badge, red top edge)"),
+  warning: v.optional().describe("BOOL: a warning (amber badge and top edge; an alarm wins)"),
+  manual: v.optional().describe("BOOL: in manual mode (a hand after its name)"),
   value: v.optional().describe("The station's key value"),
   unit: z.string().optional(),
   decimals: z.number().int().optional(),
@@ -319,7 +338,7 @@ export function screenVariables(s: Screen): string[] {
         for (const m of ["iApply", "iSave", "sActive"]) add(`PRG_Recipe_${w.recipe}.${m}`);
         break;
       case "line":
-        for (const s of w.stations) for (const x of [s, s.feed]) if (x) [x.on, x.fault, x.value].forEach(add);
+        for (const s of w.stations) for (const x of [s, s.feed]) if (x) [x.on, x.fault, x.warning, x.manual, x.value].forEach(add);
         break;
       case "process":
         for (const p of w.items) {
@@ -328,6 +347,7 @@ export function screenVariables(s: Screen): string[] {
             [f.auto, f.start, f.stop, f.open, f.close, f.reset, f.setpoint?.variable].forEach(add);
             f.values?.forEach((x) => add(x.value));
           }
+          if (p.type === "pump" || p.type === "fan" || p.type === "valve" || p.type === "symbol") [p.fault, p.warning, p.manual, p.value].forEach(add);
           if (p.type === "tank") add(p.level);
           else if (p.type === "pump") (add(p.running), add(p.fault));
           else if (p.type === "fan") add(p.running);

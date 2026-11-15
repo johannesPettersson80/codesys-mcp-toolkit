@@ -7,11 +7,12 @@
  * Colours, sizes and icons come from the design system (theme.ts, icons.ts),
  * which the native CODESYS export shares.
  */
-import { iconSvg, type IconName } from "./icons.js";
+import { ICONS, iconSvg, type IconName } from "./icons.js";
 import { routed, itemKey, labelSpots, nearestOnLine, type LabelSpot, lineEnds, instrumentTap, PUMP_CASING } from "./route.js";
 import { hasDock, type Faceplate, type Machine, type ProcessItem, type Screen, type Tone, type Widget } from "./spec.js";
-import { BUILTIN_SYMBOLS, findSymbol, INSTRUMENT_SYMBOLS, scopeIds, symbolBox, symbolSize, upright, type SymbolDef, type SymbolLib } from "./symbols.js";
+import { BUILTIN_SYMBOLS, findPictogram, findSymbol, INSTRUMENT_SYMBOLS, pictogramSize, scopeIds, symbolBox, symbolSize, upright, type SymbolDef, type SymbolLib } from "./symbols.js";
 import { scaleOf, SPACE, themeCss, themeFor, TYPE } from "./theme.js";
+import { nameParts, textKey, placeTexts, READING, readingSpot, SIGN, tapY, type PlacedLabel } from "./labels.js";
 
 export interface Canvas {
   w: number;
@@ -372,18 +373,17 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
       const vw = 100;
       const vh = r1((100 * Math.max(60, bodyH)) / Math.max(60, box.w - 24));
       const sy = vh / 100;
-      const spots = labelSpots(w.items, sy, lib);
       const ends = lineEnds(w.items);
       const all = routed(w.items, sy, lib);
+      const placed = placeTexts(all, sy, lib, ends);
       // Line names at the diagram's edge, after everything else so nothing covers them.
       const names = all.flatMap((p, n) => {
         const e = ends[n];
         if (p.type !== "pipe" || !e || !p.points?.length) return [];
         const pt = e.at === "start" ? p.points[0]! : p.points[p.points.length - 1]!;
-        const [x, y] = pt;
-        // Top and bottom first (a corner point on the top line is a top end), then left and right.
-        const top = y <= 1 || (y <= 5 && x > 5 && x < 95), bottom = y >= 99 || (y >= 95 && x > 5 && x < 95);
-        const [tx, ty, anchor] = top ? (x > 75 ? [x - 1.6, y + 2.6 / sy, "end"] : [x + 1.6, y + 2.6 / sy, "start"]) : bottom ? (x < 25 ? [x + 1.6, y - 0.8 / sy, "start"] : [x - 1.6, y - 0.8 / sy, "end"]) : x <= 5 ? [x + 1, y - 1.6 / sy, "start"] : [x - 1, y - 1.6 / sy, "end"];
+        void pt;
+        // The name's place (labels.ts): beside a top or bottom end, above or below a side end, clear of the rest.
+        const pl = placed.lines.get(n)!;
         // A flow arrow on the line near its free end: into the diagram where a line enters, out where it leaves.
         const pts = p.points;
         const [a, b] = e.at === "start" ? [pts[0]!, pts[1] ?? pts[0]!] : [pts[pts.length - 2] ?? pts[0]!, pts[pts.length - 1]!];
@@ -392,10 +392,10 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
         const tip: [number, number] = e.at === "start" ? [a[0] + dx * 3.2, a[1] * sy + dy * 3.2] : [b[0] - dx * 0.4, b[1] * sy - dy * 0.4];
         const base: [number, number] = [tip[0] - dx * 1.8, tip[1] - dy * 1.8];
         const arrow = `<path class="line-arrow" d="M${r1(tip[0])} ${r1(tip[1])}L${r1(base[0] - dy * 0.95)} ${r1(base[1] + dx * 0.95)}L${r1(base[0] + dy * 0.95)} ${r1(base[1] - dx * 0.95)}Z"/>`;
-        return [`${arrow}<text class="p-text p-line" x="${r1(tx)}" y="${r1(ty * sy)}" style="text-anchor:${anchor}">${esc(e.label)}</text>`];
+        return [`${arrow}<text class="p-text p-line" x="${r1(pl.x)}" y="${r1(pl.y + 0.65)}" style="text-anchor:${pl.anchor}">${esc(e.label)}</text>`];
       });
       const items = [...all].sort((a, b) => (a.type === "pipe" ? -1 : 0) - (b.type === "pipe" ? -1 : 0));
-      return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id, face, lib, spots, all)).join("")}${names.join("")}</svg>`;
+      return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id, face, lib, placed.labels, all)).join("")}${names.join("")}</svg>`;
     }
   }
 }
@@ -422,37 +422,30 @@ export function lineLayout(w: { stations: { feed?: unknown }[] }, bodyW: number,
 
 /** A station's pictogram in a 100x100 box: tank, pump, valve or fan, or a symbol from the library. */
 function pictogram(name: string | undefined, lib: SymbolLib): string {
-  if (!name) return "";
-  const body = `fill="var(--state)" stroke="var(--line)"`;
-  const builtin: Record<string, string> = {
-    // ISO 10628-2: a vessel with dished ends, the centrifugal pump (2322), the valve (2101), the fan (X8164).
-    tank: `<path d="M30 22Q30 10 50 10Q70 10 70 22V78Q70 90 50 90Q30 90 30 78Z" ${body}/>`,
-    pump: `<circle cx="50" cy="50" r="36" ${body}/><path d="M50 14L86 50L50 86M14 50H86" fill="none" stroke="var(--line)" stroke-linejoin="round"/>`,
-    valve: `<path d="M12 31L50 50L12 69ZM88 31L50 50L88 69Z" ${body} stroke-linejoin="round"/>`,
-    fan: `<circle cx="50" cy="50" r="36" ${body}/><path d="M24.5 24.5L50 50L24.5 75.5M50 50H86" fill="none" stroke="var(--line)" stroke-linejoin="round"/>`,
-  };
-  const b = builtin[name.toLowerCase()];
-  if (b) return b;
-  const f = findSymbol(lib, name);
+  const f = findPictogram(lib, name);
   if (!f) return "";
   const [key, d] = f;
-  const [vw, vh] = d.viewBox;
-  return `<g transform="translate(50 50)">${symbolMarkup(key, d, vw >= vh ? 84 : (84 * vw) / vh)}</g>`;
+  return `<g transform="translate(50 50)">${symbolMarkup(key, d, pictogramSize(d, 100).w)}</g>`;
 }
 
-/** The process as station tiles on a product path (Coperion, Kiefel): name, pictogram, key value, state in words. */
+/** The process as station tiles on a product path (Coperion, Kiefel): name, pictogram (filled while running) and key value. */
 function lineHtml(w: Extract<Widget, { type: "line" }>, bodyW: number, bodyH: number, k: number, bind: Bind, lib: SymbolLib): string {
   const L = lineLayout(w, bodyW, bodyH, k);
   const tile = (s: Station, x: number, y: number, h: number, small: boolean) => {
-    const valve = /valve/i.test(s.symbol ?? "");
     const pic = pictogram(s.symbol, lib);
-    const word = s.on ? `<span class="stn-st"><span class="w-on">${valve ? "OPEN" : "RUNNING"}</span><span class="w-off">${valve ? "CLOSED" : "STOPPED"}</span></span>` : "";
+    const valve = /valve/i.test(s.symbol ?? "");
+    // The name line as on the diagram: the run sign (driven equipment), the name, the mode hand.
+    const runS = s.on && !valve ? `<svg class="rs" viewBox="0 0 10 10" ${bind({ kind: "on", v: s.on })}><path class="rs-on" d="M1 .5L10 5L1 9.5Z"/><rect class="rs-off" x="1" y="1" width="8" height="8" rx=".8"/></svg>` : "";
+    const handS = s.manual ? `<span class="md-h" ${bind({ kind: "on", v: s.manual })}>${iconSvg("manual", r1(15 * k))}</span>` : "";
+    const badge = s.fault || s.warning ? `<span class="stn-cb">${s.warning ? `<svg class="cbw" viewBox="-12 -11 24 22"><path class="cb-wt" d="M0 -9.5L10.5 8.5H-10.5Z"/><path class="cb-wx" d="M0 -3.4V2M0 5V5.1"/></svg>` : ""}${s.fault ? `<svg class="cba" viewBox="-10 -10 20 20"><circle r="9.5"/><path d="M0 -5V1M0 4.6V4.7"/></svg>` : ""}</span>` : "";
     const value = small ? "" : `<span class="stn-v">${s.value ? `<b ${bind({ kind: "text", v: s.value, decimals: s.decimals ?? 1 })}>–</b>${s.unit ? `<span class="stn-u">${esc(s.unit)}</span>` : ""}` : ""}</span>`;
-    const inner = `<span class="stn-name">${esc(s.name)}</span>${s.tag && !small ? `<span class="stn-tag">${esc(s.tag)}</span>` : ""}${pic ? `<svg class="stn-pic" viewBox="0 0 100 100">${pic}</svg>` : ""}${value}${word}<span class="stn-fault">1</span>`;
+    const inner = `<span class="stn-name">${runS}<span class="stn-nt">${esc(s.name)}</span>${handS}</span>${s.tag && !small ? `<span class="stn-tag">${esc(s.tag)}</span>` : ""}${pic ? `<svg class="stn-pic${valve ? " vlv" : ""}" viewBox="0 0 100 100">${pic}</svg>` : ""}${value}${badge}`;
     const run = s.on ? ` ${bind({ kind: "on", v: s.on })}` : "";
     const nav = s.screen ? ` data-nav="${esc(s.screen)}"` : "";
-    const st = `<div class="stn${s.on ? "" : " nostat"}${small ? " small" : ""}${s.screen ? " link" : ""}"${run}${nav} style="left:${r1(x)}px;top:${r1(y)}px;width:${r1(L.tw)}px;height:${r1(h)}px"${s.screen ? ` title="Open ${esc(s.screen)}"` : ""}>${inner}</div>`;
-    return s.fault ? `<div class="stn-al" ${bind({ kind: "fault", v: s.fault })}>${st}</div>` : st;
+    const st = `<div class="stn${small ? " small" : ""}${s.screen ? " link" : ""}"${run}${nav} style="left:${r1(x)}px;top:${r1(y)}px;width:${r1(L.tw)}px;height:${r1(h)}px"${s.screen ? ` title="Open ${esc(s.screen)}"` : ""}>${inner}</div>`;
+    // The condition: the warning and the alarm each bound on a wrapper (the top edge and the badge follow them; the alarm wins).
+    const warned = s.warning ? `<div class="stn-wn" ${bind({ kind: "on", v: s.warning })}>${st}</div>` : st;
+    return s.fault ? `<div class="stn-al" ${bind({ kind: "fault", v: s.fault })}>${warned}</div>` : warned;
   };
   // The product path: in at the left edge, through every tile, out with an arrow at the right.
   const py = r1(L.pathY), end = r1(bodyW - 2 * k);
@@ -475,9 +468,26 @@ function bubbleText(tag: string, cx: number, cy: number, r: number): string {
   return `<text class="inst-fn" x="${r1(cx)}" y="${r1(cy - 0.2 * f)}" style="font-size:${r1(1.75 * f)}px">${esc(letters)}</text><text class="inst-no" x="${r1(cx)}" y="${r1(cy + 1.9 * f)}" style="font-size:${r1(1.45 * f)}px">${esc(num)}</text>`;
 }
 
-/** The alarm marker beside an item while it is faulted (ISA-101: the equipment keeps its grey; a shape and colour beside it). */
-function faultMark(x: number, y: number): string {
-  return `<g class="fault-mark" transform="translate(${r1(x + 0.4)} ${r1(y - 0.4)})"><rect x="-1.2" y="-1.2" width="2.4" height="2.4" rx=".2"/><text y=".75">1</text></g>`;
+/**
+ * Equipment state, three things each in its own place (the same signs as the machine corner and
+ * the alarm counters): the run state before the name (▶ running, ■ stopped), the mode after it
+ * (a hand in Manual, nothing in Auto), the condition at the symbol's corner (a warning triangle or
+ * an alarm circle, nothing when OK). A valve's position is its fill (closed filled, as on a P&ID).
+ */
+function runSign(x: number, cy: number, v: string, bind: Bind): string {
+  const s = SIGN.run;
+  return `<g class="rs" ${bind({ kind: "on", v })}><path class="rs-on" d="M${r1(x)} ${r1(cy - s * 0.58)}L${r1(x + s)} ${r1(cy)}L${r1(x)} ${r1(cy + s * 0.58)}Z"/><rect class="rs-off" x="${r1(x + 0.08)}" y="${r1(cy - s * 0.44)}" width="${r1(s * 0.88)}" height="${r1(s * 0.88)}" rx=".1"/></g>`;
+}
+function handSign(x: number, cy: number, v: string, bind: Bind): string {
+  const s = SIGN.hand / 24;
+  return `<g class="md" ${bind({ kind: "on", v })}><path d="${ICONS.manual}" transform="translate(${r1(x)} ${r1(cy - SIGN.hand / 2)}) scale(${s})"/></g>`;
+}
+/** The condition badge centred at (x, y): the alarm while `fault`, else the warning while `warning`. */
+function condBadge(x: number, y: number, fault: string | undefined, warning: string | undefined, bind: Bind): string {
+  if (!fault && !warning) return "";
+  const warn = warning ? `<g class="cb-w" ${bind({ kind: "on", v: warning })}><path class="cb-wt" d="M0 -1.15L1.3 1.05H-1.3Z"/><path class="cb-wx" d="M0 -.42V.32M0 .66V.67"/></g>` : "";
+  const alarm = fault ? `<g class="cb-a"><circle r="1.2"/><path d="M0 -.62V.12M0 .55V.56"/></g>` : "";
+  return `<g class="cb" transform="translate(${r1(x)} ${r1(y)})" ${fault ? bind({ kind: "fault", v: fault }) : ""}>${warn}${alarm}</g>`;
 }
 
 function describeArc(cx: number, cy: number, r: number, a0: number, a1: number): string {
@@ -500,18 +510,20 @@ export function symbolMarkup(name: string, d: SymbolDef, size: number, rotate = 
   return `<g${rotate ? ` transform="rotate(${rotate})"` : ""}><svg x="${r1(-w / 2)}" y="${r1(-h / 2)}" width="${r1(w)}" height="${r1(h)}" viewBox="0 0 ${d.viewBox[0]} ${d.viewBox[1]}" overflow="visible">${upright(scopeIds(d.svg, `sym-${name}`), rotate)}</svg></g>`;
 }
 
-/** The state in words under an item's label (redundant coding: not by colour alone), replaced in place by processSvg. */
-function stateWord(v: string, on: string, off: string): string {
-  return `<!--word:${on}|${off}|${v}-->`;
-}
 
-function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => string, face: Face, lib: SymbolLib, spots: Map<string, LabelSpot> = new Map(), all: ProcessItem[] = []): string {
+function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => string, face: Face, lib: SymbolLib, placed: Map<string, PlacedLabel> = new Map(), all: ProcessItem[] = []): string {
   const Y = (y: number) => r1(y * sy);
-  // The label centred below the item, unless something takes that place (see labelSpots).
-  const spot = spots.get((itemKey(p) ?? "").toLowerCase());
+  // The label's place, clear of the rest of the drawing (labels.ts placeTexts).
+  const pl = placed.get(textKey(p));
+  const spot = undefined as { side: string; x: number } | undefined;
   // The anchor is a class: .p-label's CSS text-anchor would override an attribute.
   const text = (x: number, y: number, t: string, anchor = "middle") => `<text class="p-label${anchor === "start" ? " left" : anchor === "end" ? " right" : ""}" x="${r1(x)}" y="${Y(y)}">${esc(t)}</text>`;
   const label = (x: number, y: number, t?: string, box?: { x0: number; x1: number; y0: number; ymid: number }) => {
+    if (pl) {
+      // The name line: the run sign, the name, the mode hand.
+      const parts = nameParts(p);
+      return `${parts.run ? runSign(pl.x0, pl.y, parts.run, bind) : ""}${t ? `<text class="p-label left" x="${r1(pl.textX)}" y="${r1(pl.y + 0.6)}">${esc(t)}</text>` : ""}${parts.manual ? handSign(pl.textEnd + 0.5, pl.y, parts.manual, bind) : ""}${parts.value ? `<text class="p-val" x="${r1(pl.x0)}" y="${r1(pl.valueY + 0.62)}" ${bind({ kind: "text", v: parts.value, decimals: "decimals" in p ? (p.decimals ?? 1) : 1, unit: "unit" in p ? p.unit : undefined })}>–</text>` : ""}`;
+    }
     if (!t) return "";
     if (spot?.side === "below-left") return text(spot.x - 1.4, y, t, "end");
     if (spot?.side === "below-right") return text(spot.x + 1.4, y, t, "start");
@@ -520,15 +532,7 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
     if (spot?.side === "above" && box) return text(x, box.y0 - 0.8 / sy, t);
     return text(x, y, t);
   };
-  const out = processSvgItem();
-  return out.replace(/<!--word:([A-Z]+)\|([A-Z]+)\|([^>]*?)-->/, (_m, on: string, off: string, v: string) => {
-    // Next to the item's label, on the side away from the item: same x and anchor, one line further.
-    const lab = /<text class="p-label( left| right)?" x="([-\d.]+)" y="([-\d.]+)">/.exec(out);
-    const at = "x" in p && "y" in p ? [p.x, p.y] : [0, 0];
-    const above = lab ? Number(lab[3]) < Y(at[1]!) : false;
-    const [cls, x, y] = lab ? [lab[1] ?? "", lab[2]!, Number(lab[3]) + (above ? -2.1 : 2.1)] : ["", String(r1(at[0]!)), Y(at[1]!) + 6];
-    return `<text class="st-word${cls}" x="${x}" y="${r1(y)}" style="text-anchor:${cls === " left" ? "start" : cls === " right" ? "end" : "middle"}" ${bind({ kind: "on", v })}><tspan class="w-on">${on}</tspan><tspan class="w-off">${off}</tspan></text>`;
-  });
+  return processSvgItem();
   function processSvgItem(): string {
   switch (p.type) {
     case "symbol": {
@@ -540,7 +544,8 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
       // An instrument symbol is an ISA-5.1 bubble: its tag inside, no label under it.
       const inst = INSTRUMENT_SYMBOLS[name];
       const tagText = inst ? bubbleText(isTag(p.label) ? p.label! : inst, p.x, Y(p.y), (p.size / 2) * 0.8) : "";
-      return `<g ${p.fault ? bind({ kind: "fault", v: p.fault }) : ""} ${click}><g class="sym sym-${esc(name)}${p.on || inst ? "" : " nostat"}" ${p.on ? bind({ kind: "on", v: p.on }) : ""}><g transform="translate(${r1(p.x)} ${Y(p.y)})">${symbolMarkup(name, d, p.size, p.rotate ?? 0)}</g>${tagText}</g>${p.fault ? faultMark(box.x1, box.y0 * sy) : ""}${inst ? "" : label(p.x, box.y1 + 2.6 / sy, p.label, { x0: box.x0, x1: box.x1, y0: box.y0, ymid: p.y })}${p.on && !inst ? (/valve/.test(name) ? stateWord(p.on, "OPEN", "CLOSED") : stateWord(p.on, "RUNNING", "STOPPED")) : ""}</g>`;
+      const valve = /valve/i.test(name) && !!p.on;
+      return `<g ${click}><g class="sym sym-${esc(name)}${valve ? " vlv" : ""}" ${valve ? bind({ kind: "on", v: p.on! }) : ""}><g transform="translate(${r1(p.x)} ${Y(p.y)})">${symbolMarkup(name, d, p.size, p.rotate ?? 0)}</g>${tagText}</g>${condBadge(box.x1 + 0.3, box.y0 * sy - 0.3, p.fault, p.warning, bind)}${inst ? "" : label(p.x, box.y1 + 2.6 / sy, p.label, { x0: box.x0, x1: box.x1, y0: box.y0, ymid: p.y })}</g>`;
     }
     case "pipe": {
       const d = (p.points ?? []).map(([x, y], i) => `${i ? "L" : "M"}${r1(x)} ${Y(y)}`).join(" ");
@@ -567,11 +572,11 @@ ${label(x + w / 2, p.y + p.h + 2.8 / sy, p.label)}</g>`;
       // The casing with the discharge nozzle tangential at its top, out to the right (ports: in on the axis, out at the nozzle).
       // ISO 10628-2 2322 (centrifugal pump): a circle, lines from its top and bottom to the outlet, the axis through it.
       const s = p.size, cx = r1(p.x), cy = Y(p.y), r = r1((s / 2) * PUMP_CASING);
-      return `<g ${p.fault ? bind({ kind: "fault", v: p.fault }) : ""} ${p.faceplate ? `class="clickable" ${face(p.label ?? "Pump", p.faceplate, { running: p.running, fault: p.fault })}` : ""}><g class="pump" ${bind({ kind: "on", v: p.running })}>
+      return `<g ${p.faceplate ? `class="clickable" ${face(p.label ?? "Pump", p.faceplate, { running: p.running, fault: p.fault })}` : ""}><g class="pump">
 <circle class="pump-body" cx="${cx}" cy="${cy}" r="${r}"/>
 <path class="pump-tri" d="M${cx} ${r1(cy - r)}L${r1(cx + r)} ${cy}L${cx} ${r1(cy + r)}M${r1(cx - r)} ${cy}H${r1(cx + r)}"/>
-</g>${p.fault ? faultMark(cx + r, cy - r) : ""}
-${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}${stateWord(p.running, "RUNNING", "STOPPED")}</g>`;
+</g>${condBadge(cx + r * 0.85, cy - r * 0.85, p.fault, p.warning, bind)}
+${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g>`;
     }
     case "fan": {
       // A fan (ISO 10628-2 17): the casing and three blades, still (no animation, as ISA-101 asks).
@@ -580,13 +585,13 @@ ${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}${stateWord(p.running, "RUNNING"
       void blades;
       // ISO 10628-2 X8164 (blower, fan): a circle with the blades as a wedge from the inlet side to the centre.
       const k = r * Math.SQRT1_2;
-      return `<g class="pump fan${p.faceplate ? " clickable" : ""}" ${bind({ kind: "on", v: p.running })} ${p.faceplate ? face(p.label ?? "Fan", p.faceplate, { running: p.running }) : ""}><circle class="pump-body" cx="${cx}" cy="${cy}" r="${r}"/><path class="pump-tri" d="M${r1(cx - k)} ${r1(cy - k)}L${cx} ${cy}L${r1(cx - k)} ${r1(cy + k)}M${cx} ${cy}H${r1(cx + r)}"/>${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}${stateWord(p.running, "RUNNING", "STOPPED")}</g>`;
+      return `<g class="pump fan${p.faceplate ? " clickable" : ""}" ${p.faceplate ? face(p.label ?? "Fan", p.faceplate, { running: p.running, fault: p.fault }) : ""}><circle class="pump-body" cx="${cx}" cy="${cy}" r="${r}"/><path class="pump-tri" d="M${r1(cx - k)} ${r1(cy - k)}L${cx} ${cy}L${r1(cx - k)} ${r1(cy + k)}M${cx} ${cy}H${r1(cx + r)}"/>${condBadge(cx + r * 0.85, cy - r * 0.85, p.fault, p.warning, bind)}${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g>`;
     }
     case "valve": {
       const s = p.size, cx = r1(p.x), cy = Y(p.y), h = r1(s / 2);
-      // ISO 10628-2 21.1: two triangles meeting in the middle; grey closed, bright open.
+      // ISO 10628-2 21.1: two triangles meeting in the middle; filled while closed, hollow open (as on a P&ID).
       const body = `<path class="valve-body" d="M${r1(-h)} ${r1(-h * 0.5)}L0 0L${r1(-h)} ${r1(h * 0.5)}ZM${h} ${r1(-h * 0.5)}L0 0L${h} ${r1(h * 0.5)}Z"/>`;
-      return `<g class="valve${p.faceplate ? " clickable" : ""}" ${bind({ kind: "on", v: p.open })} ${p.faceplate ? face(p.label ?? "Valve", p.faceplate, { open: p.open }) : ""}><g transform="translate(${cx} ${cy})${p.vertical ? " rotate(90)" : ""}">${body}</g>${p.label ? (p.vertical ? `<text class="p-label left" x="${r1(p.x + s * 0.75)}" y="${r1(cy + 0.6)}">${esc(p.label)}</text>` : label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)) : ""}${stateWord(p.open, "OPEN", "CLOSED")}</g>`;
+      return `<g class="valve${p.faceplate ? " clickable" : ""}" ${bind({ kind: "on", v: p.open })} ${p.faceplate ? face(p.label ?? "Valve", p.faceplate, { open: p.open }) : ""}><g transform="translate(${cx} ${cy})${p.vertical ? " rotate(90)" : ""}">${body}</g>${condBadge(cx + (p.vertical ? h * 0.5 : h), cy - (p.vertical ? h : h * 0.5) - 0.4, p.fault, p.warning, bind)}${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g>`;
     }
     case "instrument": {
       // ISA-5.1: a bubble with the function letters over the loop number, joined by a
@@ -603,7 +608,8 @@ ${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}${stateWord(p.running, "RUNNING"
         conn = `<path class="inst-conn" d="${d}"/><circle class="inst-tap" cx="${tx}" cy="${ty}" r="0.5"/>`;
       }
       const [, letters = p.tag, num = ""] = /^([A-Z]+)-?(.*)$/.exec(p.tag) ?? [];
-      const reading = p.value ? `<rect class="sen-box" x="${r1(cx + R + 0.8)}" y="${r1(cy - 1.9)}" width="12" height="3.8" rx="1.9"/><text class="sen-num" x="${r1(cx + R + 6.8)}" y="${r1(cy + 0.7)}" ${bind({ kind: "text", v: p.value, decimals: p.decimals ?? 1, unit: p.unit })}>–</text>` : "";
+      const rs = p.value ? readingSpot(p, all, sy, lib, tapY(p, all, sy, lib)) : undefined;
+      const reading = p.value && rs ? `<rect class="sen-box" x="${r1(rs.x - READING.w / 2)}" y="${r1(rs.y - READING.h / 2)}" width="${READING.w}" height="${READING.h}" rx="${READING.h / 2}"/><text class="sen-num" x="${r1(rs.x)}" y="${r1(rs.y + 0.62)}" ${bind({ kind: "text", v: p.value, decimals: p.decimals ?? 1, unit: p.unit })}>–</text>` : "";
       return `${conn}<g class="inst tone-${toneOf(p.tone ?? "warn")}" ${p.on ? bind({ kind: "on", v: p.on }) : ""}><circle class="inst-bubble" cx="${cx}" cy="${cy}" r="${R}"/><text class="inst-fn" x="${cx}" y="${r1(cy - 0.2)}">${esc(letters)}</text><text class="inst-no" x="${cx}" y="${r1(cy + 1.9)}">${esc(num)}</text></g>${reading}`;
     }
     case "sensor": {
@@ -619,16 +625,11 @@ ${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}${stateWord(p.running, "RUNNING"
       }
       const lead = at ? `<path class="inst-conn" d="${path}"/><circle class="inst-tap" cx="${r1(at[0])}" cy="${Y(at[1])}" r="0.5"/>` : "";
       // A value that isn't an instrument (no ISA tag as its label) is a plain reading with its label above.
-      const num = (x: number, y = cy) => `<rect class="sen-box" x="${r1(x - 6)}" y="${r1(y - 1.9)}" width="12" height="3.8" rx="1.9"/><text class="sen-num" x="${r1(x)}" y="${r1(y + 0.7)}" ${bind({ kind: "text", v: p.value, decimals: p.decimals ?? 1, unit: p.unit })}>–</text>`;
+      const num = (x: number, y = cy) => `<rect class="sen-box" x="${r1(x - READING.w / 2)}" y="${r1(y - READING.h / 2)}" width="${READING.w}" height="${READING.h}" rx="${READING.h / 2}"/><text class="sen-num" x="${r1(x)}" y="${r1(y + 0.62)}" ${bind({ kind: "text", v: p.value, decimals: p.decimals ?? 1, unit: p.unit })}>–</text>`;
       if (!tagged) return `${lead.replace(/H([-\d.]+)"/, (m, hx: string) => `H${r1(Number(hx) < cx ? cx - 6 : cx + 6)}"`)}${num(cx)}${p.label ? `<text class="sen-tag" x="${cx}" y="${r1(cy - 2.8)}">${esc(p.label)}</text>` : ""}`;
-      // The reading beside the bubble, on the side where no vessel or symbol is in the way.
-      const blocked = (x0: number, x1: number) => all.some((q) => {
-        const b = q.type === "tank" ? { x0: q.x, x1: q.x + q.w, y0: Y(q.y), y1: Y(q.y + q.h) } : q.type === "symbol" && findSymbol(lib, q.symbol) ? (({ x0, x1, y0, y1 }) => ({ x0, x1, y0: y0 * sy, y1: y1 * sy }))(symbolBox(findSymbol(lib, q.symbol)![1], q, sy)) : undefined;
-        return !!b && b.x0 < x1 && b.x1 > x0 && b.y0 < cy + 1.9 && b.y1 > cy - 1.9;
-      });
-      const rightX = cx + R + 6.8, leftX = cx - R - 6.8;
-      // Right, else left; with both blocked, above or below the bubble, away from its connection.
-      const reading = !blocked(rightX - 6, rightX + 6) ? num(rightX) : !blocked(leftX - 6, leftX + 6) ? num(leftX) : num(cx, at && Y(at[1]) > cy ? cy - R - 2.6 : cy + R + 2.6);
+      // The reading beside the bubble, on the side where no vessel or symbol is in the way (else above or below it).
+      const rs = readingSpot(p, all, sy, lib, tapY(p, all, sy, lib));
+      const reading = num(rs.x, rs.y);
       return `${lead}<g class="inst"><circle class="inst-bubble" cx="${cx}" cy="${cy}" r="${R}"/>${bubbleText(p.label!, p.x, cy, R)}</g>${reading}`;
     }
     case "lamp": {
@@ -800,7 +801,12 @@ export const HMI_CSS = String.raw`
 .junction{fill:var(--pipe)}
 .pump-body{fill:var(--equip);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke;transition:fill .3s}.pump.on .pump-body{fill:var(--equip-on)}
 .pump-tri{fill:none;stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke;stroke-linejoin:round}.pump.on .pump-tri{stroke:var(--equip-line-on)}
-.fault-mark{display:none}.fault>.fault-mark{display:inline;animation:blink 1s steps(2,jump-none) infinite}.fault-mark rect{fill:var(--alarm)}.fault-mark text{font-size:2px;font-weight:700;fill:var(--on-alarm);text-anchor:middle}
+.rs .rs-on{display:none;fill:var(--accent)}.rs .rs-off{fill:var(--muted)}.rs.on .rs-on{display:inline}.rs.on .rs-off{display:none}
+.md{display:none}.md.on{display:inline}.md path{fill:none;stroke:var(--accent);stroke-width:1.9px;stroke-linecap:round;stroke-linejoin:round}
+.cb-a,.cb-w{display:none}.cb.fault .cb-a{display:inline}.cb:not(.fault) .cb-w.on{display:inline}
+.cb-a circle{fill:var(--alarm)}.cb-a path{stroke:var(--on-alarm);stroke-width:.3px;stroke-linecap:round}
+.cb-wt{fill:var(--warn);stroke:var(--warn);stroke-width:.25px;stroke-linejoin:round}.cb-wx{stroke:#1a232d;stroke-width:.28px;stroke-linecap:round}
+.sym.vlv{--state:var(--equip-line)}.sym.vlv.on{--state:var(--surface)}
 .inst-bubble{fill:var(--surface);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke}.inst.on .inst-bubble{fill:color-mix(in srgb,var(--c) 30%,var(--tile));stroke:var(--c)}.inst-fn{font-size:1.75px;font-weight:700;fill:var(--fg);text-anchor:middle;letter-spacing:.04em}.inst-no{font-size:1.45px;fill:var(--muted);text-anchor:middle;font-variant-numeric:tabular-nums}.inst-conn{fill:none;stroke:var(--equip-line);stroke-width:1.5px;vector-effect:non-scaling-stroke}.inst-tap{fill:var(--muted)}.line-arrow{fill:var(--muted)}
 .signal{fill:none;stroke:var(--equip-line);stroke-width:1.5px;vector-effect:non-scaling-stroke;stroke-dasharray:6 5}.sen-lead{fill:none;stroke:var(--muted);stroke-width:.3}.sen-tap{fill:var(--muted)}.p-line{font-size:1.9px;fill:var(--muted)}
 .pipe-outer{fill:none;stroke:var(--pipe);stroke-width:4px;vector-effect:non-scaling-stroke;stroke-linecap:square;stroke-linejoin:miter}.pipe-inner{display:none}
@@ -811,27 +817,25 @@ export const HMI_CSS = String.raw`
 .tank-num{font-size:3.2px;font-weight:600;fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--surface);stroke-width:.8px;font-variant-numeric:tabular-nums}
 .sym{--state:var(--equip);--body:var(--surface);--body2:var(--equip);--line:var(--equip-line);transition:filter .3s}
 .sym.on{--state:var(--equip-on);--line:var(--equip-line-on)}.sym.nostat{--state:var(--surface);--line:var(--equip-line)}
-.st-word{font-size:1.5px;font-weight:700;letter-spacing:.06em;fill:var(--text2)}.st-word .w-on{display:none}.on .st-word .w-on,.on.st-word .w-on{display:inline}.on .st-word .w-off,.on.st-word .w-off{display:none}
 .sym .spin{transform-box:fill-box;transform-origin:center}.sym.on .spin{animation:spin 1.2s linear infinite}
 .clickable:hover .sym{filter:drop-shadow(0 0 1.5px var(--accent))}
 .ln{position:absolute;inset:0}.ln-svg{position:absolute;left:0;top:0;overflow:visible}
 .ln-path{fill:none;stroke:var(--pipe);stroke-width:calc(3px*var(--k))}.ln-arrow{fill:var(--pipe)}
-.stn{position:absolute;display:flex;flex-direction:column;align-items:center;gap:calc(1px*var(--k));padding:calc(8px*var(--k)) calc(6px*var(--k)) calc(7px*var(--k));background:var(--surface2);border:1px solid var(--line);border-top:calc(3px*var(--k)) solid var(--ctl);border-radius:calc(3px*var(--k));text-align:center;overflow:hidden}
-.stn.on{border-top-color:var(--accent)}.stn-pic{--state:var(--equip);--line:var(--equip-line);--body:var(--surface)}.stn.on .stn-pic{--state:var(--equip-on);--line:var(--equip-line-on)}.stn.nostat .stn-pic{--state:var(--surface)}
-.stn-al.fault .stn{border-top-color:var(--alarm)}
-.stn.link{cursor:pointer}.stn.link:hover{border-color:var(--accent);border-top-color:var(--accent)}
-.stn-name{font-size:var(--f-small);font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.stn{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:calc(1px*var(--k));padding:calc(8px*var(--k)) calc(6px*var(--k)) calc(7px*var(--k));background:var(--surface2);border:1px solid var(--line);border-top:calc(3px*var(--k)) solid var(--ctl);border-radius:calc(3px*var(--k));text-align:center;overflow:hidden}
+.stn-pic{--state:var(--surface);--line:var(--equip-line);--body:var(--surface)}.stn-pic.vlv{--state:var(--equip-line)}.stn.on .stn-pic.vlv{--state:var(--surface)}
+.stn-wn.on .stn{border-top-color:var(--warn)}.stn-al.fault .stn{border-top-color:var(--alarm)}
+.stn.link{cursor:pointer}.stn.link:hover{border-color:var(--accent)}
+.stn-name{display:flex;align-items:center;justify-content:center;gap:calc(4px*var(--k));max-width:100%;font-size:var(--f-small);font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--fg)}.stn-nt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.stn-name .rs{flex:none;width:calc(10px*var(--k));height:calc(10px*var(--k))}.md-h{display:none;flex:none;color:var(--accent)}.md-h.on{display:inline-flex}
 .stn-tag{font-size:var(--f-tiny);color:var(--muted);line-height:1}
 .stn>*{flex-shrink:0}.stn-pic{flex:0 1 auto;min-height:0;width:100%;height:calc(38px*var(--k));margin:calc(4px*var(--k)) 0 calc(2px*var(--k));overflow:visible}.stn-pic *{stroke-width:2px;vector-effect:non-scaling-stroke}
 .stn-v{display:flex;align-items:baseline;min-height:calc(24px*var(--k));gap:calc(3px*var(--k));font-variant-numeric:tabular-nums}.stn-v b{font-size:calc(18px*var(--k));font-weight:400}.stn-u{font-size:var(--f-tiny);color:var(--muted)}
-.stn-st{margin-top:auto;font-size:calc(10px*var(--k));font-weight:700;letter-spacing:.06em;color:var(--text2)}.stn-st .w-on{display:none}.stn.on .stn-st .w-on{display:inline}.stn.on .stn-st .w-off{display:none}
-.stn-fault{display:none;position:absolute;right:calc(4px*var(--k));top:calc(4px*var(--k));width:calc(16px*var(--k));height:calc(16px*var(--k));background:var(--alarm);color:var(--on-alarm);font-size:calc(11px*var(--k));font-weight:700;line-height:calc(16px*var(--k));border-radius:2px}
-.stn-al.fault .stn-fault{display:block;animation:blink 1s steps(2,jump-none) infinite}
+.stn-cb{position:absolute;right:calc(5px*var(--k));top:calc(6px*var(--k));line-height:0}.stn-cb svg{display:none;width:calc(18px*var(--k));height:calc(18px*var(--k))}.stn-wn.on .cbw{display:block}.stn-al.fault .cbw{display:none}.stn-al.fault .cba{display:block}.cba circle{fill:var(--alarm)}.cba path{stroke:var(--on-alarm);stroke-width:2.4px;stroke-linecap:round}.cbw .cb-wt{stroke-width:1.6px}.cbw .cb-wx{stroke-width:2.2px}
 .stn.small{padding-top:calc(5px*var(--k));padding-bottom:calc(5px*var(--k))}.stn.small .stn-pic{height:calc(24px*var(--k));margin:calc(2px*var(--k)) 0}
-.valve-body{fill:var(--equip);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke;stroke-linejoin:round;transition:fill .3s}
-.valve.on .valve-body{fill:var(--equip-on)}
+.valve-body{fill:var(--equip-line);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke;stroke-linejoin:round;transition:fill .3s}
+.valve.on .valve-body{fill:var(--surface)}
+.p-val{font-size:1.8px;font-weight:600;fill:var(--fg);font-variant-numeric:tabular-nums}
 .sen-box{fill:var(--surface);stroke:var(--line);stroke-width:1px;vector-effect:non-scaling-stroke}
-.sen-num{font-size:2px;font-weight:700;fill:var(--fg);text-anchor:middle;font-variant-numeric:tabular-nums}.sen-tag{font-size:1.5px;fill:var(--muted);text-anchor:middle;font-weight:600;letter-spacing:.06em}
+.sen-num{font-size:1.8px;font-weight:700;fill:var(--fg);text-anchor:middle;font-variant-numeric:tabular-nums}.sen-tag{font-size:1.5px;fill:var(--muted);text-anchor:middle;font-weight:600;letter-spacing:.06em}
 .plamp .pl-dot{fill:var(--track);transition:all .3s}.plamp .pl-halo{fill:none}.plamp.on .pl-dot{fill:var(--c)}.plamp.on .pl-halo{fill:color-mix(in srgb,var(--c) 30%,transparent)}
 @keyframes spin{to{transform:rotate(360deg)}}@keyframes flow{to{stroke-dashoffset:-16}}@keyframes blink{50%{opacity:.35}}
 @keyframes wave{from{transform:translateX(-6%)}to{transform:translateX(0)}}

@@ -407,6 +407,34 @@ export function connectionWarnings(items: ProcessItem[], aspect: number, lib: Sy
       } else if (ports.includes("in") && ports.includes("out")) pair("in", "out", "what goes in must come out.");
     }
   });
+  out.push(...meaningWarnings(items, lib));
+  return out;
+}
+
+/** Equipment with no drive: it has no run state (a ▶ or ■ by its name would mean nothing). */
+const PASSIVE = new Set(["filter", "heat_exchanger", "plate_heat_exchanger", "check_valve"]);
+
+/**
+ * Mistakes of meaning a layout check can't see: a reading drawn as a separate sensor that
+ * belongs to a piece of equipment (its label names that equipment's tag, e.g. 'TCV-201
+ * opening'), and a run state on equipment that has no drive.
+ */
+export function meaningWarnings(items: ProcessItem[], lib: SymbolLib = BUILTIN_SYMBOLS): string[] {
+  const out: string[] = [];
+  const tags = new Map(items.flatMap((p) => (keyOf(p) && p.type !== "sensor" && p.type !== "instrument" && p.type !== "pipe" ? [[keyOf(p)!.toUpperCase(), p] as const] : [])));
+  for (const p of items) {
+    if (p.type === "sensor" && p.label) {
+      // 'TCV-201 opening': a tag of another item followed by more words.
+      const m = /^([A-Z]{1,5}-?\d{1,5}[A-Z]?)\s+(.+)$/.exec(p.label.trim());
+      const owner = m ? tags.get(m[1]!.toUpperCase()) : undefined;
+      if (owner && (owner.type === "symbol" || owner.type === "pump" || owner.type === "fan" || owner.type === "valve"))
+        out.push(`sensor '${p.label}' is a value of ${m![1]}: put it on ${m![1]} instead ({value: '${p.value}'${p.unit ? `, unit: '${p.unit}'` : ""}${p.decimals !== undefined ? `, decimals: ${p.decimals}` : ""}}), shown under its name, and remove the sensor.`);
+    }
+    if (p.type === "symbol" && p.on) {
+      const f = findSymbol(lib, p.symbol);
+      if (f && PASSIVE.has(f[0])) out.push(`${f[0]}${p.label ? ` ${p.label}` : ""} has on, but it has no drive, so no run state: remove on. For its condition use warning or fault (e.g. a clogged filter: warning).`);
+    }
+  }
   return out;
 }
 

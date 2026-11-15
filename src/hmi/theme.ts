@@ -42,9 +42,8 @@ export interface Theme {
   pipe: string;
   liquid: string;
   /**
-   * Equipment state as the High Performance HMI Handbook draws it (no hue): stopped or closed
-   * darker, running or open lighter, each with its word beside it (STOPPED, RUNNING); the greys
-   * are the theme's own (Siemens iX color-2/-4), so equipment sits in the palette.
+   * Equipment's fill: the surface whatever its state (state has its own signs: a run sign by the
+   * name, a mode hand, a condition badge; a closed valve is drawn filled in the line colour).
    */
   equip: string;
   equipOn: string;
@@ -71,7 +70,7 @@ export const THEMES: Record<ThemeName, Theme> = {
     tones: { accent: "#006e93", ok: "#2c8500", warn: "#ffbb00", alarm: "#d72332", neutral: "#66727e" },
     pipe: "#92979b",
     liquid: "#9cc2e0",
-    equip: "#d8dadd",
+    equip: "#ffffff",
     equipOn: "#ffffff",
     equipLine: "#1a232d",
     equipLineOn: "#1a232d",
@@ -92,8 +91,8 @@ export const THEMES: Record<ThemeName, Theme> = {
     tones: { accent: "#00bde3", ok: "#44cc00", warn: "#ffbb00", alarm: "#ff2453", neutral: "#94a1a9" },
     pipe: "#63737b",
     liquid: "#3d6f94",
-    equip: "#283236",
-    equipOn: "#4c5a60",
+    equip: "#1b2428",
+    equipOn: "#1b2428",
     equipLine: "#e0e7ea",
     equipLineOn: "#e0e7ea",
     series: ["#4d9be6", "#f0913a", "#a585e8", "#35b5a5", "#e86a9a", "#b3c23f"],
@@ -113,8 +112,8 @@ export const THEMES: Record<ThemeName, Theme> = {
     tones: { accent: "#3ab0ff", ok: "#22e06a", warn: "#ffd400", alarm: "#ff4136", neutral: "#a6a6a6" },
     pipe: "#a6a6a6",
     liquid: "#3ab0ff",
-    equip: "#262626",
-    equipOn: "#808080",
+    equip: "#000000",
+    equipOn: "#000000",
     equipLine: "#ffffff",
     equipLineOn: "#ffffff",
     series: ["#3ab0ff", "#ffa31a", "#c9a0ff", "#22e0c8", "#ff7eb6", "#d8f03a"],
