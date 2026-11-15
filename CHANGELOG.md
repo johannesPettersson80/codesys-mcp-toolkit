@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-11-15
+
+Tanks and switches on process diagrams, after a look at the 2.11.0 screens.
+
 ### Changed
 - A tripped switch (an `instrument` with `on`) keeps a white bubble and gets
   the same condition badge as equipment at its corner: the red alarm with
