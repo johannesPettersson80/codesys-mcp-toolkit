@@ -73,11 +73,11 @@ describe("custom symbol SVG", () => {
 describe("symbols on a diagram", () => {
   it("place their ports with size, rotation and the diagram's aspect", () => {
     const hx = BUILTIN_SYMBOLS.heat_exchanger!;
-    expect(symbolPorts(hx, { x: 50, y: 50, size: 20 }, 0.5).in).toEqual({ at: [41, 50], dir: "l" }); // the shell's end
+    expect(symbolPorts(hx, { x: 50, y: 50, size: 20 }, 0.5).in).toEqual({ at: [42, 50], dir: "l" }); // on the circle
     const turned = symbolPorts(hx, { x: 50, y: 50, size: 20, rotate: 90 }, 0.5).in!;
     expect(turned.dir).toBe("u");
     expect(turned.at[0]).toBeCloseTo(50);
-    expect(turned.at[1]).toBeCloseTo(32); // 9 x units up (the shell's end) = 18 y units at aspect 0.5
+    expect(turned.at[1]).toBeCloseTo(34); // 8 x units up (on the circle) = 16 y units at aspect 0.5
   });
 
   it("route pipes to symbol ports, and name unknown symbols and ports", () => {
@@ -91,7 +91,7 @@ describe("symbols on a diagram", () => {
     expect(problems.join(" ")).toMatch(/heat_exchanger 'E-201' has no port 'side' \(ports: in, out, top, bottom\)/);
     expect(problems.join(" ")).toMatch(/no symbol 'centrifuge' in the library/);
     const pts = routePipe(w.items[1] as Extract<ProcessItem, { type: "pipe" }>, w.items, 0.5);
-    expect(pts.at(-1)).toEqual([41, 50]);
+    expect(pts.at(-1)).toEqual([42, 50]);
   });
 
   it("know the project's own symbols, and warn when symbols overlap", () => {
@@ -120,18 +120,28 @@ describe("symbols on a diagram", () => {
     expect(r.html).toMatch(/rotate\(90\)/);
     expect(r.html).toMatch(/data-open="fp-1"/);
     expect(r.bindings).toEqual(expect.arrayContaining([{ kind: "on", v: "PLC_PRG.xRun" }, { kind: "fault", v: "PLC_PRG.xTrip" }, { kind: "on", v: "PLC_PRG.xBelt" }]));
-    expect(r.css).toMatch(/\.fault \.sym\{--state:var\(--alarm\)/);
+    // Grey off, bright on; a fault is a marker beside the symbol, not a red symbol (ISA-101).
+    expect(r.css).toMatch(/\.sym\.on\{--state:var\(--equip-on\)/);
+    expect(r.css).not.toMatch(/\.fault \.sym\{/);
+    expect(r.html).toMatch(/class="fault-mark"/);
+    expect(r.html).not.toMatch(/class="run-dot"/); // the state is the fill
   });
 
-  it("export to CODESYS as one picture per state, picked by the fault and on variables", () => {
+  it("export to CODESYS as one picture per state, picked by the on variable, with the fault as a marker", () => {
     const plan = nativePlan(screen);
     const img = plan.elements.find((e) => e.kind === "image" && String(e.props?.["Static ID"]).includes("sym_motor_off"))!;
-    expect(img.props!["Bitmap ID variable.Bitmap ID"]).toBe(`SEL(PLC_PRG.xTrip, SEL(PLC_PRG.xRun, 'IP_Plant.sym_motor_off_${img.w}x${img.h}', 'IP_Plant.sym_motor_on_${img.w}x${img.h}'), 'IP_Plant.sym_motor_fault_${img.w}x${img.h}')`);
+    expect(img.props!["Bitmap ID variable.Bitmap ID"]).toBe(`SEL(PLC_PRG.xRun, 'IP_Plant.sym_motor_off_${img.w}x${img.h}', 'IP_Plant.sym_motor_on_${img.w}x${img.h}')`);
+    expect(plan.elements.some((e) => e.text === "1" && e.invisible === "NOT (PLC_PRG.xTrip)")).toBe(true); // priority-1 alarm indicator
+    expect(plan.elements.some((e) => e.text === "RUNNING" && e.invisible === "NOT (PLC_PRG.xRun)")).toBe(true); // the state in words too
     const ids = plan.images.map((i) => i.id);
-    expect(ids.filter((i) => i.startsWith("sym_motor_"))).toHaveLength(3);
+    expect(ids.filter((i) => i.startsWith("sym_motor_"))).toHaveLength(2);
+    // The outline keeps 2 px at any size: the stroke is converted to box units for the picture's size.
+    const motor = plan.images.find((i) => i.id.startsWith("sym_motor_on"))!.svg;
+    expect(motor).not.toMatch(/vector-effect/);
+    expect(motor).toContain(`stroke-width="${Math.round(2 * (100 / img.w) * 100) / 100}"`);
     expect(ids.some((i) => /^sym_conveyor_on_r90_\d+x\d+$/.test(i))).toBe(true);
     for (const i of plan.images.filter((x) => x.id.startsWith("sym_"))) expect(i.svg).not.toMatch(/var\(--/);
-    expect(plan.images.find((i) => i.id.startsWith("sym_motor_on"))!.svg).toMatch(/#2c8500/); // the light theme's ok (iX success)
+    expect(plan.images.find((i) => i.id.startsWith("sym_motor_on"))!.svg).toMatch(/#ffffff/); // running: white (High Performance HMI Handbook)
     expect(plan.dialogs.map((d) => d.name)).toEqual(["Dlg_Plant_M_1"]);
     // A conveyor turned upright is taller than wide.
     const belt = plan.elements.find((e) => String(e.props?.["Static ID"]).includes("sym_conveyor"))!;

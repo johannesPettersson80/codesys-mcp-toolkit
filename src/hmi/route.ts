@@ -104,11 +104,11 @@ export function portsOf(p: ProcessItem, aspect: number, lib: SymbolLib = BUILTIN
       };
     }
     case "pump": {
-      // A centrifugal pump: suction on the axis (left), discharge tangential at the top (right).
+      // ISO 10628-2 2322: inlet and outlet on the axis, left and right of the circle.
       const rc = (p.size / 2) * PUMP_CASING;
       return {
         in: { at: [p.x - rc, p.y], dir: "l" },
-        out: { at: [p.x + p.size / 2, p.y - rc / aspect], dir: "r" },
+        out: { at: [p.x + rc, p.y], dir: "r" },
       };
     }
     case "fan": {
@@ -143,7 +143,7 @@ export const PORT_NAMES: Record<string, string[]> = {
   instrument: ["c"],
 };
 
-/** The pump casing's radius as a share of its size: the rest is the discharge nozzle. */
+/** The pump circle's radius as a share of half its size. */
 export const PUMP_CASING = 0.82;
 
 /**
@@ -335,6 +335,13 @@ export function connectionWarnings(items: ProcessItem[], aspect: number, lib: Sy
   });
   const tanks = items.flatMap((p) => (p.type === "tank" ? [p] : []));
   const onTank = (x: number, y: number, m = 3) => tanks.some((t) => x >= t.x - m && x <= t.x + t.w + m && y >= t.y - m / aspect && y <= t.y + t.h + m / aspect);
+  // Inside a vessel's outline (an instrument drawn there is wrong: ISA-5.1 draws it outside, joined to its nozzle).
+  const inTank = (x: number, y: number) => tanks.find((t) => x > t.x && x < t.x + t.w && y > t.y && y < t.y + t.h);
+  const outside = (what: string, name: string, x: number, y: number) => {
+    const t = inTank(x, y);
+    if (t) out.push(`${what} ${name} is drawn inside tank ${keyOf(t) ?? ""}: instruments go outside the vessel, joined to the wall where they are mounted (ISA-5.1), e.g. {type: 'instrument', tag: '${name}', x: ${Math.round(t.x + t.w + 6)}, y: ${Math.round(y)}, at: '${keyOf(t) ?? "T-1"}.right-high'}.`);
+    return !!t;
+  };
   // Distances in x units (y scaled by the diagram's aspect).
   const lines = items.flatMap((p) => (p.type === "pipe" && !p.signal ? [routePipe(p, items, aspect, lib)] : []));
   const nearLine = (x: number, y: number, m: number) =>
@@ -372,18 +379,25 @@ export function connectionWarnings(items: ProcessItem[], aspect: number, lib: Sy
       else pair("in", "out", "what goes in must come out.");
     } else if (p.type === "junction") {
       if (e.length < 2) out.push(`junction ${name} joins ${e.length} pipe(s): a tee joins at least two.`);
-    } else if (p.type === "sensor") {
-      if (!nearLine(p.x, p.y, 9) && !onTank(p.x, p.y, 9)) out.push(`sensor ${name} isn't next to a pipe or tank: put it on the line or vessel it measures.`);
+    } else if (p.type === "sensor" || p.type === "instrument") {
+      const tag = p.type === "instrument" ? p.tag : name;
+      if (outside(p.type, tag, p.x, p.y)) return;
+      if (p.type === "sensor" && !nearLine(p.x, p.y, 9) && !onTank(p.x, p.y, 9)) out.push(`sensor ${name} isn't next to a pipe or tank: put it on the line or vessel it measures.`);
     } else if (p.type === "symbol") {
       const f = findSymbol(lib, p.symbol);
       if (!f) return;
       const [sym, def] = f;
       const ports = Object.keys(def.ports);
-      if (sym === "mixer" || sym === "level_switch") {
-        if (!onTank(p.x, p.y)) out.push(`${sym} ${name} isn't on a tank: an agitator or a level switch is mounted on the vessel it serves.`);
+      if (sym === "level_switch" || sym === "pressure_switch") {
+        if (outside(sym, name, p.x, p.y)) return;
+      }
+      if (sym === "mixer") {
+        if (!onTank(p.x, p.y)) out.push(`${sym} ${name} isn't on a tank: an agitator is mounted on the vessel it serves.`);
+      } else if (sym === "level_switch") {
+        if (!onTank(p.x, p.y, 10)) out.push(`level_switch ${name} isn't beside a tank: a level switch is mounted on the vessel's wall, drawn outside it next to the level it switches at.`);
       } else if (ports.includes("shaft")) {
         const at = symbolPorts(def, p, aspect).shaft!.at;
-        if (!machines.some((b) => at[0] >= b.x0 - 2 && at[0] <= b.x1 + 2 && at[1] >= b.y0 - 2 / aspect && at[1] <= b.y1 + 2 / aspect)) out.push(`${sym} ${name} drives nothing: put its shaft against the machine it drives.`);
+        if (!machines.some((b) => at[0] >= b.x0 - 0.5 && at[0] <= b.x1 + 0.5 && at[1] >= b.y0 - 0.5 / aspect && at[1] <= b.y1 + 0.5 / aspect)) out.push(`${sym} ${name} drives nothing: its shaft end (${at.map((v) => Math.round(v * 10) / 10).join(", ")}) must touch the machine it drives (ISO 10628-2 draws the motor on the machine), not float near it.`);
       } else if (!ports.length) {
         return; // a picture without ports (a custom symbol can be decoration)
       } else if (!key) out.push(`${sym} ${i + 1} has no label or id, so no pipe can connect to it.`);

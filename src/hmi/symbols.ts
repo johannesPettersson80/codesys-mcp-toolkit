@@ -7,8 +7,8 @@
  *
  * A symbol is SVG markup in its own box (viewBox, 100x100 by default) that
  * colours itself through a few variables, so one drawing shows every state:
- *   var(--state)  off: grey, on: green, fault: red
- *   var(--body)   main fill;  var(--body2) darker fill
+ *   var(--state)  the body's fill: grey off, bright on (a fault shows as an alarm marker beside it)
+ *   var(--body)   a neutral fill;  var(--body2) a darker one
  *   var(--line)   outlines and details;  var(--accent) highlights
  * Ports are points on the box where pipes connect, with the direction a pipe
  * leaves in. An element with class="spin" turns while the symbol is on (browser).
@@ -42,116 +42,141 @@ const def = (svg: string, ports: Record<string, [number, number, "left" | "right
   ...(description ? { description } : {}),
 });
 
-/** The standard symbols. Pumps, fans, valves and tanks have their own item types. */
+/**
+ * The standard symbols, drawn from ISO 10628-2:2012 (geometry taken from the symbol files on
+ * Wikimedia Commons, CC BY-SA 4.0, which reproduce the standard's tables): black-line symbols,
+ * here in the theme's text colour, 2 px whatever the size. The body is hollow when off and
+ * filled with a soft green when on; a fault shows as a red marker beside it. Ports are the
+ * standard's preferred connection points, on the outline. Letters (the motor's M) stay upright
+ * when a symbol is turned. Pumps, fans, valves and tanks have their own item types; instruments
+ * (sensors, switches, gauges) are ISA-5.1 bubbles (the instrument item).
+ */
+const OUT = `stroke="var(--line)" stroke-width="2" vector-effect="non-scaling-stroke"`;
+const LN = `fill="none" ${OUT} stroke-linecap="round" stroke-linejoin="round"`;
+/** An upright M (IEC 60617 / ISO 10628-2 C0082) in a circle of radius r at (cx, cy). */
+const motorM = (cx: number, cy: number, r: number) =>
+  `<g data-upright="${cx} ${cy}"><path d="M${cx - r * 0.38} ${cy + r * 0.5}V${cy - r * 0.5}L${cx} ${cy + r * 0.05}L${cx + r * 0.38} ${cy - r * 0.5}V${cy + r * 0.5}" ${LN}/></g>`;
 export const BUILTIN_SYMBOLS: SymbolLib = {
   motor: def(
-    `<rect x="6" y="34" width="9" height="32" rx="2" fill="var(--body2)" stroke="var(--line)" stroke-width="2"/>
-<rect x="15" y="24" width="62" height="52" rx="9" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
-<path d="M27 30v40M37 30v40M55 30v40M65 30v40" stroke="var(--body2)" stroke-width="3.5" stroke-linecap="round"/>
-<rect x="33" y="10" width="26" height="14" rx="3" fill="var(--body2)" stroke="var(--line)" stroke-width="2"/>
-<rect x="77" y="44" width="17" height="12" rx="2" fill="var(--line)"/>
-<circle cx="46" cy="50" r="9" fill="var(--state)"/>`,
-    { shaft: [94, 50, "right"] },
+    // ISO 10628-2 C0082: a circle with an M; the shaft to the right.
+    `<path d="M75 50H100" ${LN}/>
+<circle cx="50" cy="50" r="25" fill="var(--state)" ${OUT}/>
+${motorM(50, 50, 25)}`,
+    { shaft: [100, 50, "right"] },
     [100, 100],
-    "Electric motor, shaft to the right",
+    "Electric motor (ISO 10628-2 C0082), shaft to the right",
   ),
   conveyor: def(
-    `<rect x="5" y="16" width="190" height="28" rx="14" fill="var(--body2)" stroke="var(--state)" stroke-width="4"/>
-<circle cx="19" cy="30" r="9" fill="var(--body)" stroke="var(--line)" stroke-width="2.5"/>
-<circle cx="181" cy="30" r="9" fill="var(--body)" stroke="var(--line)" stroke-width="2.5"/>
-<g class="spin"><path d="M19 23v14M12 30h14" stroke="var(--line)" stroke-width="2"/></g>
-<circle cx="62" cy="30" r="4" fill="var(--line)"/><circle cx="100" cy="30" r="4" fill="var(--line)"/><circle cx="138" cy="30" r="4" fill="var(--line)"/>
-<path d="M42 44l-6 14M158 44l6 14" stroke="var(--line)" stroke-width="3.5" stroke-linecap="round"/>`,
+    // ISO 10628-2 3821: a belt around two rollers.
+    `<path d="M20 15H180A15 15 0 0 1 180 45H20A15 15 0 0 1 20 15Z" fill="var(--state)" ${OUT}/>
+<circle cx="20" cy="30" r="9" fill="var(--body)" ${OUT}/>
+<circle cx="180" cy="30" r="9" fill="var(--body)" ${OUT}/>`,
     {},
     [200, 60],
-    "Belt conveyor (solids are dropped onto it: no pipe ports)",
+    "Belt conveyor (ISO 10628-2 3821); solids are dropped onto it: no pipe ports",
   ),
   heat_exchanger: def(
-    // Shell and tube: the product runs through the tubes from head to head, the heating or
-    // cooling medium through the shell, in at the top and out at the bottom (counterflow).
-    // The ports sit on the outline: a pipe runs up to the shell and ends under it, like a nozzle.
-    `<rect x="8" y="22" width="22" height="36" rx="9" fill="var(--body2)" stroke="var(--line)" stroke-width="3"/>
-<rect x="130" y="22" width="22" height="36" rx="9" fill="var(--body2)" stroke="var(--line)" stroke-width="3"/>
-<rect x="26" y="16" width="108" height="48" rx="6" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
-<path d="M36 28h88M36 40h88M36 52h88" stroke="var(--line)" stroke-width="2.5" stroke-linecap="round"/>
-<path d="M36 18v44M124 18v44" stroke="var(--line)" stroke-width="3"/>`,
-    { in: [8, 40, "left"], out: [152, 40, "right"], top: [116, 16, "up"], bottom: [44, 64, "down"] },
-    [160, 80],
-    "Shell-and-tube heat exchanger (twice as wide as high): product through the tubes (in left, out right), heating or cooling medium through the shell (top in, bottom out)",
+    // ISO 10628-2 X8079: a circle; the line goes in, up, down through the middle and out.
+    `<circle cx="50" cy="50" r="40" fill="var(--state)" ${OUT}/>
+<path d="M10 50H30L50 30V70L70 50H90" ${LN}/>`,
+    { in: [10, 50, "left"], out: [90, 50, "right"], top: [50, 10, "up"], bottom: [50, 90, "down"] },
+    [100, 100],
+    "Heat exchanger (general), ISO 10628-2 X8079: product through it (in left, out right), heating or cooling medium in at the top, out at the bottom",
+  ),
+  plate_heat_exchanger: def(
+    // ISO 10628-2 2516: a plate pack (3.5 : 1) with a cross and plate lines; four nozzles, two on top, two below.
+    `<rect x="2" y="2" width="136" height="36" fill="var(--state)" ${OUT}/>
+<path d="M10 2L130 38M130 2L10 38M30 2V38M70 2V38M110 2V38" ${LN}/>`,
+    { in: [10, 38, "down"], out: [130, 2, "up"], "medium-in": [130, 38, "down"], "medium-out": [10, 2, "up"] },
+    [140, 40],
+    "Plate heat exchanger, ISO 10628-2 2516: product in bottom left, out top right; heating or cooling medium in bottom right, out top left (counterflow)",
   ),
   mixer: def(
-    `<rect x="32" y="4" width="36" height="24" rx="5" fill="var(--body)" stroke="var(--state)" stroke-width="3.5"/>
-<rect x="46" y="28" width="8" height="54" rx="2" fill="var(--line)"/>
-<path d="M50 80L22 72v18zM50 80l28-8v18z" fill="var(--state)" stroke="var(--line)" stroke-width="2" stroke-linejoin="round"/>`,
+    // ISO 10628-2 X8006 / 2672: the drive (M) on top, the shaft and the agitator (general) below; it sits on a vessel.
+    `<path d="M50 30V75M38 75H58L38 92H58" ${LN}/>
+<circle cx="50" cy="17" r="13" fill="var(--state)" ${OUT}/>
+${motorM(50, 17, 13)}`,
     {},
     [100, 100],
-    "Agitator: place it over a tank",
+    "Agitator with its motor (ISO 10628-2 X8006): place it on a tank, the agitator inside",
   ),
   filter: def(
-    `<rect x="18" y="12" width="64" height="76" rx="9" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
-<path d="M24 82L76 18" stroke="var(--line)" stroke-width="3.5" stroke-dasharray="7 5" stroke-linecap="round"/>`,
-    { in: [18, 50, "left"], out: [82, 50, "right"] },
+    // ISO 10628-2 X8116 liquid filter (general): a housing with the filter insert dashed across the flow.
+    `<rect x="25" y="15" width="50" height="70" fill="var(--state)" ${OUT}/>
+<path d="M50 15V85" fill="none" ${OUT} stroke-dasharray="7 6"/>`,
+    { in: [25, 50, "left"], out: [75, 50, "right"] },
     [100, 100],
-    "Filter or strainer, flow left to right",
+    "Liquid filter (ISO 10628-2 X8116), flow left to right through the insert",
   ),
   compressor: def(
-    `<circle cx="50" cy="50" r="40" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
-<path d="M17 27l66 12M17 73l66-12" stroke="var(--line)" stroke-width="4" stroke-linecap="round"/>`,
+    // ISO 10628-2 2302: a circle with the flow narrowing to the outlet.
+    `<circle cx="50" cy="50" r="40" fill="var(--state)" ${OUT}/>
+<path d="M22 22L88 38M22 78L88 62" ${LN}/>`,
     { in: [10, 50, "left"], out: [90, 50, "right"] },
     [100, 100],
-    "Compressor or blower, inlet left",
+    "Compressor or vacuum pump (ISO 10628-2 2302), inlet left",
   ),
   cylinder: def(
-    `<rect x="6" y="14" width="84" height="32" rx="5" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
-<rect x="44" y="18" width="9" height="24" rx="1" fill="var(--line)"/>
-<rect x="53" y="27" width="62" height="6" rx="2" fill="var(--line)"/>
-<rect x="22" y="46" width="7" height="10" fill="var(--line)"/><rect x="71" y="46" width="7" height="10" fill="var(--line)"/>`,
-    { a: [25, 56, "down"], b: [75, 56, "down"] },
+    `<path d="M60 30H115" fill="none" stroke="var(--line)" stroke-width="5" stroke-linecap="round"/>
+<rect x="5" y="15" width="80" height="30" fill="var(--state)" ${OUT}/>
+<path d="M55 15V45" ${LN}/>`,
+    { a: [25, 45, "down"], b: [65, 45, "down"] },
     [120, 60],
-    "Pneumatic cylinder, rod to the right; ports a and b underneath",
+    "Pneumatic cylinder, rod to the right; air ports a and b on its underside",
   ),
-  level_switch: def(
-    `<rect x="34" y="4" width="32" height="14" rx="3" fill="var(--body2)" stroke="var(--line)" stroke-width="2"/>
-<path d="M50 18v36" stroke="var(--line)" stroke-width="4" stroke-linecap="round"/>
-<circle cx="50" cy="68" r="17" fill="var(--state)" stroke="var(--line)" stroke-width="3"/>
-<path d="M16 93h68" stroke="var(--line)" stroke-width="3" stroke-dasharray="6 4"/>`,
-    {},
+  separator: def(
+    // ISO 10628-2 X8036: centrifuge, separator, disc type: the bowl with its disc stack; the drive sits on it.
+    `<rect x="20" y="2" width="60" height="96" fill="var(--state)" ${OUT}/>
+<path d="M50 12V88M30 50L50 35L70 50M30 68L50 53L70 68M30 86L50 71L70 86" ${LN}/>`,
+    { in: [20, 30, "left"], out: [80, 30, "right"], solids: [50, 98, "down"] },
     [100, 100],
-    "Float level switch as a picture (HMI). On a P&ID use an instrument: {type: 'instrument', tag: 'LSH-201', at: 'T-201.left-high'}",
-  ),
-  pressure_switch: def(
-    `<circle cx="50" cy="40" r="33" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
-<path d="M27 54a26 26 0 0 1 46 0" fill="none" stroke="var(--line)" stroke-width="2.5" stroke-dasharray="3 4"/>
-<path d="M50 40l19-17" stroke="var(--state)" stroke-width="4.5" stroke-linecap="round"/>
-<circle cx="50" cy="40" r="5" fill="var(--line)"/>
-<rect x="45" y="73" width="10" height="23" fill="var(--line)"/>`,
-    { bottom: [50, 96, "down"] },
-    [100, 100],
-    "Pressure gauge as a picture (HMI). On a P&ID use an instrument: {type: 'instrument', tag: 'PSH-201', at: [x, y] on the line}",
+    "Centrifugal separator, disc type (ISO 10628-2 X8036): feed in left, clarified product out right, solids out at the bottom; put its motor on top",
   ),
   check_valve: def(
-    `<path d="M4 30v40l46-20zM96 30v40L50 50z" fill="var(--state)" stroke="var(--line)" stroke-width="2.5" stroke-linejoin="round"/>
-<path d="M30 16h38M60 9l9 7-9 7" fill="none" stroke="var(--line)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>`,
-    { in: [4, 50, "left"], out: [96, 50, "right"] },
+    // ISO 10628-2 X8077: a valve with a filled dot at the inlet's upper corner; flow left to right.
+    `<path d="M5 25V75L50 50ZM95 25V75L50 50Z" fill="var(--state)" ${OUT} stroke-linejoin="round"/>
+<circle cx="5" cy="25" r="8" fill="var(--line)"/>`,
+    { in: [5, 50, "left"], out: [95, 50, "right"] },
     [100, 100],
-    "Check (non-return) valve, flow left to right",
+    "Check valve (ISO 10628-2 X8077), flow left to right",
   ),
   control_valve: def(
-    `<path d="M50 50V22" stroke="var(--line)" stroke-width="4"/>
-<path d="M22 22a28 20 0 0 1 56 0z" fill="var(--body)" stroke="var(--line)" stroke-width="3" stroke-linejoin="round"/>
-<path d="M4 32v36l46-18zM96 32v36L50 50z" fill="var(--state)" stroke="var(--line)" stroke-width="2.5" stroke-linejoin="round"/>`,
-    { in: [4, 50, "left"], out: [96, 50, "right"], actuator: [50, 2, "up"] },
+    // ISO 10628-2 X8087: a valve, continuously operated: the oblique arrow through it; the signal comes to the arrow's head.
+    `<path d="M5 25V75L50 50ZM95 25V75L50 50Z" fill="var(--state)" ${OUT} stroke-linejoin="round"/>
+<path d="M22 88L78 12M78 12L64 16M78 12L76 26" ${LN}/>`,
+    { in: [5, 50, "left"], out: [95, 50, "right"], actuator: [50, 50, "up"] },
     [100, 100],
-    "Control valve with diaphragm actuator; a signal line from its controller or transmitter goes to actuator",
+    "Control valve (ISO 10628-2 X8087); a signal line from its controller or transmitter goes to actuator (it comes down to the valve's centre)",
   ),
 };
+
+BUILTIN_SYMBOLS.level_switch = def(
+  `<circle cx="50" cy="50" r="40" fill="var(--body)" ${OUT}/>`,
+  { left: [10, 50, "left"], right: [90, 50, "right"], bottom: [50, 90, "down"] },
+  [100, 100],
+  "Level switch as an ISA-5.1 instrument bubble; its label is the tag (e.g. 'LSH-201'). Better: {type: 'instrument', tag: 'LSH-201', at: 'T-201.left-high'}",
+);
+BUILTIN_SYMBOLS.pressure_switch = def(
+  `<circle cx="50" cy="50" r="40" fill="var(--body)" ${OUT}/>`,
+  { bottom: [50, 90, "down"] },
+  [100, 100],
+  "Pressure switch or gauge as an ISA-5.1 instrument bubble; its label is the tag (e.g. 'PSH-201'). Better: {type: 'instrument', tag: 'PSH-201', at: [x, y] on the line}",
+);
+
+/** Symbols that are instruments: drawn as ISA-5.1 bubbles (the label is the tag, e.g. 'LSH-201'). */
+export const INSTRUMENT_SYMBOLS: Record<string, string> = { level_switch: "LS", pressure_switch: "PI" };
+
+/** Letters kept upright in a turned symbol: data-upright="cx cy" becomes the counter-rotation. */
+export function upright(svg: string, rotate: number): string {
+  return svg.replace(/ data-upright="([-\d.]+) ([-\d.]+)"/g, (_m, x: string, y: string) => (rotate ? ` transform="rotate(${-rotate} ${x} ${y})"` : ""));
+}
 
 /* ---------- checking custom SVG ---------- */
 
 const ELEMENTS = new Set(["g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "defs", "linearGradient", "radialGradient", "stop", "text"]);
 const ATTRS = new Set([
   "d", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "fx", "fy", "width", "height", "points", "transform", "id", "class",
-  "fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin", "stroke-dasharray", "stroke-dashoffset", "stroke-opacity", "stroke-miterlimit", "opacity",
+  "fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin", "stroke-dasharray", "stroke-dashoffset", "stroke-opacity", "stroke-miterlimit", "opacity", "vector-effect", "data-upright",
   "offset", "stop-color", "stop-opacity", "gradientUnits", "gradientTransform", "spreadMethod", "font-size", "font-weight", "font-family", "text-anchor", "dominant-baseline",
 ]);
 
@@ -288,7 +313,11 @@ export interface SymbolColors {
 /** A standalone SVG of the symbol in fixed colours, rotated, at a pixel size (CODESYS draws images at their own size). */
 export function symbolPicture(d: SymbolDef, name: string, colors: SymbolColors, rotate: number, wpx: number, hpx: number): string {
   const [vw, vh] = d.viewBox;
-  const body = scopeIds(d.svg, name).replace(/var\(--(state|body2|body|line|accent)\)/g, (_, k: keyof SymbolColors) => colors[k]);
+  // A stroke marked non-scaling keeps its pixel width: CODESYS draws the picture at wpx, so it's converted to box units.
+  const unit = vw / wpx;
+  const body = upright(scopeIds(d.svg, name), rotate)
+    .replace(/var\(--(state|body2|body|line|accent)\)/g, (_, k: keyof SymbolColors) => colors[k])
+    .replace(/<[a-z]+\b[^>]*vector-effect="non-scaling-stroke"[^>]*>/g, (tag) => tag.replace(/ vector-effect="non-scaling-stroke"/, "").replace(/stroke-width="([\d.]+)"/, (_m, w: string) => `stroke-width="${Math.round(Number(w) * unit * 100) / 100}"`));
   const turn = rotate === 90 ? `translate(${vh} 0) rotate(90)` : rotate === 180 ? `rotate(180 ${vw / 2} ${vh / 2})` : rotate === 270 ? `translate(0 ${vw}) rotate(270)` : "";
   const [bw, bh] = rotate % 180 ? [vh, vw] : [vw, vh];
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${wpx}" height="${hpx}" viewBox="0 0 ${bw} ${bh}">${turn ? `<g transform="${turn}">${body}</g>` : body}</svg>`;

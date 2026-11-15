@@ -143,7 +143,7 @@ describe("process checks: is the diagram a process?", () => {
     expect(all).toContain("heat exchanger E-1 needs both circuits");
     expect(all).toContain("motor M-1 drives nothing");
     expect(all).toContain("pressure_switch PS-1 isn't connected: run a short pipe from its bottom");
-    expect(all).toContain("level_switch LS-1 isn't on a tank");
+    expect(all).toContain("level_switch LS-1 isn't beside a tank");
     expect(all).toContain("sensor TT-1 isn't next to a pipe or tank");
     expect(all).toContain("pipe 10 ends at [60, 50], in the middle of the diagram");
     expect(all).not.toContain("P-1");
@@ -152,7 +152,7 @@ describe("process checks: is the diagram a process?", () => {
   it("is quiet for a connected line, and the built-in templates pass", () => {
     const ok = P([
       { type: "tank", x: 5, y: 20, w: 10, h: 50, level: "a", label: "T-1" },
-      { type: "symbol", symbol: "level_switch", x: 10, y: 25, size: 4, label: "LS-1" },
+      { type: "symbol", symbol: "level_switch", x: 19, y: 25, size: 4, label: "LS-1" },
       { type: "pump", x: 30, y: 80, size: 8, running: "b", label: "P-1" },
       { type: "symbol", symbol: "motor", x: 30, y: 68, size: 6, rotate: 90, label: "M-1" },
       { type: "sensor", x: 45, y: 74, value: "c", label: "PT-1" },
@@ -161,6 +161,11 @@ describe("process checks: is the diagram a process?", () => {
       { type: "pipe", from: "P-1.out", to: [100, 80] },
     ]);
     expect(connectionWarnings(ok, 0.5)).toEqual([]);
+    // An instrument drawn inside the vessel is wrong (ISA-5.1: outside, joined to its nozzle).
+    const inside = P([{ type: "tank", x: 5, y: 20, w: 10, h: 50, level: "a", label: "T-1" }, { type: "instrument", tag: "LSH-1", x: 10, y: 25 }, { type: "symbol", symbol: "level_switch", x: 10, y: 40, size: 4, label: "LS-2" }]);
+    const msgs = connectionWarnings(inside, 0.5).join(" ");
+    expect(msgs).toContain("instrument LSH-1 is drawn inside tank T-1");
+    expect(msgs).toContain("level_switch LS-2 is drawn inside tank T-1");
     for (const t of Object.values(TEMPLATES)) {
       const s = screenSchema.parse((t as { screen?: unknown }).screen ?? t);
       for (const w of s.widgets) if (w.type === "process") expect(connectionWarnings(w.items, 0.5)).toEqual([]);
@@ -201,7 +206,7 @@ describe("pipe routing", () => {
   it("routes pipes with right angles from port to port", () => {
     const [, , , a, b, c] = items;
     expect(routePipe(a as never, items, 0.5)).toEqual([[40, 71], [55.9, 71]]); // same height: straight
-    expect(routePipe(b as never, items, 0.5)).toEqual([[65, 62.8], [85, 62.8], [85, 48]]); // out of the nozzle at the casing's top, right, up into the valve
+    expect(routePipe(b as never, items, 0.5)).toEqual([[64.1, 71], [85, 71], [85, 48]]); // out on the axis (ISO 10628-2 2322), right, up into the valve
     expect(routePipe(c as never, items, 0.5)).toEqual([[85, 32], [85, 10], [98, 10]]); // up, then out through the edge
   });
 
@@ -257,12 +262,11 @@ describe("native CODESYS visualization plan", () => {
 
   it("uses SVG symbols for pumps, with buttons, alarms and texts bound to the program", () => {
     const pump = plan.elements.find((e) => e.kind === "image" && String(e.props?.["Static ID"]).includes(".pump_off_"))!;
-    // one SVG per symbol size, drawn at exactly the box's size: the stopped picture and 8 running frames
-    expect(plan.images.filter((i) => i.id.startsWith("pump")).map((i) => i.id).sort()).toEqual([...Array.from({ length: 8 }, (_, k) => `pump_f${k}_${pump.w}`), `pump_off_${pump.w}`].sort());
+    // one SVG per symbol size, drawn at exactly the box's size: stopped and running, no turning frames (ISA-101)
+    expect(plan.images.filter((i) => i.id.startsWith("pump")).map((i) => i.id).sort()).toEqual([`pump_off_${pump.w}`, `pump_on_${pump.w}`]);
     for (const i of plan.images.filter((x) => x.id.startsWith("pump"))) expect(i.svg).toMatch(new RegExp(`^<svg xmlns="http://www.w3.org/2000/svg" width="${pump.w}" height="${pump.w}"`));
     expect(pump.props!["Static ID"]).toBe(`IP_Overview.pump_off_${pump.w}`);
-    expect(pump.props!["Bitmap ID variable.Bitmap ID"]).toBe(`SEL(PLC_PRG.xRun, 'IP_Overview.pump_off_${pump.w}', CONCAT('IP_Overview.pump_f', CONCAT(INT_TO_STRING(PRG_HMI_Overview.iF${(plan.helper.implementation.match(/iF(\d+)/) ?? [])[1]}), '_${pump.w}')))`);
-    expect(plan.helper.implementation).toMatch(/IF PLC_PRG\.xRun THEN iF\d+ := DINT_TO_INT\(\(TIME_TO_DINT\(TIME\(\)\) \/ 100\) MOD 8\); END_IF/);
+    expect(pump.props!["Bitmap ID variable.Bitmap ID"]).toBe(`SEL(PLC_PRG.xRun, 'IP_Overview.pump_off_${pump.w}', 'IP_Overview.pump_on_${pump.w}')`);
     expect(plan.elements.some((e) => e.text === "Start")).toBe(true);
     expect(plan.elements.find((e) => e.props?.["Input configuration.Tap.Variable"] === "PLC_PRG.xStart")!.fill).toBeNull();
     expect(flat(plan.elements).find((e) => e.invisible === "NOT PLC_PRG.xHigh" && e.text)!.text).toMatch(/High level <T-101>/);
@@ -329,17 +333,12 @@ describe("themes, brand colour and pipe flow", () => {
     expect(plan.elements.find((e) => e.name === "Nav_Overview")).toBeUndefined();
   });
 
-  it("native pipes with flow get dashes that slide with the clock", () => {
+  it("native pipes with flow turn dark, still (no moving dashes: ISA-101)", () => {
     const plan = nativePlan(screenSchema.parse(SCREEN));
-    const dashes = plan.elements.filter((e) => e.invisible === "NOT (PLC_PRG.xRun)" && e.kind === "rect");
-    expect(dashes.length).toBeGreaterThan(0);
-    for (const d of dashes) {
-      const moves = Object.entries(d.props ?? {}).filter(([k]) => k.startsWith("Relative movement."));
-      expect(moves).toHaveLength(2);
-      expect(new Set(moves.map(([, v]) => v)).size).toBe(1);
-    }
-    expect(plan.helper.declaration).toContain("iFlow : INT;");
-    expect(plan.helper.implementation).toContain("iFlow := DINT_TO_INT((TIME_TO_DINT(TIME()) / 20) MOD 24);");
+    const pipes = plan.elements.filter((e) => e.props?.["Color variables.Toggle color"] === "PLC_PRG.xRun" && e.kind === "round" && e.fill === paletteFor({}).pipe);
+    expect(pipes.length).toBeGreaterThan(0);
+    expect(plan.elements.some((e) => Object.keys(e.props ?? {}).some((k) => k.startsWith("Relative movement.") && String(e.props![k]).includes("iFlow")))).toBe(false);
+    expect(plan.helper.declaration).not.toContain("iFlow");
   });
 });
 
@@ -416,7 +415,7 @@ describe("HMI actions over MCP (fake CODESYS)", () => {
     if (findBrowser()) expect(ok.images).toHaveLength(1);
     const list = await call("hmi_symbols", { names: ["centrifuge", "heat_exchanger"] });
     expect(list.text).toMatch(/centrifuge \(project\): Decanter centrifuge \[100x100; ports: in left, out right\]/);
-    expect(list.text).toMatch(/heat_exchanger: Shell-and-tube heat exchanger/);
+    expect(list.text).toMatch(/heat_exchanger: Heat exchanger \(general\), ISO 10628-2 X8079/);
     const plant = { name: "Plant", title: "Plant", widgets: [{ type: "process", at: [1, 1, 8, 5], items: [{ type: "symbol", symbol: "centrifuge", label: "C-1", x: 50, y: 50, size: 16, on: "PLC_PRG.xRun" }, { type: "pipe", from: [0, 50], to: "C-1.in" }] }] };
     expect((await call("hmi_save_screen", { screen: plant })).isError).toBe(false);
     const h = await panel("get_hmi", { screen: "Plant" });

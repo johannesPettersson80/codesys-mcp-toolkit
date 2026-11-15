@@ -10,7 +10,7 @@
 import { iconSvg, type IconName } from "./icons.js";
 import { routed, itemKey, labelSpots, nearestOnLine, type LabelSpot, lineEnds, instrumentTap, PUMP_CASING } from "./route.js";
 import { hasDock, type Faceplate, type Machine, type ProcessItem, type Screen, type Tone, type Widget } from "./spec.js";
-import { BUILTIN_SYMBOLS, findSymbol, scopeIds, symbolBox, symbolSize, type SymbolDef, type SymbolLib } from "./symbols.js";
+import { BUILTIN_SYMBOLS, findSymbol, INSTRUMENT_SYMBOLS, scopeIds, symbolBox, symbolSize, upright, type SymbolDef, type SymbolLib } from "./symbols.js";
 import { scaleOf, SPACE, themeCss, themeFor, TYPE } from "./theme.js";
 
 export interface Canvas {
@@ -398,6 +398,24 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
   }
 }
 
+/** An ISA-5.1 tag: function letters and a loop number, e.g. 'TT-201', 'LSH201'. */
+export function isTag(s: string | undefined): boolean {
+  return /^[A-Z]{1,5}-?\d{1,5}[A-Z]?$/.test(s ?? "");
+}
+
+/** An ISA-5.1 bubble's text: function letters over the loop number. */
+function bubbleText(tag: string, cx: number, cy: number, r: number): string {
+  // ISA-5.1: the function letters on top, the loop number below, sized to the bubble.
+  const [, letters = tag, num = ""] = /^([A-Z]+)-?(.*)$/.exec(tag) ?? [];
+  const f = r / 3.3;
+  return `<text class="inst-fn" x="${r1(cx)}" y="${r1(cy - 0.2 * f)}" style="font-size:${r1(1.75 * f)}px">${esc(letters)}</text><text class="inst-no" x="${r1(cx)}" y="${r1(cy + 1.9 * f)}" style="font-size:${r1(1.45 * f)}px">${esc(num)}</text>`;
+}
+
+/** The alarm marker beside an item while it is faulted (ISA-101: the equipment keeps its grey; a shape and colour beside it). */
+function faultMark(x: number, y: number): string {
+  return `<g class="fault-mark" transform="translate(${r1(x + 0.4)} ${r1(y - 0.4)})"><rect x="-1.2" y="-1.2" width="2.4" height="2.4" rx=".2"/><text y=".75">1</text></g>`;
+}
+
 function describeArc(cx: number, cy: number, r: number, a0: number, a1: number): string {
   const p = (a: number) => [cx + r * Math.sin((a * Math.PI) / 180), cy - r * Math.cos((a * Math.PI) / 180)].map(r1);
   const [x0, y0] = p(a0);
@@ -415,7 +433,12 @@ const DEFS = `<defs>
 /** A library symbol drawn at the origin, in diagram units (shared with the symbol preview). */
 export function symbolMarkup(name: string, d: SymbolDef, size: number, rotate = 0): string {
   const { w, h } = symbolSize(d, size);
-  return `<g${rotate ? ` transform="rotate(${rotate})"` : ""}><svg x="${r1(-w / 2)}" y="${r1(-h / 2)}" width="${r1(w)}" height="${r1(h)}" viewBox="0 0 ${d.viewBox[0]} ${d.viewBox[1]}" overflow="visible">${scopeIds(d.svg, `sym-${name}`)}</svg></g>`;
+  return `<g${rotate ? ` transform="rotate(${rotate})"` : ""}><svg x="${r1(-w / 2)}" y="${r1(-h / 2)}" width="${r1(w)}" height="${r1(h)}" viewBox="0 0 ${d.viewBox[0]} ${d.viewBox[1]}" overflow="visible">${upright(scopeIds(d.svg, `sym-${name}`), rotate)}</svg></g>`;
+}
+
+/** The state in words under an item's label (redundant coding: not by colour alone), replaced in place by processSvg. */
+function stateWord(v: string, on: string, off: string): string {
+  return `<!--word:${on}|${off}|${v}-->`;
 }
 
 function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => string, face: Face, lib: SymbolLib, spots: Map<string, LabelSpot> = new Map(), all: ProcessItem[] = []): string {
@@ -433,6 +456,16 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
     if (spot?.side === "above" && box) return text(x, box.y0 - 0.8 / sy, t);
     return text(x, y, t);
   };
+  const out = processSvgItem();
+  return out.replace(/<!--word:([A-Z]+)\|([A-Z]+)\|([^>]*?)-->/, (_m, on: string, off: string, v: string) => {
+    // Next to the item's label, on the side away from the item: same x and anchor, one line further.
+    const lab = /<text class="p-label( left| right)?" x="([-\d.]+)" y="([-\d.]+)">/.exec(out);
+    const at = "x" in p && "y" in p ? [p.x, p.y] : [0, 0];
+    const above = lab ? Number(lab[3]) < Y(at[1]!) : false;
+    const [cls, x, y] = lab ? [lab[1] ?? "", lab[2]!, Number(lab[3]) + (above ? -2.1 : 2.1)] : ["", String(r1(at[0]!)), Y(at[1]!) + 6];
+    return `<text class="st-word${cls}" x="${x}" y="${r1(y)}" style="text-anchor:${cls === " left" ? "start" : cls === " right" ? "end" : "middle"}" ${bind({ kind: "on", v })}><tspan class="w-on">${on}</tspan><tspan class="w-off">${off}</tspan></text>`;
+  });
+  function processSvgItem(): string {
   switch (p.type) {
     case "symbol": {
       const f = findSymbol(lib, p.symbol);
@@ -440,7 +473,10 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
       const [name, d] = f;
       const box = symbolBox(d, p, sy);
       const click = p.faceplate ? `class="clickable" ${face(p.label ?? name, p.faceplate, { running: p.on, fault: p.fault })}` : "";
-      return `<g ${p.fault ? bind({ kind: "fault", v: p.fault }) : ""} ${click}><g class="sym sym-${esc(name)}" ${p.on ? bind({ kind: "on", v: p.on }) : ""}><g transform="translate(${r1(p.x)} ${Y(p.y)})">${symbolMarkup(name, d, p.size, p.rotate ?? 0)}</g></g>${label(p.x, box.y1 + 2.6 / sy, p.label, { x0: box.x0, x1: box.x1, y0: box.y0, ymid: p.y })}</g>`;
+      // An instrument symbol is an ISA-5.1 bubble: its tag inside, no label under it.
+      const inst = INSTRUMENT_SYMBOLS[name];
+      const tagText = inst ? bubbleText(isTag(p.label) ? p.label! : inst, p.x, Y(p.y), (p.size / 2) * 0.8) : "";
+      return `<g ${p.fault ? bind({ kind: "fault", v: p.fault }) : ""} ${click}><g class="sym sym-${esc(name)}${p.on || inst ? "" : " nostat"}" ${p.on ? bind({ kind: "on", v: p.on }) : ""}><g transform="translate(${r1(p.x)} ${Y(p.y)})">${symbolMarkup(name, d, p.size, p.rotate ?? 0)}</g>${tagText}</g>${p.fault ? faultMark(box.x1, box.y0 * sy) : ""}${inst ? "" : label(p.x, box.y1 + 2.6 / sy, p.label, { x0: box.x0, x1: box.x1, y0: box.y0, ymid: p.y })}${p.on && !inst ? (/valve/.test(name) ? stateWord(p.on, "OPEN", "CLOSED") : stateWord(p.on, "RUNNING", "STOPPED")) : ""}</g>`;
     }
     case "pipe": {
       const d = (p.points ?? []).map(([x, y], i) => `${i ? "L" : "M"}${r1(x)} ${Y(y)}`).join(" ");
@@ -451,34 +487,42 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
       const x = r1(p.x), y = Y(p.y), w = r1(p.w), h = Y(p.h);
       const clip = id("tk");
       const ticks = [0.25, 0.5, 0.75].map((f) => `<line x1="${r1(x + w - 2.2)}" x2="${r1(x + w - 0.8)}" y1="${r1(y + h * (1 - f))}" y2="${r1(y + h * (1 - f))}"/>`).join("");
+      // ISO 10628-2 1.5: a vessel with dished ends; the level as a flat fill and its value in the text colour.
+      const dish = r1(Math.min(w * 0.18, h * 0.12));
+      const shell = `M${x} ${r1(y + dish)}Q${x} ${y} ${r1(x + w / 2)} ${y}Q${r1(x + w)} ${y} ${r1(x + w)} ${r1(y + dish)}V${r1(y + h - dish)}Q${r1(x + w)} ${r1(y + h)} ${r1(x + w / 2)} ${r1(y + h)}Q${x} ${r1(y + h)} ${x} ${r1(y + h - dish)}Z`;
       return `<g class="tank" ${bind({ kind: "level", v: p.level, min: 0, max: p.max, bands: p.bands })}>
-<clipPath id="${clip}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r1(Math.min(w, h) * 0.12)}"/></clipPath>
-<rect class="tank-shell" x="${x}" y="${y}" width="${w}" height="${h}" rx="${r1(Math.min(w, h) * 0.12)}"/>
-<g clip-path="url(#${clip})"><g class="tank-liq" style="transform-origin:${x}px ${r1(y + h)}px"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="url(#gLiquid)"/><path class="tank-wave" d="M${x} ${r1(y + 1)} q ${r1(w / 8)} -1.2 ${r1(w / 4)} 0 t ${r1(w / 4)} 0 t ${r1(w / 4)} 0 t ${r1(w / 4)} 0 t ${r1(w / 4)} 0 V ${r1(y + 3)} H ${x} Z"/></g></g>
-<rect class="tank-gloss" x="${r1(x + w * 0.1)}" y="${r1(y + h * 0.05)}" width="${r1(w * 0.12)}" height="${r1(h * 0.9)}" rx="${r1(w * 0.06)}"/>
+<clipPath id="${clip}"><path d="${shell}"/></clipPath>
+<path class="tank-shell" d="${shell}"/>
+<g clip-path="url(#${clip})"><g class="tank-liq" style="transform-origin:${x}px ${r1(y + h)}px"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></g></g>
+<path class="tank-out" d="${shell}"/>
 <g class="tank-ticks">${ticks}</g>
 <text class="tank-num" x="${r1(x + w / 2)}" y="${r1(y + h / 2 + 1.5)}" ${bind({ kind: "text", v: p.level, decimals: 0, unit: p.unit })}>–</text>
 ${label(x + w / 2, p.y + p.h + 2.8 / sy, p.label)}</g>`;
     }
     case "pump": {
       // The casing with the discharge nozzle tangential at its top, out to the right (ports: in on the axis, out at the nozzle).
+      // ISO 10628-2 2322 (centrifugal pump): a circle, lines from its top and bottom to the outlet, the axis through it.
       const s = p.size, cx = r1(p.x), cy = Y(p.y), r = r1((s / 2) * PUMP_CASING);
-      const blades = [0, 60, 120, 180, 240, 300].map((a) => `<path d="M0 0 Q ${r1(r * 0.3)} ${r1(-r * 0.25)} ${r1(r * 0.12)} ${r1(-r * 0.62)}" transform="rotate(${a})"/>`).join("");
       return `<g ${p.fault ? bind({ kind: "fault", v: p.fault }) : ""} ${p.faceplate ? `class="clickable" ${face(p.label ?? "Pump", p.faceplate, { running: p.running, fault: p.fault })}` : ""}><g class="pump" ${bind({ kind: "on", v: p.running })}>
-<rect class="pump-noz" x="${cx}" y="${r1(cy - r - 0.85)}" width="${r1(s / 2)}" height="1.7"/>
-<circle class="pump-ring" cx="${cx}" cy="${cy}" r="${r}"/><circle class="pump-body" cx="${cx}" cy="${cy}" r="${r1(r * 0.86)}" fill="url(#gHub)"/>
-<g transform="translate(${cx} ${cy})"><g class="pump-imp">${blades}<circle r="${r1(r * 0.14)}" class="pump-hub"/></g></g>
-${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g></g>`;
+<circle class="pump-body" cx="${cx}" cy="${cy}" r="${r}"/>
+<path class="pump-tri" d="M${cx} ${r1(cy - r)}L${r1(cx + r)} ${cy}L${cx} ${r1(cy + r)}M${r1(cx - r)} ${cy}H${r1(cx + r)}"/>
+</g>${p.fault ? faultMark(cx + r, cy - r) : ""}
+${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}${stateWord(p.running, "RUNNING", "STOPPED")}</g>`;
     }
     case "fan": {
+      // A fan (ISO 10628-2 17): the casing and three blades, still (no animation, as ISA-101 asks).
       const s = p.size, cx = r1(p.x), cy = Y(p.y), r = r1(s / 2);
-      const blades = [0, 120, 240].map((a) => `<path d="M0 0 C ${r1(r * 0.5)} ${r1(-r * 0.2)} ${r1(r * 0.55)} ${r1(-r * 0.8)} 0 ${r1(-r * 0.86)} C ${r1(-r * 0.2)} ${r1(-r * 0.6)} ${r1(-r * 0.1)} ${r1(-r * 0.2)} 0 0Z" transform="rotate(${a})"/>`).join("");
-      return `<g class="pump fan${p.faceplate ? " clickable" : ""}" ${bind({ kind: "on", v: p.running })} ${p.faceplate ? face(p.label ?? "Fan", p.faceplate, { running: p.running }) : ""}><circle class="pump-ring" cx="${cx}" cy="${cy}" r="${r}"/><circle class="pump-body" cx="${cx}" cy="${cy}" r="${r1(r * 0.9)}" fill="url(#gHub)"/><g transform="translate(${cx} ${cy})"><g class="pump-imp">${blades}<circle r="${r1(r * 0.12)}" class="pump-hub"/></g></g>${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g>`;
+      const blades = [0, 120, 240].map((a) => `<path d="M0 0C${r1(r * 0.45)} ${r1(-r * 0.15)} ${r1(r * 0.45)} ${r1(-r * 0.6)} 0 ${r1(-r * 0.72)}C${r1(-r * 0.2)} ${r1(-r * 0.5)} ${r1(-r * 0.12)} ${r1(-r * 0.2)} 0 0Z" transform="rotate(${a})"/>`).join("");
+      void blades;
+      // ISO 10628-2 X8164 (blower, fan): a circle with the blades as a wedge from the inlet side to the centre.
+      const k = r * Math.SQRT1_2;
+      return `<g class="pump fan${p.faceplate ? " clickable" : ""}" ${bind({ kind: "on", v: p.running })} ${p.faceplate ? face(p.label ?? "Fan", p.faceplate, { running: p.running }) : ""}><circle class="pump-body" cx="${cx}" cy="${cy}" r="${r}"/><path class="pump-tri" d="M${r1(cx - k)} ${r1(cy - k)}L${cx} ${cy}L${r1(cx - k)} ${r1(cy + k)}M${cx} ${cy}H${r1(cx + r)}"/>${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}${stateWord(p.running, "RUNNING", "STOPPED")}</g>`;
     }
     case "valve": {
       const s = p.size, cx = r1(p.x), cy = Y(p.y), h = r1(s / 2);
-      const body = `<path class="valve-body" d="M${r1(-h)} ${r1(-h * 0.7)} L${h} ${r1(h * 0.7)} L${h} ${r1(-h * 0.7)} L${r1(-h)} ${r1(h * 0.7)} Z"/><line class="valve-stem" x1="0" y1="0" x2="0" y2="${r1(-h * 1.1)}"/><rect class="valve-act" x="${r1(-h * 0.5)}" y="${r1(-h * 1.5)}" width="${h}" height="${r1(h * 0.45)}" rx="${r1(h * 0.1)}"/>`;
-      return `<g class="valve${p.faceplate ? " clickable" : ""}" ${bind({ kind: "on", v: p.open })} ${p.faceplate ? face(p.label ?? "Valve", p.faceplate, { open: p.open }) : ""}><g transform="translate(${cx} ${cy})${p.vertical ? " rotate(90)" : ""}">${body}</g>${p.label ? (p.vertical ? `<text class="p-label left" x="${r1(p.x + s * 0.75)}" y="${r1(cy + 0.6)}">${esc(p.label)}</text>` : label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)) : ""}</g>`;
+      // ISO 10628-2 21.1: two triangles meeting in the middle; grey closed, bright open.
+      const body = `<path class="valve-body" d="M${r1(-h)} ${r1(-h * 0.5)}L0 0L${r1(-h)} ${r1(h * 0.5)}ZM${h} ${r1(-h * 0.5)}L0 0L${h} ${r1(h * 0.5)}Z"/>`;
+      return `<g class="valve${p.faceplate ? " clickable" : ""}" ${bind({ kind: "on", v: p.open })} ${p.faceplate ? face(p.label ?? "Valve", p.faceplate, { open: p.open }) : ""}><g transform="translate(${cx} ${cy})${p.vertical ? " rotate(90)" : ""}">${body}</g>${p.label ? (p.vertical ? `<text class="p-label left" x="${r1(p.x + s * 0.75)}" y="${r1(cy + 0.6)}">${esc(p.label)}</text>` : label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)) : ""}${stateWord(p.open, "OPEN", "CLOSED")}</g>`;
     }
     case "instrument": {
       // ISA-5.1: a bubble with the function letters over the loop number, joined by a
@@ -499,16 +543,29 @@ ${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g></g>`;
       return `${conn}<g class="inst tone-${toneOf(p.tone ?? "warn")}" ${p.on ? bind({ kind: "on", v: p.on }) : ""}><circle class="inst-bubble" cx="${cx}" cy="${cy}" r="${R}"/><text class="inst-fn" x="${cx}" y="${r1(cy - 0.2)}">${esc(letters)}</text><text class="inst-no" x="${cx}" y="${r1(cy + 1.9)}">${esc(num)}</text></g>${reading}`;
     }
     case "sensor": {
-      const cx = r1(p.x), cy = Y(p.y);
-      // A signal line leaving upward would cross the tag: the tag moves left of it.
-      const signalUp = all.some((q) => q.type === "pipe" && q.signal && (q.points ?? []).some((pt, k, pts) => Math.abs(pt[0] - p.x) < 1e-6 && Math.abs(pt[1] - p.y) < 1e-6 && [pts[k - 1], pts[k + 1]].some((n) => n && Math.abs(n[0] - p.x) < 1e-6 && n[1] < p.y)));
-      // A leader from the box to the point on the line it measures.
+      // An ISA-5.1 instrument bubble (its label as the tag, e.g. 'TT-201'), the reading beside it,
+      // and the process connection to the point on the line it measures.
+      const cx = r1(p.x), cy = Y(p.y), R = 3.3;
+      const tagged = isTag(p.label);
       const at = nearestOnLine(all, p.x, p.y, sy, 9);
-      // Level with the box: straight across to its side; else up or down, then across if needed.
-      const level = at && Math.abs(at[1] * sy - cy) <= 2.1;
-      const path = !at ? "" : level ? `M${r1(at[0])} ${Y(at[1])}H${r1(at[0] < p.x ? cx - 6.5 : cx + 6.5)}` : `M${r1(at[0])} ${Y(at[1])}V${r1(at[1] < p.y ? cy - 2.1 : cy + 2.1)}H${r1(Math.max(p.x - 6.5, Math.min(p.x + 6.5, at[0])))}`;
-      const lead = at ? `<path class="sen-lead" d="${path}"/><circle class="sen-tap" cx="${r1(at[0])}" cy="${Y(at[1])}" r="0.55"/>` : "";
-      return `${lead}<g class="sensor"><rect class="sen-box" x="${r1(cx - 6.5)}" y="${r1(cy - 2.1)}" width="13" height="4.2" rx="2.1"/><text class="sen-num" x="${cx}" y="${r1(cy + 0.75)}" ${bind({ kind: "text", v: p.value, decimals: p.decimals ?? 1, unit: p.unit })}>–</text>${p.label ? (signalUp ? `<text class="sen-tag" x="${r1(p.x - 1)}" y="${r1(cy - 3)}" style="text-anchor:end">${esc(p.label)}</text>` : `<text class="sen-tag" x="${cx}" y="${r1(cy - 3)}">${esc(p.label)}</text>`) : ""}</g>`;
+      let path = "";
+      if (at) {
+        const [ax, ay] = [r1(at[0]), Y(at[1])];
+        path = Math.abs(ay - cy) <= R ? `M${ax} ${ay}H${r1(ax < cx ? cx - R : cx + R)}` : Math.abs(ax - cx) <= R ? `M${ax} ${ay}V${r1(ay < cy ? cy - R : cy + R)}` : `M${ax} ${ay}V${cy}H${r1(ax < cx ? cx - R : cx + R)}`;
+      }
+      const lead = at ? `<path class="inst-conn" d="${path}"/><circle class="inst-tap" cx="${r1(at[0])}" cy="${Y(at[1])}" r="0.5"/>` : "";
+      // A value that isn't an instrument (no ISA tag as its label) is a plain reading with its label above.
+      const num = (x: number, y = cy) => `<rect class="sen-box" x="${r1(x - 6)}" y="${r1(y - 1.9)}" width="12" height="3.8" rx="1.9"/><text class="sen-num" x="${r1(x)}" y="${r1(y + 0.7)}" ${bind({ kind: "text", v: p.value, decimals: p.decimals ?? 1, unit: p.unit })}>–</text>`;
+      if (!tagged) return `${lead.replace(/H([-\d.]+)"/, (m, hx: string) => `H${r1(Number(hx) < cx ? cx - 6 : cx + 6)}"`)}${num(cx)}${p.label ? `<text class="sen-tag" x="${cx}" y="${r1(cy - 2.8)}">${esc(p.label)}</text>` : ""}`;
+      // The reading beside the bubble, on the side where no vessel or symbol is in the way.
+      const blocked = (x0: number, x1: number) => all.some((q) => {
+        const b = q.type === "tank" ? { x0: q.x, x1: q.x + q.w, y0: Y(q.y), y1: Y(q.y + q.h) } : q.type === "symbol" && findSymbol(lib, q.symbol) ? (({ x0, x1, y0, y1 }) => ({ x0, x1, y0: y0 * sy, y1: y1 * sy }))(symbolBox(findSymbol(lib, q.symbol)![1], q, sy)) : undefined;
+        return !!b && b.x0 < x1 && b.x1 > x0 && b.y0 < cy + 1.9 && b.y1 > cy - 1.9;
+      });
+      const rightX = cx + R + 6.8, leftX = cx - R - 6.8;
+      // Right, else left; with both blocked, above or below the bubble, away from its connection.
+      const reading = !blocked(rightX - 6, rightX + 6) ? num(rightX) : !blocked(leftX - 6, leftX + 6) ? num(leftX) : num(cx, at && Y(at[1]) > cy ? cy - R - 2.6 : cy + R + 2.6);
+      return `${lead}<g class="inst"><circle class="inst-bubble" cx="${cx}" cy="${cy}" r="${R}"/>${bubbleText(p.label!, p.x, cy, R)}</g>${reading}`;
     }
     case "lamp": {
       const cx = r1(p.x), cy = Y(p.y);
@@ -518,6 +575,7 @@ ${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g></g>`;
       return `<circle class="junction" cx="${r1(p.x)}" cy="${Y(p.y)}" r="1.1"/>`;
     case "label":
       return `<text class="p-text" x="${r1(p.x)}" y="${Y(p.y)}">${esc(p.text)}</text>`;
+  }
   }
 }
 
@@ -676,31 +734,28 @@ export const HMI_CSS = String.raw`
 .proc{width:100%;height:100%;overflow:visible}
 .p-label{font-size:1.75px;fill:var(--muted);text-anchor:middle;font-weight:600;letter-spacing:.05em}.p-label.left{text-anchor:start}.p-label.right{text-anchor:end}.p-text{font-size:2px;fill:var(--fg);font-weight:600}
 .junction{fill:var(--pipe)}
-.pump-noz{fill:var(--pipe-in);stroke:var(--neutral);stroke-width:.35;transition:all .3s}.pump.on .pump-noz{stroke:var(--ok)}
-.inst-bubble{fill:var(--tile);stroke:var(--muted);stroke-width:.35}.inst.on .inst-bubble{fill:color-mix(in srgb,var(--c) 30%,var(--tile));stroke:var(--c)}.inst-fn{font-size:1.75px;font-weight:700;fill:var(--fg);text-anchor:middle;letter-spacing:.04em}.inst-no{font-size:1.45px;fill:var(--muted);text-anchor:middle;font-variant-numeric:tabular-nums}.inst-conn{fill:none;stroke:var(--muted);stroke-width:.35}.inst-tap{fill:var(--muted)}.line-arrow{fill:var(--muted)}
-.signal{fill:none;stroke:var(--muted);stroke-width:.35;stroke-dasharray:1.2 .9;opacity:.85}.sen-lead{fill:none;stroke:var(--muted);stroke-width:.3}.sen-tap{fill:var(--muted)}.p-line{font-size:1.9px;fill:var(--muted)}
-.pipe-outer{fill:none;stroke:var(--pipe);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.pipe-inner{fill:none;stroke:var(--pipe-in);stroke-width:1;stroke-linecap:round;stroke-linejoin:round}
-.pipe-flow{fill:none;stroke:var(--accent);stroke-width:.55;stroke-dasharray:1.1 1.9;stroke-linecap:round;opacity:0;transition:opacity .4s}.pipe.on .pipe-flow{opacity:1;animation:flow .8s linear infinite}
-.tank{--p:0}.tank-shell{fill:url(#gShell);stroke:var(--tile-bd);stroke-width:.4}.tank-liq{transform:scaleY(var(--p));transition:transform .8s cubic-bezier(.2,.8,.2,1)}
-.tank-liq rect{fill:url(#gLiquid);opacity:.92}.tank[data-tone=warn] .tank-liq rect{fill:var(--warn)}.tank[data-tone=alarm] .tank-liq rect{fill:var(--alarm)}
-.tank-wave{fill:rgba(255,255,255,.22);animation:wave 3s ease-in-out infinite alternate}
-.tank-gloss{fill:rgba(255,255,255,.08)}.tank-ticks line{stroke:var(--muted);stroke-width:.3}
-.tank-num{font-size:3.4px;font-weight:700;fill:#fff;text-anchor:middle;paint-order:stroke;stroke:rgba(2,6,23,.45);stroke-width:.6px;font-variant-numeric:tabular-nums}
-.pump-ring{fill:none;stroke:var(--neutral);stroke-width:.9;transition:all .3s}.pump-body{stroke:var(--tile-bd);stroke-width:.3}.pump-out{fill:var(--shell-b);stroke:var(--tile-bd);stroke-width:.3}
-.pump-imp path{fill:none;stroke:var(--muted);stroke-width:.9;stroke-linecap:round}.fan .pump-imp path{fill:var(--muted);stroke:none;opacity:.85}.pump-hub{fill:var(--muted)}
-.pump.on .pump-ring{stroke:var(--ok)}.pump.on .pump-imp{animation:spin 1s linear infinite}.pump.on .pump-imp path{stroke:var(--ok)}.fan.on .pump-imp path{fill:var(--ok)}.pump.on .pump-hub{fill:var(--ok)}
-.fault .pump-ring{stroke:var(--alarm);animation:blink .8s infinite}
-.sym{--state:var(--neutral);--body:var(--shell-b);--body2:var(--shell-a);--line:var(--muted);transition:filter .3s}
-.sym.on{--state:var(--ok)}
-.fault .sym{--state:var(--alarm);animation:blink .8s infinite}
+.pump-body{fill:var(--equip);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke;transition:fill .3s}.pump.on .pump-body{fill:var(--equip-on)}
+.pump-tri{fill:none;stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke;stroke-linejoin:round}.pump.on .pump-tri{stroke:var(--equip-line-on)}
+.fault-mark{display:none}.fault>.fault-mark{display:inline;animation:blink 1s steps(2,jump-none) infinite}.fault-mark rect{fill:var(--alarm)}.fault-mark text{font-size:2px;font-weight:700;fill:var(--on-alarm);text-anchor:middle}
+.inst-bubble{fill:var(--surface);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke}.inst.on .inst-bubble{fill:color-mix(in srgb,var(--c) 30%,var(--tile));stroke:var(--c)}.inst-fn{font-size:1.75px;font-weight:700;fill:var(--fg);text-anchor:middle;letter-spacing:.04em}.inst-no{font-size:1.45px;fill:var(--muted);text-anchor:middle;font-variant-numeric:tabular-nums}.inst-conn{fill:none;stroke:var(--equip-line);stroke-width:1.5px;vector-effect:non-scaling-stroke}.inst-tap{fill:var(--muted)}.line-arrow{fill:var(--muted)}
+.signal{fill:none;stroke:var(--equip-line);stroke-width:1.5px;vector-effect:non-scaling-stroke;stroke-dasharray:6 5}.sen-lead{fill:none;stroke:var(--muted);stroke-width:.3}.sen-tap{fill:var(--muted)}.p-line{font-size:1.9px;fill:var(--muted)}
+.pipe-outer{fill:none;stroke:var(--pipe);stroke-width:4px;vector-effect:non-scaling-stroke;stroke-linecap:square;stroke-linejoin:miter}.pipe-inner{display:none}
+.pipe-flow{display:none}.pipe-outer{transition:stroke .3s}.pipe.on .pipe-outer{stroke:var(--equip-line)}
+.tank{--p:0}.tank-shell{fill:var(--surface)}.tank-out{fill:none;stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke}.tank-liq{transform:scaleY(var(--p));transition:transform .8s cubic-bezier(.2,.8,.2,1)}
+.tank-liq rect{fill:var(--liquid)}.tank[data-tone=warn] .tank-liq rect{fill:var(--warn)}.tank[data-tone=alarm] .tank-liq rect{fill:var(--alarm)}
+.tank-ticks line{stroke:var(--equip-line);stroke-width:1px;vector-effect:non-scaling-stroke}
+.tank-num{font-size:3.2px;font-weight:600;fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--surface);stroke-width:.8px;font-variant-numeric:tabular-nums}
+.sym{--state:var(--equip);--body:var(--surface);--body2:var(--equip);--line:var(--equip-line);transition:filter .3s}
+.sym.on{--state:var(--equip-on);--line:var(--equip-line-on)}.sym.nostat{--state:var(--surface);--line:var(--equip-line)}
+.st-word{font-size:1.5px;font-weight:700;letter-spacing:.06em;fill:var(--text2)}.st-word .w-on{display:none}.on .st-word .w-on,.on.st-word .w-on{display:inline}.on .st-word .w-off,.on.st-word .w-off{display:none}
 .sym .spin{transform-box:fill-box;transform-origin:center}.sym.on .spin{animation:spin 1.2s linear infinite}
 .clickable:hover .sym{filter:drop-shadow(0 0 1.5px var(--accent))}
-.valve-body{fill:var(--neutral);stroke:var(--tile-bd);stroke-width:.3;transition:fill .3s}.valve-stem{stroke:var(--muted);stroke-width:.6}.valve-act{fill:var(--shell-b);stroke:var(--tile-bd);stroke-width:.3}
-.valve.on .valve-body{fill:var(--ok)}
-.sen-box{fill:rgba(2,6,23,.6);stroke:color-mix(in srgb,var(--accent) 70%,transparent);stroke-width:.22}.theme-light .sen-box{fill:#fff}
+.valve-body{fill:var(--equip);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke;stroke-linejoin:round;transition:fill .3s}
+.valve.on .valve-body{fill:var(--equip-on)}
+.sen-box{fill:var(--surface);stroke:var(--line);stroke-width:1px;vector-effect:non-scaling-stroke}
 .sen-num{font-size:2px;font-weight:700;fill:var(--fg);text-anchor:middle;font-variant-numeric:tabular-nums}.sen-tag{font-size:1.5px;fill:var(--muted);text-anchor:middle;font-weight:600;letter-spacing:.06em}
 .plamp .pl-dot{fill:var(--track);transition:all .3s}.plamp .pl-halo{fill:none}.plamp.on .pl-dot{fill:var(--c)}.plamp.on .pl-halo{fill:color-mix(in srgb,var(--c) 30%,transparent)}
-@keyframes spin{to{transform:rotate(360deg)}}@keyframes flow{to{stroke-dashoffset:-3}}@keyframes blink{50%{opacity:.35}}
+@keyframes spin{to{transform:rotate(360deg)}}@keyframes flow{to{stroke-dashoffset:-16}}@keyframes blink{50%{opacity:.35}}
 @keyframes wave{from{transform:translateX(-6%)}to{transform:translateX(0)}}
 @media (prefers-reduced-motion:reduce){.hmi *{animation:none!important;transition:none!important}}
 `;

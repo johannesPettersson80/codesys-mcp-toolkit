@@ -41,8 +41,16 @@ export interface Theme {
   /** Process drawings (pipes, liquid, equipment). */
   pipe: string;
   liquid: string;
+  /**
+   * Equipment state as the High Performance HMI Handbook draws it (no hue): stopped or closed
+   * darker, running or open lighter, each with its word beside it (STOPPED, RUNNING); the greys
+   * are the theme's own (Siemens iX color-2/-4), so equipment sits in the palette.
+   */
   equip: string;
+  equipOn: string;
+  /** Lines on stopped equipment (and outlines generally), and on running equipment. */
   equipLine: string;
+  equipLineOn: string;
   /** Trend lines, in order. */
   series: string[];
 }
@@ -61,10 +69,12 @@ export const THEMES: Record<ThemeName, Theme> = {
     track: "#e2e4e6",
     ctl: "#b3b9bf",
     tones: { accent: "#006e93", ok: "#2c8500", warn: "#ffbb00", alarm: "#d72332", neutral: "#66727e" },
-    pipe: "#9aa4ae",
-    liquid: "#6fa8d6",
-    equip: "#eef1f4",
-    equipLine: "#4b5661",
+    pipe: "#92979b",
+    liquid: "#9cc2e0",
+    equip: "#d8dadd",
+    equipOn: "#ffffff",
+    equipLine: "#1a232d",
+    equipLineOn: "#1a232d",
     series: ["#1565c0", "#d9730d", "#7b4fc9", "#13897b", "#c2185b", "#6d7d1a"],
   },
   dark: {
@@ -80,10 +90,12 @@ export const THEMES: Record<ThemeName, Theme> = {
     track: "#283236",
     ctl: "#6a7a82",
     tones: { accent: "#00bde3", ok: "#44cc00", warn: "#ffbb00", alarm: "#ff2453", neutral: "#94a1a9" },
-    pipe: "#5d6772",
-    liquid: "#3f7fb3",
-    equip: "#2a3138",
-    equipLine: "#b9c2ca",
+    pipe: "#63737b",
+    liquid: "#3d6f94",
+    equip: "#283236",
+    equipOn: "#4c5a60",
+    equipLine: "#e0e7ea",
+    equipLineOn: "#e0e7ea",
     series: ["#4d9be6", "#f0913a", "#a585e8", "#35b5a5", "#e86a9a", "#b3c23f"],
   },
   // For bright light or poor eyesight: black, white text and lines, full-strength colours.
@@ -101,8 +113,10 @@ export const THEMES: Record<ThemeName, Theme> = {
     tones: { accent: "#3ab0ff", ok: "#22e06a", warn: "#ffd400", alarm: "#ff4136", neutral: "#a6a6a6" },
     pipe: "#a6a6a6",
     liquid: "#3ab0ff",
-    equip: "#111111",
+    equip: "#262626",
+    equipOn: "#808080",
     equipLine: "#ffffff",
+    equipLineOn: "#ffffff",
     series: ["#3ab0ff", "#ffa31a", "#c9a0ff", "#22e0c8", "#ff7eb6", "#d8f03a"],
   },
 };
@@ -202,6 +216,8 @@ export function themeCss(t: Theme): string {
     pipe: t.pipe,
     liquid: t.liquid,
     equip: t.equip,
+    "equip-on": t.equipOn,
+    "equip-line-on": t.equipLineOn,
     "equip-line": t.equipLine,
     ...Object.fromEntries(Object.entries(t.tones).flatMap(([k, c]) => [[k, c], [`${k}-soft`, softOf(t, c)], [`on-${k}`, textOn(c)]])),
   };

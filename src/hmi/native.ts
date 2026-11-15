@@ -7,11 +7,11 @@
  */
 import { darkTextOn } from "./color.js";
 import { iconPicture, type IconName } from "./icons.js";
-import { ALARM_COUNTERS, buttonIcon, buttonKind, buttonLayout, canvasOf, machineStates, modeIcon, modeValues, pageIcon, stateButtonFit, stateTextSize, tileBox, type ButtonKind } from "./render.js";
-import { routed, itemKey, labelSpots, lineEnds, nearestOnLine, type LabelSpot } from "./route.js";
+import { ALARM_COUNTERS, buttonIcon, buttonKind, buttonLayout, canvasOf, isTag, machineStates, modeIcon, modeValues, pageIcon, stateButtonFit, stateTextSize, tileBox, type ButtonKind } from "./render.js";
+import { routed, itemKey, instrumentTap, labelSpots, lineEnds, nearestOnLine, PUMP_CASING, type LabelSpot } from "./route.js";
 import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
 import { hasDock, screenVariables, USER_GROUPS } from "./spec.js";
-import { BUILTIN_SYMBOLS, findSymbol, symbolPicture, symbolSize, type SymbolColors, type SymbolLib } from "./symbols.js";
+import { BUILTIN_SYMBOLS, findSymbol, INSTRUMENT_SYMBOLS, symbolPicture, symbolSize, type SymbolColors, type SymbolLib } from "./symbols.js";
 import { PT, softOf, SPACE, textOn, themeFor, TYPE, type ThemeName } from "./theme.js";
 
 type Argb = number;
@@ -91,7 +91,11 @@ export interface Palette {
   /** Borders of controls (outlined buttons). */
   ctl: Argb;
   pipe: Argb;
+  /** Equipment's fill: off (grey) and on (bright), and its outline. */
   shell: Argb;
+  shellOn: Argb;
+  equipLine: Argb;
+  equipLineOn: Argb;
   liquid: [Argb, Argb];
   tones: Record<Tone, Argb>;
   soft: Record<Tone, Argb>;
@@ -139,6 +143,9 @@ export function paletteFor(screen: { theme?: ThemeName; accent?: string }): Pale
     ctl: argbOf(t.ctl),
     pipe: argbOf(t.pipe),
     shell: argbOf(t.equip),
+    shellOn: argbOf(t.equipOn),
+    equipLine: argbOf(t.equipLine),
+    equipLineOn: argbOf(t.equipLineOn),
     liquid: [argbOf(t.liquid), argbOf(t.liquid)],
     tones: per((x) => x),
     soft: per((x) => softOf(t, x)),
@@ -160,43 +167,36 @@ function band(bands: { from: number; tone: Tone }[] | undefined): { from: number
   return hot[0];
 }
 
-/** Pictures per turn of a running pump or fan. */
-export const FRAMES = 8;
-
-/** SVG symbols for the image pool (100x100). */
-export function symbols(p: Palette): { id: string; svg: string }[] {
+/**
+ * Pictures for the image pool (a 100x100 box drawn at px pixels), drawn from ISO 10628-2: the
+ * centrifugal pump (2322), the fan (X8164) and the valve (2101), lines in the text colour,
+ * hollow when off and a soft green when on. Outlines are 2 px whatever the size, as in the browser.
+ */
+export function symbols(p: Palette, px = 100): { id: string; svg: string }[] {
+  const u = 100 / px;
   const wrap = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">${body}</svg>`;
-  const pump = (on: boolean, angle = 0) => {
-    const ring = on ? hex(p.tones.ok) : hex(p.tones.neutral);
-    const blades = [0, 60, 120, 180, 240, 300].map((a) => `<path d="M0 0 Q 12 -10 5 -26" transform="rotate(${a})" fill="none" stroke="${ring}" stroke-width="4.5" stroke-linecap="round"/>`).join("");
-    return wrap(`<defs><radialGradient id="h" cx=".35" cy=".35" r=".8"><stop offset="0" stop-color="${hex(p.dark ? 0xff475569 : 0xfff1f5f9)}"/><stop offset="1" stop-color="${hex(p.dark ? 0xff0f172a : 0xffcbd5e1)}"/></radialGradient>
-<filter id="g" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="${on ? 3 : 0.01}"/></filter></defs>
-${on ? `<circle cx="50" cy="50" r="46" fill="none" stroke="${ring}" stroke-width="6" opacity=".55" filter="url(#g)"/>` : ""}
-<circle cx="50" cy="50" r="47" fill="none" stroke="${ring}" stroke-width="5"/><circle cx="50" cy="50" r="41" fill="url(#h)"/>
-<g transform="translate(50 50) rotate(${angle})">${blades}<circle r="6" fill="${ring}"/></g>`);
-  };
-  const fan = (on: boolean, angle = 0) => {
-    const col = on ? hex(p.tones.ok) : hex(p.tones.neutral);
-    const blades = [0, 120, 240].map((a) => `<path d="M0 0 C 18 -7 20 -30 0 -33 C -8 -24 -4 -8 0 0Z" transform="rotate(${a})" fill="${col}"/>`).join("");
-    return wrap(`<circle cx="50" cy="50" r="47" fill="none" stroke="${col}" stroke-width="5"/><circle cx="50" cy="50" r="41" fill="${hex(p.tile2)}"/><g transform="translate(50 50) rotate(${angle})">${blades}<circle r="6" fill="${hex(p.tile)}" stroke="${col}" stroke-width="2"/></g>`);
-  };
-  const valve = (open: boolean) => {
-    const col = open ? hex(p.tones.ok) : hex(p.tones.neutral);
-    return wrap(`<line x1="50" y1="50" x2="50" y2="18" stroke="${hex(p.muted)}" stroke-width="4"/><rect x="36" y="8" width="28" height="12" rx="3" fill="${hex(p.shell)}" stroke="${hex(p.border)}"/>
-<path d="M1 30 L99 70 L99 30 L1 70 Z" fill="${col}" stroke="${hex(p.border)}" stroke-width="1.5" stroke-linejoin="round"/>`);
-  };
+  const lnOf = (on: boolean) => `stroke="${hex(on ? p.equipLineOn : p.equipLine)}" stroke-width="${2 * u}"`;
+  const fill = (on: boolean) => hex(on ? p.shellOn : p.shell);
+  const R = 50 * PUMP_CASING - u;
+  const k = R * Math.SQRT1_2;
+  const pump = (on: boolean) =>
+    wrap(`<circle cx="50" cy="50" r="${R}" fill="${fill(on)}" ${lnOf(on)}/>
+<path d="M50 ${50 - R}L${50 + R} 50L50 ${50 + R}M${50 - R} 50H${50 + R}" fill="none" ${lnOf(on)} stroke-linejoin="round"/>`);
+  const fan = (on: boolean) =>
+    wrap(`<circle cx="50" cy="50" r="${50 - u}" fill="${fill(on)}" ${lnOf(on)}/>
+<path d="M${50 - k} ${50 - k}L50 50L${50 - k} ${50 + k}M50 50H${100 - u}" fill="none" ${lnOf(on)} stroke-linejoin="round"/>`);
+  const valve = (open: boolean) =>
+    wrap(`<path d="M${u} 25L50 50L${u} 75ZM${100 - u} 25L50 50L${100 - u} 75Z" fill="${fill(open)}" ${lnOf(open)} stroke-linejoin="round"/>`);
+  const turn = (svg: string) => svg.replace(/(<svg[^>]*>)([\s\S]*)(<\/svg>)/, '$1<g transform="rotate(90 50 50)">$2</g>$3');
   return [
     { id: "pump_on", svg: pump(true) },
     { id: "pump_off", svg: pump(false) },
     { id: "fan_on", svg: fan(true) },
     { id: "fan_off", svg: fan(false) },
-    // Running frames: CODESYS can't rotate an image, so the impeller turns through 8 pictures.
-    ...Array.from({ length: FRAMES }, (_, k) => ({ id: `pump_f${k}`, svg: pump(true, (k * 60) / FRAMES) })),
-    ...Array.from({ length: FRAMES }, (_, k) => ({ id: `fan_f${k}`, svg: fan(true, (k * 120) / FRAMES) })),
     { id: "valve_open", svg: valve(true) },
     { id: "valve_closed", svg: valve(false) },
-    { id: "valve_open_v", svg: valve(true).replace(/(<svg[^>]*>)([\s\S]*)(<\/svg>)/, '$1<g transform="rotate(90 50 50)">$2</g>$3') },
-    { id: "valve_closed_v", svg: valve(false).replace(/(<svg[^>]*>)([\s\S]*)(<\/svg>)/, '$1<g transform="rotate(90 50 50)">$2</g>$3') },
+    { id: "valve_open_v", svg: turn(valve(true)) },
+    { id: "valve_closed_v", svg: turn(valve(false)) },
   ];
 }
 
@@ -208,18 +208,18 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
   const p = paletteFor(screen);
   const lib: SymbolLib = { ...BUILTIN_SYMBOLS, ...custom };
   const dark = p.dark;
-  const symColors = (state: "off" | "on" | "fault"): SymbolColors => ({
-    state: hex(state === "on" ? p.tones.ok : state === "fault" ? p.tones.alarm : p.tones.neutral),
-    body: dark ? "#334155" : "#f1f5f9",
-    body2: dark ? "#1e293b" : "#cbd5e1",
-    line: hex(p.muted),
+  // A symbol's colours per state: the body grey off, bright on (a fault shows as a marker beside it).
+  const symColors = (state: "off" | "on"): SymbolColors => ({
+    state: hex(state === "on" ? p.shellOn : p.shell),
+    body: hex(p.tile),
+    body2: hex(p.shell),
+    line: hex(state === "on" ? p.equipLineOn : p.equipLine),
     accent: hex(p.tones.accent),
   });
   const visu = `Visu_${screen.name}`;
   const pool = `IP_${screen.name}`;
   const helperName = `PRG_HMI_${screen.name}`;
   const els: NativeElement[] = [];
-  const templates = symbols(p);
   const dialogs: NativeDialog[] = [];
   const needed = new Map<string, string>();
   const decl: string[] = [];
@@ -238,40 +238,6 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     decl.push(`    ${name} : INT; // ${v}`);
     impl.push(`${name} := ${negative ? "-" : ""}REAL_TO_INT(LIMIT(0.0, (ANY_TO_REAL(${v}) - (${num(min)})) / (${num(max - min || 1)}), 1.0) * ${len}.0);`);
     return `${helperName}.${name}`;
-  };
-  // Flow in pipes: dashes inside the pipe slide with the clock (not per cycle) while the flow
-  // variable is TRUE; each moves by up to one gap and the pattern repeats, so it looks endless.
-  const FLOW_GAP = 24;
-  let flowVar: { pos: string; neg: string } | undefined;
-  const flowPhase = () => {
-    if (!flowVar) {
-      decl.push("    iFlow : INT; // pipe flow phase, px", "    iFlowN : INT;");
-      impl.push(`iFlow := DINT_TO_INT((TIME_TO_DINT(TIME()) / 20) MOD ${FLOW_GAP});`, "iFlowN := -iFlow;");
-      flowVar = { pos: `${helperName}.iFlow`, neg: `${helperName}.iFlowN` };
-    }
-    return flowVar;
-  };
-  const flowDashes = (x1: number, y1: number, x2: number, y2: number, flow: string) => {
-    const horiz = y1 === y2;
-    const lo = horiz ? Math.min(x1, x2) : Math.min(y1, y2);
-    const hi = horiz ? Math.max(x1, x2) : Math.max(y1, y2);
-    const dash = 9;
-    const thick = 3;
-    const fwd = horiz ? x2 >= x1 : y2 >= y1;
-    if (hi - lo < FLOW_GAP + dash + 8) return;
-    const move = fwd ? flowPhase().pos : flowPhase().neg;
-    const axis = horiz ? "X" : "Y";
-    for (let d = 4; d + FLOW_GAP + dash <= hi - lo - 4; d += FLOW_GAP) {
-      const at = fwd ? lo + d : hi - d - dash;
-      els.push({
-        kind: "rect",
-        ...(horiz ? { x: r(at), y: r(y1 - thick / 2), w: dash, h: thick } : { x: r(x1 - thick / 2), y: r(at), w: thick, h: dash }),
-        fill: onColor(p.tones.accent),
-        frame: null,
-        invisible: `NOT (${flow})`,
-        props: { [`Relative movement.Movement top-left.${axis}`]: move, [`Relative movement.Movement bottom-right.${axis}`]: move },
-      });
-    }
   };
   const above = (v: string, from: number) => {
     const name = `xB${++n}`;
@@ -368,6 +334,33 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
       out.push({ kind: "rect", x: r(sx), y: r(sy), w: r(sw), h: r(sh), fill: null, frame: null, click: `${variable} := ${vals[i]};` });
     });
     return h;
+  };
+  /** The fault marker (red square with !) at an item's corner, as in the browser; the state itself is the fill. */
+  const markers = (x: number, y: number, _on?: string, fault?: string) => {
+    if (fault) {
+      els.push({ kind: "rect", x: r(x - 6), y: r(y - 14), w: 20, h: 20, fill: p.tones.alarm, frame: null, invisible: `NOT (${fault})` });
+      els.push(text(x - 6, y - 14, 20, 20, "1", [SEMI, 12], p.onTone.alarm, "HCENTER", { invisible: `NOT (${fault})` }));
+    }
+  };
+  /** An ISA-5.1 instrument bubble (radius rr px) with its tag: function letters over the loop number. */
+  const bubble = (cx: number, cy: number, rr: number, tag: string, on?: string) => {
+    const [, letters = tag, num0 = ""] = /^([A-Z]+)-?(.*)$/.exec(tag) ?? [];
+    els.push({ kind: "circle", x: r(cx - rr), y: r(cy - rr), w: r(2 * rr), h: r(2 * rr), fill: p.tile, frame: p.equipLine, lineWidth: 2, ...(on ? { props: { "Color variables.Toggle color": on, "Colors.Alarm state.Fill color": c(p.soft.warn), "Colors.Alarm state.Frame color": c(p.tones.warn) } } : {}) });
+    els.push(text(cx - rr, cy - rr * 0.62, 2 * rr, rr * 0.7, letters, [SEMI, ptPx(Math.max(8, rr * 0.55))], p.text, "HCENTER"));
+    els.push(text(cx - rr, cy + rr * 0.08, 2 * rr, rr * 0.6, num0, [FONT, ptPx(Math.max(7, rr * 0.45))], p.muted, "HCENTER"));
+  };
+  /** A reading box beside a bubble (or alone): the value with its unit. */
+  const reading = (x: number, cy: number, v: string, decimals?: number, unit?: string) =>
+    els.push({ kind: "round", x: r(x), y: r(cy - 15), w: 104, h: 30, text: `%.${decimals ?? 1}f${unit ? ` ${unit}` : ""}`, font: [SEMI, 10], color: p.text, fill: p.tile, frame: p.border, radius: 15, props: { "Text variables.Text variable": real(v) } });
+  /** A thin line between two points with one bend (process connection of an instrument). */
+  const leader = (ax: number, ay: number, bx: number, by: number, vertFirst: boolean) => {
+    const seg = (x1: number, y1: number, x2: number, y2: number) => {
+      if (Math.abs(x2 - x1) < 1 && Math.abs(y2 - y1) < 1) return;
+      els.push({ kind: "rect", x: r(Math.min(x1, x2) - 1), y: r(Math.min(y1, y2) - 1), w: Math.max(2, r(Math.abs(x2 - x1) + 2)), h: Math.max(2, r(Math.abs(y2 - y1) + 2)), fill: p.equipLine, frame: null });
+    };
+    if (vertFirst) (seg(ax, ay, ax, by), seg(ax, by, bx, by));
+    else (seg(ax, ay, bx, ay), seg(bx, ay, bx, by));
+    els.push({ kind: "circle", x: r(ax - 4), y: r(ay - 4), w: 8, h: 8, fill: p.equipLine, frame: null });
   };
   /** A status lamp: a ring that fills in its tone while the expression is TRUE, and its label. */
   const lamp = (out: NativeElement[], x: number, y: number, w: number, label: string, on: string, tone: Tone) => {
@@ -861,6 +854,14 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
       else if (spot?.side === "above" && bx) els.push(text(cx - 60, bx.y0 - 20, 120, 18, t, [SEMI, 8.5], p.muted, "HCENTER"));
       else els.push(text(cx - 60, y, 120, 18, t, [SEMI, 8.5], p.muted, "HCENTER"));
     };
+    /** The state in words beside the label just drawn (away from the item): two texts, one shown at a time. */
+    const word = (v: string | undefined, on: string, off: string, itemY: number) => {
+      const lab = els[els.length - 1];
+      if (!v || !lab || lab.kind !== "rect" || !lab.text) return;
+      const dy = lab.y < itemY ? -15 : 15;
+      els.push({ ...lab, y: lab.y + dy, text: on, font: [SEMI, 7.5], color: p.text2, invisible: `NOT (${v})` });
+      els.push({ ...lab, y: lab.y + dy, text: off, font: [SEMI, 7.5], color: p.text2, invisible: v });
+    };
     switch (it.type) {
       case "symbol": {
         const f = findSymbol(lib, it.symbol);
@@ -872,17 +873,23 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         const wpx = Math.max(4, r(vw * sx)), hpx = Math.max(4, r(vh * sx));
         const cx = X(it.x), cy = Y(it.y);
         // One picture per state; the bitmap ID expression picks it (fault wins over on).
-        const pic = (state: "off" | "on" | "fault") => {
+        const pic = (state: "off" | "on") => {
           const id = `sym_${name}_${state}${rot ? `_r${rot}` : ""}_${wpx}x${hpx}`;
           if (!needed.has(id)) needed.set(id, symbolPicture(d, name, symColors(state), rot, wpx, hpx));
           return `${pool}.${id}`;
         };
         let expr = `'${pic("off")}'`;
         if (it.on) expr = `SEL(${it.on}, ${expr}, '${pic("on")}')`;
-        if (it.fault) expr = `SEL(${it.fault}, ${expr}, '${pic("fault")}')`;
-        els.push({ kind: "image", x: r(cx - wpx / 2), y: r(cy - hpx / 2), w: wpx, h: hpx, props: { "Static ID": pic("off"), ...(it.on || it.fault ? { "Bitmap ID variable.Bitmap ID": expr } : {}) } });
+        els.push({ kind: "image", x: r(cx - wpx / 2), y: r(cy - hpx / 2), w: wpx, h: hpx, props: { "Static ID": pic("off"), ...(it.on ? { "Bitmap ID variable.Bitmap ID": expr } : {}) } });
+        markers(cx + wpx / 2, cy - hpx / 2, it.on, it.fault);
+        const inst = INSTRUMENT_SYMBOLS[name];
+        if (inst) {
+          bubble(cx, cy, Math.min(wpx, hpx) * 0.4, isTag(it.label) ? it.label! : inst);
+          break;
+        }
         if (it.faceplate) els.push({ kind: "rect", x: r(cx - wpx / 2), y: r(cy - hpx / 2), w: wpx, h: hpx, fill: null, frame: null, dialog: { name: dialogFor(it.label ?? name, it.faceplate, it), x: r(cx + wpx / 2 + 10), y: r(cy - 60) } });
         label(cx, cy + hpx / 2 + 2, it.label, { x0: cx - wpx / 2, x1: cx + wpx / 2, y0: cy - hpx / 2, cy });
+        if (it.label) /valve/.test(name) ? word(it.on, "OPEN", "CLOSED", cy) : word(it.on, "RUNNING", "STOPPED", cy);
         break;
       }
       case "pipe": {
@@ -901,24 +908,26 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
           }
           break;
         }
-        const th = 7;
+        const th = 4;
         for (let k = 1; k < pts.length; k++) {
           const [x1, y1] = pts[k - 1]!;
           const [x2, y2] = pts[k]!;
           const segs: [number, number, number, number][] = x1 === x2 || y1 === y2 ? [[x1, y1, x2, y2]] : [[x1, y1, x2, y1], [x2, y1, x2, y2]];
           for (const [a1, b1, a2, b2] of segs) {
             const x = Math.min(X(a1), X(a2)) - th / 2, y = Math.min(Y(b1), Y(b2)) - th / 2;
-            els.push({ kind: "round", x: r(x), y: r(y), w: r(Math.abs(X(a2) - X(a1)) + th), h: r(Math.abs(Y(b2) - Y(b1)) + th), fill: p.pipe, frame: null, radius: 3, ...(it.flow ? { props: { "Color variables.Toggle color": it.flow, "Colors.Alarm state.Fill color": c(p.tones.accent), "Colors.Alarm state.Frame color": c(p.tones.accent) } } : {}) });
-            if (it.flow) flowDashes(X(a1), Y(b1), X(a2), Y(b2), it.flow);
+            els.push({ kind: "round", x: r(x), y: r(y), w: r(Math.abs(X(a2) - X(a1)) + th), h: r(Math.abs(Y(b2) - Y(b1)) + th), fill: p.pipe, frame: null, ...(it.flow ? { props: { "Color variables.Toggle color": it.flow, "Colors.Alarm state.Fill color": c(p.equipLine), "Colors.Alarm state.Frame color": c(p.equipLine) } } : {}) });
           }
         }
         break;
       }
       case "tank": {
         const x = X(it.x), y = Y(it.y), w = it.w * sx, h = Y(it.y + it.h) - y;
-        els.push({ kind: "round", x: r(x), y: r(y), w: r(w), h: r(h), fill: p.shell, frame: p.border, radius: 12, gradient: [p.shell, darken(p.shell, -0.12), 0] });
-        els.push({ kind: "rect", x: r(x + 3), y: r(y + h - 3), w: r(w - 6), h: 1, fill: p.liquid[0], frame: null, gradient: [p.liquid[0], p.liquid[1], 90], props: { "Relative movement.Movement top-left.Y": pixels(it.level, 0, it.max, r(h - 6), true) } });
-        els.push(text(x, y + h / 2 - 18, w, 36, `%.0f${it.unit ? ` ${it.unit}` : ""}`, [SEMI, 15], 0xffffffff, "HCENTER", { props: { "Text variables.Text variable": real(it.level) } }));
+        // A vessel with rounded ends (CODESYS has no dished end: a radius stands in), the level a flat fill.
+        const rad = r(Math.min(w * 0.3, h * 0.15));
+        els.push({ kind: "round", x: r(x), y: r(y), w: r(w), h: r(h), fill: p.tile, frame: null, radius: rad });
+        els.push({ kind: "rect", x: r(x + 2), y: r(y + h - rad / 2), w: r(w - 4), h: 1, fill: p.liquid[0], frame: null, props: { "Relative movement.Movement top-left.Y": pixels(it.level, 0, it.max, r(h - rad), true) } });
+        els.push({ kind: "round", x: r(x), y: r(y), w: r(w), h: r(h), fill: null, frame: p.equipLine, lineWidth: 2, radius: rad });
+        els.push(text(x, y + h / 2 - 14, w, 28, `%.0f${it.unit ? ` ${it.unit}` : ""}`, [SEMI, 13], p.text, "HCENTER", { props: { "Text variables.Text variable": real(it.level) } }));
         label(x + w / 2, y + h + 4, it.label);
         break;
       }
@@ -937,41 +946,56 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         if (it.type === "valve") {
           els.push({ kind: "switcher", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, props: { 'Image settings.Image, if "on"': `${pool}.${image(on, px)}`, 'Image settings.Image, if  "off"': `${pool}.${image(off, px)}`, Variable: v }, ...face });
         } else {
-          // A turning impeller: a frame counter in the helper program picks the picture while running.
-          const frame = `iF${++n}`;
-          decl.push(`    ${frame} : INT; // ${it.label ?? it.type} frame`);
-          // From the clock, not per cycle: a steady 10 pictures a second whatever the task's interval.
-          impl.push(`IF ${v} THEN ${frame} := DINT_TO_INT((TIME_TO_DINT(TIME()) / 100) MOD ${FRAMES}); END_IF`);
-          for (let k = 0; k < FRAMES; k++) image(`${it.type}_f${k}`, px);
+          // Grey stopped, bright running; no turning impeller (ISA-101: no animation without a reason).
           const offId = `${pool}.${image(off, px)}`;
-          const expr = `SEL(${v}, '${offId}', CONCAT('${pool}.${it.type}_f', CONCAT(INT_TO_STRING(${helperName}.${frame}), '_${px}')))`;
-          els.push({ kind: "image", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, props: { "Static ID": offId, "Bitmap ID variable.Bitmap ID": expr }, ...face });
+          els.push({ kind: "image", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, props: { "Static ID": offId, "Bitmap ID variable.Bitmap ID": `SEL(${v}, '${offId}', '${pool}.${image(on, px)}')` }, ...face });
+          const rc = it.type === "pump" ? (px / 2) * PUMP_CASING : px / 2;
+          markers(cx + rc, cy - rc, v, it.type === "pump" ? it.fault : undefined);
         }
         if (faceDialog) els.push({ kind: "rect", x: r(cx - px / 2), y: r(cy - px / 2), w: px, h: px, fill: null, frame: null, dialog: faceDialog });
         if (it.type === "valve" && it.label) els.push(text(cx + size / 2 + 6, cy - 9, 120, 18, it.label, [SEMI, 8.5], p.muted));
         else label(cx, cy + size / 2 + 2, it.label);
+        if (it.label) it.type === "valve" ? word(v, "OPEN", "CLOSED", cy) : word(v, "RUNNING", "STOPPED", cy);
         break;
       }
+      case "instrument":
       case "sensor": {
-        const cx = X(it.x), cy = Y(it.y);
-        // A leader from the box to the point on the line it measures.
-        const at = nearestOnLine(all, it.x, it.y, aspect, 9);
-        if (at) {
-          const [tx, ty] = [X(at[0]), Y(at[1])];
-          const ex = Math.max(cx - 58, Math.min(cx + 58, tx)), ey = ty < cy ? cy - 15 : cy + 15;
-          if (Math.abs(ty - cy) <= 15) {
-            // Level with the box: straight across to its side.
-            const sx2 = tx < cx ? cx - 58 : cx + 58;
-            els.push({ kind: "rect", x: r(Math.min(tx, sx2)), y: r(ty - 1), w: Math.max(2, r(Math.abs(sx2 - tx))), h: 2, fill: p.muted, frame: null });
-          } else {
-            // Straight up or down from the measuring point, then across to the box if it lies to one side.
-            els.push({ kind: "rect", x: r(tx - 1), y: r(Math.min(ty, ey)), w: 2, h: Math.max(2, r(Math.abs(ey - ty))), fill: p.muted, frame: null });
-            if (Math.abs(ex - tx) > 1) els.push({ kind: "rect", x: r(Math.min(tx, ex)), y: r(ey - 1), w: r(Math.abs(ex - tx)), h: 2, fill: p.muted, frame: null });
-          }
-          els.push({ kind: "circle", x: r(tx - 4), y: r(ty - 4), w: 8, h: 8, fill: p.muted, frame: null });
+        // ISA-5.1, as in the browser: the bubble with its tag, the process connection, the reading beside it.
+        const cx = X(it.x), cy = Y(it.y), rr = 3.3 * sx;
+        const tag = it.type === "instrument" ? it.tag : it.label;
+        const v = it.value;
+        if (it.type === "sensor" && !isTag(tag)) {
+          // Not an instrument: a plain reading with its label above.
+          const at = nearestOnLine(all, it.x, it.y, aspect, 9);
+          if (at) leader(X(at[0]), Y(at[1]), cx, cy + (Y(at[1]) < cy ? -15 : 15), true);
+          reading(cx - 52, cy, it.value, it.decimals, it.unit);
+          if (it.label) els.push(text(cx - 80, cy - 33, 160, 16, it.label, [SEMI, 8], p.muted, "HCENTER"));
+          break;
         }
-        els.push({ kind: "round", x: r(cx - 58), y: r(cy - 15), w: 116, h: 30, text: `%.${it.decimals ?? 1}f${it.unit ? ` ${it.unit}` : ""}`, font: [SEMI, 10], color: p.text, fill: p.tile2, frame: p.tones.accent, radius: 15, props: { "Text variables.Text variable": real(it.value) } });
-        if (it.label) els.push(text(cx - 58, cy - 33, 116, 16, it.label, [SEMI, 8], p.muted, "HCENTER"));
+        const tap = it.type === "instrument" ? instrumentTap(it, all, aspect, lib) : (() => { const at = nearestOnLine(all, it.x, it.y, aspect, 9); return at ? { at, dir: "u" as const } : undefined; })();
+        if (tap) {
+          const [tx, ty] = [X(tap.at[0]), Y(tap.at[1])];
+          const vertical = tap.dir === "u" || tap.dir === "d" || Math.abs(ty - cy) > rr;
+          if (vertical) leader(tx, ty, Math.abs(tx - cx) < 2 ? tx : cx + (tx < cx ? -rr : rr), Math.abs(tx - cx) < 2 ? cy + (ty < cy ? -rr : rr) : cy, true);
+          else leader(tx, ty, cx + (tx < cx ? -rr : rr), ty, false);
+        }
+        bubble(cx, cy, rr, tag ?? "XI", it.type === "instrument" ? it.on : undefined);
+        if (v) {
+          // As in the browser: right of the bubble, else left, else above or below (away from the connection).
+          const boxes = all.flatMap((q) => {
+            if (q.type === "tank") return [{ x0: X(q.x), x1: X(q.x + q.w), y0: Y(q.y), y1: Y(q.y + q.h) }];
+            const f = q.type === "symbol" ? findSymbol(lib, q.symbol) : undefined;
+            if (!f || q.type !== "symbol") return [];
+            const { w: sw, h: sh } = symbolSize(f[1], q.size);
+            const [vw, vh] = (q.rotate ?? 0) % 180 ? [sh, sw] : [sw, sh];
+            return [{ x0: X(q.x) - (vw * sx) / 2, x1: X(q.x) + (vw * sx) / 2, y0: Y(q.y) - (vh * sx) / 2, y1: Y(q.y) + (vh * sx) / 2 }];
+          });
+          const free = (x0: number) => !boxes.some((b) => b.x0 < x0 + 104 && b.x1 > x0 && b.y0 < cy + 15 && b.y1 > cy - 15);
+          const right = cx + rr + 8, left = cx - rr - 112;
+          if (free(right)) reading(right, cy, v, it.decimals, it.unit);
+          else if (free(left)) reading(left, cy, v, it.decimals, it.unit);
+          else reading(cx - 52, tap && Y(tap.at[1]) > cy ? cy - rr - 22 : cy + rr + 22, v, it.decimals, it.unit);
+        }
         break;
       }
       case "lamp": {
@@ -993,7 +1017,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
   function image(base: string, px: number): string {
     const id = `${base}_${px}`;
     if (!needed.has(id)) {
-      const svg = templates.find((t) => t.id === base)!.svg.replace('width="100" height="100"', `width="${px}" height="${px}"`);
+      const svg = symbols(p, px).find((t) => t.id === base)!.svg.replace('width="100" height="100"', `width="${px}" height="${px}"`);
       needed.set(id, svg);
     }
     return id;
