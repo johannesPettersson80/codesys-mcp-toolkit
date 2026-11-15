@@ -5,7 +5,7 @@ import { registerTools, revertObject, versionLine, type AppContext } from "./too
 import { registerPanel } from "./panel.js";
 import { HmiService } from "./hmi/service.js";
 
-export const VERSION = "2.10.0";
+export const VERSION = "2.11.0";
 
 const INSTRUCTIONS = `CODESYS V3.5 automation through a persistent CODESYS session.
 Everything goes through the one tool named codesys, as {"action": "<name>", "args": {...}}. The names below are its actions; {"action": "help"} lists them all with their arguments.

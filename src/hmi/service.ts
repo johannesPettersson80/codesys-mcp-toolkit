@@ -18,6 +18,7 @@ import type { AppContext } from "../tools.js";
 import { canvasOf, HMI_CSS, symbolMarkup, type PageContext } from "./render.js";
 import { allAlarms, screenSchema, screenVariables, type Screen } from "./spec.js";
 import { BUILTIN_SYMBOLS, svgProblems, symbolPorts, symbolSchema, type SymbolDef, type SymbolLib } from "./symbols.js";
+import { themeCss, themeFor } from "./theme.js";
 
 export type Values = Record<string, string | undefined>;
 
@@ -253,8 +254,9 @@ export function staticPage(screen: Screen, values: Values, sim: { state?: string
 }
 
 /**
- * A picture of symbols for the model: each in its off, on and fault colours,
- * with its ports marked and named. Returns the page and its pixel size.
+ * A picture of symbols for the model: each with its ports marked and named, and a valve
+ * also open and closed (state is shown by signs beside a symbol, not by its colours).
+ * Returns the page and its pixel size.
  */
 export function symbolSheet(entries: [string, SymbolDef][], theme: "dark" | "light" = "dark"): { html: string; size: { w: number; h: number } } {
   const rowH = 128;
@@ -269,7 +271,8 @@ export function symbolSheet(entries: [string, SymbolDef][], theme: "dark" | "lig
         : "";
       return `<svg width="190" height="114" viewBox="-40 -24 80 48"><g class="${cls}">${symbolMarkup(name, d, fit)}</g>${marks}</svg>`;
     };
-    return `<div class="row" style="top:${44 + k * rowH}px"><div class="nm">${name.replace(/[<&]/g, "")}<div class="ds">${(d.description ?? "").replace(/[<&]/g, "")}</div><div class="ds">ports: ${Object.keys(d.ports).join(", ") || "none"}</div></div>${cell("sym", true)}${cell("sym on", false)}<span class="fault">${cell("sym", false)}</span></div>`;
+    const valve = /valve/i.test(name);
+    return `<div class="row" style="top:${44 + k * rowH}px"><div class="nm">${name.replace(/[<&]/g, "")}<div class="ds">${(d.description ?? "").replace(/[<&]/g, "")}</div><div class="ds">ports: ${Object.keys(d.ports).join(", ") || "none"}</div></div>${cell("sym", true)}${valve ? `${cell("sym vlv on", false)}${cell("sym vlv", false)}` : ""}</div>`;
   });
   const h = 44 + entries.length * rowH + 10;
   const html = `<!doctype html><html><head><meta charset="utf-8"><style>${HMI_CSS}
@@ -279,7 +282,7 @@ html,body{margin:0}body{width:${W}px;height:${h}px;overflow:hidden}
 .row{position:absolute;left:12px;right:12px;height:${rowH - 8}px;display:flex;align-items:center;gap:8px;border-radius:12px;background:var(--tile);border:1px solid var(--tile-bd)}
 .row svg{overflow:visible}.nm{width:228px;padding-left:14px;font:650 15px "Segoe UI";color:var(--fg)}.ds{font:400 11.5px "Segoe UI";color:var(--muted);margin-top:4px}
 .pn{font:600 3.6px "Segoe UI";fill:#f472b6;text-anchor:middle}.sym,.sym *{animation:none!important}
-</style></head><body><div class="hmi sheet theme-${theme}"><div class="hd"><span>off · ports</span><span>on</span><span>fault</span></div>${rows.join("")}</div></body></html>`;
+</style></head><body><div class="hmi sheet theme-${theme}" style="${themeCss(themeFor({ theme }))}"><div class="hd"><span>symbol · ports</span><span>valve open</span><span>valve closed</span></div>${rows.join("")}</div></body></html>`;
   return { html, size: { w: W, h } };
 }
 

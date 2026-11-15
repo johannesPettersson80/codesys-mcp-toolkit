@@ -34,11 +34,13 @@ can watch the code change as it happens.
   interfaces, without reading every object.
 - **Shows its work.** A live panel with the project tree, the code as it is
   written, compile results, and Accept or Revert for each change.
-- **Designs operator screens.** Claude builds a live HMI for your program,
-  with tanks, pumps, valves, a library of process symbols (or your own SVG),
-  gauges, trends and alarms, looks at it, and polishes it. You operate it in
-  the browser against the simulation, and it exports as a native CODESYS
-  visualization with real CODESYS alarms.
+- **Designs operator screens.** Claude builds a live HMI for your program:
+  an overview of the line's stations, process diagrams with ISO 10628-2
+  symbols and ISA-5.1 instruments, clear state signs, values, trends and
+  alarms. It looks at the result and polishes it. You operate it in the
+  browser against the simulation, it exports as a native CODESYS
+  visualization with real CODESYS alarms, and as a P&ID sheet for the
+  documentation.
 - **Ready for handover.** A project report with a commissioning checklist
   built from the project, and a plain-text export of every object for git.
 - **Never touches a real controller.** The only online connection is to
@@ -122,7 +124,7 @@ operation. [The reference](docs/reference.md) describes each one.
 | **Simulation** | `codesys_sim_start` `codesys_sim_stop` `codesys_sim_status` `codesys_sim_control` `codesys_sim_cycle` `codesys_sim_read` `codesys_sim_write` `codesys_sim_force` `codesys_sim_unforce` `codesys_sim_test` |
 | **Trace** | `trace_setup` `trace_record` |
 | **Debug** | `breakpoint_set` `breakpoint_on_change` `breakpoint_clear` `debug_status` `debug_step` `debug_continue` `watch` |
-| **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` `hmi_translate` |
+| **HMI screens** | `hmi_save_screen` `hmi_template` `hmi_screenshot` `hmi_export_codesys` `hmi_list` `hmi_delete_screen` `open_hmi` `hmi_save_symbol` `hmi_symbols` `hmi_delete_symbol` `hmi_translate` `hmi_pid` |
 | **Alarms** | `alarm_list` `alarm_status` `alarm_acknowledge` `alarm_history` `create_alarm_history` |
 | **Handover** | `project_report` `export_sources` `compare_sources` `create_recipes` |
 | **Helpers** | `batch` `wait` `help` `open_workspace` `show_in_codesys` |
@@ -171,98 +173,108 @@ the browser never opens by itself.
 
 ## HMI screens
 
-Ask Claude for an operator screen and it designs one for your program: a
-process diagram with tanks, pumps, fans, valves and flowing pipes, and gauges,
-values, trends, status lights, alarms, buttons, switches and setpoints, all
-bound to your PLC variables.
+Ask Claude for operator screens and it designs them for your program: an
+overview of the line's stations, process diagrams, values with their
+set-points, trends and alarms, all bound to your PLC variables. The look is a
+calm, flat design system (Siemens iX colours, high-performance HMI practice
+after ISA-101): colour means a state or something to act on, never decoration.
 
-![The live HMI Claude designed for a pump station, running against CODESYS's simulation: the pump's faceplate switched to manual and started, the pump turning and the pipes flowing, a fault raised on the alarm page, the trend page, and the alarm on the overview](docs/images/hmi-live.gif)
+![The overview of a heat treatment line: the machine's state "Production" in the top bar's corner with a green line under the bar, the line as station tiles on a product path (feed tank, pump, filter, heating with steam joining from above, holding tank, pump, centrifuge, filling) each with its pictogram and key value, a play sign before the running pumps and the centrifuge, a hand on the steam valve in manual, and below them cards for the outlet temperature, its setpoint, the tank levels and the alarms; Manual/Auto and Reset, Start, Stop along the bottom](docs/images/hmi-overview.png)
 
-- **A whole HMI, not one screen.** Pages (overview, unit, alarms, trends,
-  settings) share a header that links to every page and counts the active
-  alarms of all pages. `hmi_template` gives Claude a good layout for each kind
-  of page to adapt. Panels: 1280x720, 1920x1080, 1024x768 or 800x480.
-- **Faceplates.** Clicking a pump, fan or valve opens its popup: mode switch,
-  Start/Stop or Open/Close, Reset, live values and a setpoint.
-- **Pipes connect themselves.** Tanks, pumps, fans, valves and junctions have
-  named ports (`T-101.right`, `P-101.in`, `V-102.out`). Claude says what a pipe
-  connects, and the toolkit routes it with right angles to meet each symbol
-  exactly, in the browser and in CODESYS alike. Unknown symbols or ports are
-  refused with the list of valid ones.
-- **A symbol library, and your own symbols.** Besides tanks, pumps, fans and
-  valves: motor, conveyor, heat exchanger, mixer, filter, compressor,
-  cylinder, level and pressure switches, check valve and control valve, each
-  grey when off, green when on and red on a fault, with ports for pipes and
-  rotation. Claude can draw a symbol you need as SVG, or import yours from an
-  SVG file (`hmi_save_symbol`), and gets back a picture of it in every state
-  to check. Custom SVG is checked against a short list of elements and
+- **The machine in the frame.** Its state (Production, Fault, Stopped, ...)
+  sits in the top bar's corner with a thin line in its colour under the bar;
+  Start, Stop, Reset and the Manual/Auto switch in a bar along the bottom; the
+  active faults, warnings and messages counted in the top bar; the pages in a
+  rail on the left. `hmi_template` gives Claude a good layout for each kind of
+  page. Panels: 1280x720, 1920x1080, 1024x768 or 800x480.
+- **An overview of the stations.** A `line` card draws the process as station
+  tiles on a product path, each with its pictogram, key value and state; a
+  supply such as steam joins its station from above, and tapping a tile opens
+  its page.
+- **Process diagrams to the standards.** Symbols drawn from ISO 10628-2 (pumps,
+  fans, valves, check and control valves, heat exchangers, motors on the
+  machine they drive, agitators, separators, filters, conveyors and more),
+  instruments as ISA-5.1 bubbles outside the vessel and joined to where they
+  measure, and pipes that route themselves between named ports
+  (`T-201.right`, `P-201.in`) with line names and flow arrows at the edges.
+- **State at a glance, without clutter.** Three separate things, each with its
+  own sign, so none hides another: the run state before the name (▶ running,
+  ■ stopped), the mode after it (a hand in Manual; Auto shows nothing) and the
+  condition at the symbol's corner (an amber warning or a red alarm; OK shows
+  nothing). A closed valve is drawn filled, as on a P&ID. Symbols are never
+  filled grey or coloured by state, and nothing moves.
+- **Labels place themselves.** Every name, line name and reading is put where
+  it touches no pipe, equipment or other text and stays inside the card; a
+  tank's name goes inside the vessel. A value that belongs to a piece of
+  equipment, such as a control valve's opening, is shown under its name.
+- **Claude checks its own work.** Saving a screen checks the layout (overlaps,
+  labels without room) and that the diagram is a process: equipment no pipe
+  reaches, an inlet without an outlet, a heat exchanger with one circuit,
+  instruments inside a vessel, a motor that drives nothing, a reading drawn
+  as a separate sensor when it belongs to equipment, or a run state on a
+  filter. `hmi_screenshot` returns the screen as an image to look at.
+- **Your own symbols.** Claude can draw a symbol you need as SVG, or import
+  yours from an SVG file (`hmi_save_symbol`), and gets back a picture of it
+  with its ports. Custom SVG is checked against a short list of elements and
   attributes: scripts, styles, links and external images are refused.
-- **Claude checks its own work.** `hmi_screenshot` returns the screen as an
-  image, so Claude can see overlaps, empty space or unclear labels and fix
-  them before you look.
 - **Live in your browser.** Ask Claude to open the HMI (`open_hmi`). The page
-  is served by the toolkit on 127.0.0.1 with a token, like the workspace. While
-  CODESYS's simulation runs, it shows live values, pumps spin, pipes flow and
-  trends draw. Buttons, switches and setpoints write to the simulation, so you
-  can operate your program before any hardware exists.
-- **Stored with the project.** Screens are saved next to the project file as
-  `<project>.hmi.json`, so they travel with it and can go into version control.
-- **Dark, light and high-contrast themes,** per page, on a 1280x720 canvas
-  that scales to any window. The high-contrast theme is black and white with
-  full-strength colours and no glow, for bright light or poor eyesight.
-  `accent` puts your company colour on the highlights, the flow and the
-  current page, and text on it turns black or white to stay readable.
+  is served by the toolkit on 127.0.0.1 with a token, like the workspace.
+  While CODESYS's simulation runs it shows live values and trends, and
+  buttons, switches and setpoints write to the simulation, so you can operate
+  your program before any hardware exists.
+- **Light, dark and high-contrast themes,** the same on every page; `accent`
+  puts your company colour on the highlights, and text on it turns black or
+  white to stay readable. Screens are saved next to the project as
+  `<project>.hmi.json`, so they travel with it and can go into version
+  control.
 
-![The standard process symbols in their on, off and fault colours, and a decanter centrifuge drawn as the project's own SVG symbol](docs/images/hmi-symbols.png)
+![The heat treatment process: feed into tank T-201 with a high level switch LSH-201, pump P-201 with a pressure switch PS-201, filter F-201 with an amber warning (clogged), heat exchanger E-201 heated by steam through control valve TCV-201 (in manual, 46 % open) with the condensate returned, the outlet temperature TT-201 on the line controlling the valve, tank T-202 with its agitator, pump P-202 feeding centrifuge C-202 with motor M-202 on it, and the product out to filling; running equipment has a play sign before its name](docs/images/hmi-process.png)
 
-![A heat treatment line built from the symbols: feed into tank T-201 with a high level switch, pump P-201 with a pressure switch on its outlet, filter F-201, heat exchanger E-201 heated by steam through control valve TCV-201 (opening 46 %) with the condensate returned, outlet temperature TT-201 on the line, tank T-202 with an agitator, pump P-202 feeding centrifuge C-202 driven by motor M-202, and the product out to filling](docs/images/hmi-process.png)
+![The same process page in the dark theme](docs/images/hmi-process-dark.png)
 
-When a screen is saved, the toolkit also checks that the diagram is a
-process: it reports equipment no pipe reaches, an inlet without an outlet, a
-heat exchanger with one circuit connected, tanks nothing flows into or out of,
-instruments and sensors away from any line or vessel, a motor whose shaft
-touches nothing, and pipes that end in mid-diagram, so Claude fixes them
-before you look.
-
-![The same heat treatment line in the high-contrast theme: black background, white outlines, cyan flow and green running symbols](docs/images/hmi-contrast.png)
+![The standard process symbols with their ports, and the valves open and closed](docs/images/hmi-symbols.png)
 
 The HMI writes only into CODESYS's own simulation, like the rest of the
 toolkit. Screenshots use Microsoft Edge or Google Chrome, whichever is
 installed.
 
+### P&ID sheet
+
+`hmi_pid` exports a screen's process diagram as an engineering P&ID drawing
+for documentation and commissioning: the same diagram drawn black on white,
+with nothing live, on an A3 sheet with a frame, a legend of the symbols it
+uses and a title block (drawing number, revision, date). It is saved next to
+the project as PDF, SVG or PNG. Since it comes from the HMI's own diagram,
+there is no second drawing to keep up to date.
+
+![The heat treatment line as an A3 P&ID: the diagram in black on white with its tags, instruments and line names, a legend of the symbols used (vessel, centrifugal pump, filter, control valve, heat exchanger, agitator, separator, motor, instrument, process line, signal line) and a title block](docs/images/hmi-pid.png)
+
 ### As a native CODESYS visualization
 
-`hmi_export_codesys` builds the same screen as a real CODESYS visualization in
-your project. It is an ordinary visualization object, so it goes with the
-application like one you drew yourself (we checked it in CODESYS's simulation,
-not on a controller). It doesn't use CODESYS's stock lamps: cards with gradients, SVG
-pump, fan and valve symbols in an embedded image pool, live values, bars and
-tank levels, colour states, buttons, switches, setpoints and alarm rows that
-appear only while active. A generated program, `PRG_HMI_<screen>`, scales
-values for the bars and levels. Claude gets a picture of the result.
+`hmi_export_codesys` builds the same screens as real CODESYS visualizations in
+your project. They are ordinary visualization objects, so they go with the
+application like ones you drew yourself (checked in CODESYS's simulation, not
+on a controller): the same frame, cards, symbols, state signs, labels and
+station tiles as in the browser, drawn with CODESYS's own elements and
+pictures in an embedded image pool. A generated program, `PRG_HMI_<screen>`,
+works out what the pictures need (scaled bars and levels, the machine state,
+alarm counts). Claude gets a picture of the result.
 
-A multi-page HMI comes out as one visualization per page with page buttons in
-the header, the first page as the start page of TargetVisu and WebVisu at the
-panel size, pumps and fans that turn while running, faceplates as CODESYS
-dialogs, the pages' alarms in CODESYS's alarm management (Alarm Configuration,
-with timestamps and acknowledge in the PLC), and user groups (Operator,
-Maintenance, Admin) behind a Login button. Users and passwords are yours to add
-in the Visualization Manager.
+![The overview as a native CODESYS visualization in the simulation: the same station tiles, signs, cards and frame as in the browser, with the active filter warning in the alarms card](docs/images/hmi-codesys-overview.png)
+
+![The heat treatment process as a native CODESYS visualization in the simulation](docs/images/hmi-codesys-process.png)
+
+A multi-page HMI comes out as one visualization per page with the rail of
+page buttons, the first page as the start page of TargetVisu and WebVisu at
+the panel size, faceplates as CODESYS dialogs, the pages' alarms in CODESYS's
+alarm management (Alarm Configuration, with timestamps and acknowledge in the
+PLC), and user groups (Operator, Maintenance, Admin) behind a Login button.
+Users and passwords are yours to add in the Visualization Manager.
 
 A tile can be limited to a group and up: `access: {min: 'Maintenance'}` lets
 lower groups see it without operating it, `below: 'hide'` hides it from them.
 The rights go on CODESYS's own elements and also apply when nobody is logged
-in. Below, with nobody logged in, the pump buttons (Maintenance and up) are
-greyed out and the level setpoint (Admin only) is hidden:
-
-![The pump station with nobody logged in: the Start and Stop buttons are greyed out and the level setpoint tile is gone](docs/images/hmi-codesys-access.png)
-
-![The same pump station as a native CODESYS visualization, running in CODESYS's simulation](docs/images/hmi-codesys.png)
-
-Themes and the company colour carry over, and pipes with flow show dashes
-moving along them, as in the browser:
-
-![The pump station exported with a red company colour: red current-page button, gauge and sensor frames, and red pipes with white dashes moving while water flows](docs/images/hmi-codesys-brand.png)
+in.
 
 The alarms are CODESYS's own, not a copy in the HMI: an alarm group with its
 observations, classes and messages, which CODESYS's alarm manager evaluates in
@@ -275,38 +287,25 @@ Error-class alarm should.
 Claude can test them in the simulation: `alarm_status` reads each alarm's
 state from CODESYS's alarm manager (normal, active, active acknowledged,
 cleared but waiting for confirmation or acknowledgement), and
-`alarm_acknowledge` acknowledges as an operator would. In the browser HMI, a
-cleared alarm stays in the list until someone presses its ACK button, which
-acknowledges it in CODESYS.
+`alarm_acknowledge` acknowledges as an operator would. In the browser HMI and
+in CODESYS, an alarm row stays until it is acknowledged, with the time it
+came, its state and an acknowledge button.
 
 CODESYS's runtime alarm forgets its times once it is normal again, so the
 export also adds an alarm history to the PLC: generated ST that records every
 state change of every alarm (with CODESYS's own time of the change) in a
 RETAIN ring buffer. `alarm_history` lists it, and an alarms tile with
 `history: 5` shows the last events, in the browser and in CODESYS
-(`create_alarm_history` adds the same to a project with alarms of its own):
-
-![The exported alarms tile in CODESYS: the active "Level high" row with ACK, and below it the history: Pump fault normal, cleared, active, and Level high active, each with its time](docs/images/hmi-codesys-history.png)
-
-![The browser HMI's alarm page: "Pump P-101 fault" has cleared and waits for confirmation, with an ACK button](docs/images/hmi-alarm-ack.png)
-
-The symbols come along too: each state is its own picture in the image pool,
-and the symbol's on and fault variables choose which one CODESYS shows.
-
-![The heat treatment line as a native CODESYS visualization in the simulation: the symbols in their on colours, the filter red because it is clogged, and the alarm row](docs/images/hmi-codesys-symbols.png)
+(`create_alarm_history` adds the same to a project with alarms of its own).
 
 Gauges are the same arc gauge as in the browser (pictures in the image pool,
-one per 2.5 % of the range, in the band's colour), not CODESYS's chrome meter.
-The alarm rows follow CODESYS's alarm manager: a row stays until the alarm is
-acknowledged, with the time it came, its state and an ACK button that
-acknowledges it in CODESYS, instead of CODESYS's grey alarm table. Trends show
-their current values: a CODESYS trend needs a trend recording that scripting
-can't create yet. Checked on CODESYS V3.5 SP21 in the simulation.
-
-![An exported alarm row in CODESYS: the time it came, "Pump P-101 fault", "cleared - confirm" and an ACK button](docs/images/hmi-codesys-alarm-row.png) A visualization needs the `FloatingPointUtils` library in CODESYS's
-library repository; if it's missing, the export says so before it builds
-anything. A long export reports its progress (each page, the alarms, the
-compile) to clients that show MCP progress.
+one per 2.5 % of the range), not CODESYS's chrome meter. Trends show their
+current values: a CODESYS trend needs a trend recording that scripting can't
+create yet. Checked on CODESYS V3.5 SP21 in the simulation. A visualization
+needs the `FloatingPointUtils` library in CODESYS's library repository; if
+it's missing, the export says so before it builds anything. A long export
+reports its progress (each page, the alarms, the compile) to clients that
+show MCP progress.
 
 ## Handover and version control
 

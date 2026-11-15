@@ -7,19 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-11-15
+
+A redesign of the HMI: a design system, symbols from the standards, a station
+overview, a clear way to show equipment state, the same result in CODESYS,
+and a P&ID sheet for the documentation.
+
 ### Added
+- Design system for the browser HMI and the CODESYS export alike: Siemens iX
+  colours in light, dark and contrast themes, line icons, flat cards, and the
+  machine in the frame (`machine` on a screen): its state small in the top
+  bar's corner with a line in its colour under the bar, Start, Stop, Reset and
+  the Manual/Auto switch in a bar along the bottom, and the active faults,
+  warnings and messages counted in the top bar.
+- `line` widget: the process as station tiles on a product path (an
+  overview), each with its pictogram, key value and state; a supply such as
+  steam joins its station from above, and a tap opens the station's page.
+- Equipment state as three separate signs, never a coloured or grey-filled
+  symbol and never words: the run state before the name (▶ running,
+  ■ stopped), the mode after it (`manual`: a hand) and the condition at the
+  symbol's corner (`warning`: an amber triangle, `fault`: a red alarm circle,
+  which wins). A closed valve is drawn filled, as on a P&ID. Pumps, fans,
+  valves, symbols and stations take `fault`, `warning` and `manual`.
+- `value`, `unit` and `decimals` on pumps, fans, valves and symbols: a value
+  that belongs to the equipment (a control valve's opening) shown under its
+  name, instead of a separate sensor.
+- Labels and line names place themselves where they touch no pipe, equipment
+  or other text and stay inside the card; a tank's name goes inside the
+  vessel. `hmi_save_screen` names a label that has no free place.
+- The process check also reports a reading drawn as a separate sensor when it
+  belongs to a piece of equipment (its label starts with that equipment's
+  tag), and a run state (`on`) on equipment without a drive (filter, heat
+  exchanger, check valve).
+- `hmi_pid`: a screen's process diagram as an engineering P&ID sheet (black
+  on white, nothing live) on A3 with a frame, a legend of the symbols it uses
+  and a title block, saved next to the project as PDF, SVG or PNG.
 - Process check on `hmi_save_screen`: it reports equipment no pipe reaches,
   an inlet without an outlet, a heat exchanger with one circuit connected,
   tanks nothing flows into or out of, instruments and sensors away from any
-  line or vessel, a motor whose shaft touches nothing, and pipes that end in
-  mid-diagram. The screen still saves; Claude gets the list to fix.
+  line or vessel or drawn inside a vessel, a motor whose shaft touches
+  nothing, and pipes that end in mid-diagram. The screen still saves; Claude
+  gets the list to fix.
 
 ### Changed
-- A label moves beside its symbol or tank when a pipe or a motor's shaft runs
-  below it, instead of being crossed by it (browser and CODESYS).
-- The heat treatment example in the README is now a real process: feed,
-  steam heating through a control valve with condensate return, the outlet
-  temperature on the line, and a pump feeding a motor-driven centrifuge.
+- Process symbols are drawn from ISO 10628-2 (pump, heat exchangers, valves,
+  check and control valves, motor on the machine it drives, agitator,
+  separator and others), instruments as ISA-5.1 bubbles outside the vessel
+  joined to where they measure, readings beside them on the free side.
+- Equipment keeps the surface colour in every state, pipes are one solid
+  line that turns darker while flowing, and nothing moves (no turning
+  impellers or moving dashes), as high-performance HMI practice asks.
+- The CODESYS export draws the same as the browser: the station line, the
+  state signs, labels at the browser's size, arrows at line ends, page titles
+  on two lines in the rail, and a narrow alarms card with the time and state
+  under the message.
+- `hmi_symbols` and `hmi_save_symbol` show a symbol with its ports (valves
+  also open and closed) instead of off, on and fault colours.
+
+### Fixed
+- The CODESYS setpoint card with an actual value left its value field a few
+  pixels wide.
 
 ## [2.10.0] - 2026-11-14
 

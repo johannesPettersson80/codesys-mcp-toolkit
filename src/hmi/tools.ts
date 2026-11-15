@@ -170,8 +170,8 @@ export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: Hm
   reg(
     "hmi_save_symbol",
     {
-      description: `Add your own process-diagram symbol to the project (or replace one), drawn as SVG or imported from an SVG file, and get back a picture of it in its off, on and fault colours with the ports marked: look at it and fix what's off. Then place it on a process diagram as {type: 'symbol', symbol: '<name>', ...}; it works in the browser HMI and in the CODESYS export.
-Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, ellipse, line, polyline, polygon, text and gradients. Colour with var(--state) (grey off, green on, red fault), var(--body), var(--body2), var(--line) and var(--accent), so one drawing serves every state and theme; fixed colours work too. class="spin" on a group makes it turn while on (browser). Ports are where pipes connect: { in: { x: 0, y: 50, dir: 'left' } } in box coordinates; put them on the outline. Scripts, styles, links and external images are refused.`,
+      description: `Add your own process-diagram symbol to the project (or replace one), drawn as SVG or imported from an SVG file, and get back a picture of it with the ports marked: look at it and fix what's off. Then place it on a process diagram as {type: 'symbol', symbol: '<name>', ...}; it works in the browser HMI and in the CODESYS export.
+Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, ellipse, line, polyline, polygon, text and gradients. Fill the body with var(--state) (the surface; a valve's body is filled while it is closed) and draw outlines with var(--line) (stroke-width 2 with vector-effect="non-scaling-stroke"); var(--body), var(--body2) and var(--accent) are there too, so one drawing serves every theme. Don't colour the symbol by state: running, manual, warnings and alarms are signs the HMI draws beside it. Nothing moves. Ports are where pipes connect: { in: { x: 0, y: 50, dir: 'left' } } in box coordinates; put them on the outline. Scripts, styles, links and external images are refused.`,
       inputSchema: z.object({
         name: z.string().regex(/^[a-z][a-z0-9_]*$/).describe("Lower case, e.g. 'centrifuge'"),
         svg: z.string().optional().describe("The markup inside the box (no outer <svg>)"),
@@ -239,7 +239,7 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
   reg(
     "hmi_symbols",
     {
-      description: "The process-diagram symbols you can place ({type: 'symbol', symbol: '<name>'}): the standard ones and the project's own, as a picture in their off, on and fault colours with their ports, and as a list.",
+      description: "The process-diagram symbols you can place ({type: 'symbol', symbol: '<name>'}): the standard ones and the project's own, as a picture with their ports (valves also open and closed), and as a list.",
       inputSchema: z.object({ names: z.array(z.string()).optional().describe("Only these (default: all)") }),
     },
     async ({ names }) => {
