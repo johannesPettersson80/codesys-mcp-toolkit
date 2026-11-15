@@ -9,7 +9,7 @@
  * size / aspect, where aspect = height / width of the diagram on screen.
  */
 import type { ProcessItem } from "./spec.js";
-import { BUILTIN_SYMBOLS, findSymbol, symbolBox, symbolPorts, type Dir, type SymbolLib } from "./symbols.js";
+import { BUILTIN_SYMBOLS, findSymbol, INSTRUMENT_SYMBOLS, symbolBox, symbolPorts, type Dir, type SymbolLib } from "./symbols.js";
 
 type Pt = [number, number];
 export interface Port {
@@ -433,6 +433,9 @@ export function meaningWarnings(items: ProcessItem[], lib: SymbolLib = BUILTIN_S
     if (p.type === "symbol" && p.on) {
       const f = findSymbol(lib, p.symbol);
       if (f && PASSIVE.has(f[0])) out.push(`${f[0]}${p.label ? ` ${p.label}` : ""} has on, but it has no drive, so no run state: remove on. For its condition use warning or fault (e.g. a clogged filter: warning).`);
+      // A switch drawn as a symbol: its bubble has no run state, so on would show nothing.
+      if (f && INSTRUMENT_SYMBOLS[f[0]])
+        out.push(`${f[0]}${p.label ? ` ${p.label}` : ""} has on, which a bubble symbol doesn't show: draw it as {type: 'instrument', tag: '${/^[A-Z]{1,5}-?\d{1,5}[A-Z]?$/.test(p.label ?? "") ? p.label : `${INSTRUMENT_SYMBOLS[f[0]]}-1`}', x, y, at, on: <BOOL TRUE when tripped>}, tone: 'alarm' for an alarm; it gets the condition badge.`);
     }
   }
   return out;

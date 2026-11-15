@@ -603,7 +603,8 @@ ${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g>`;
     }
     case "instrument": {
       // ISA-5.1: a bubble with the function letters over the loop number, joined by a
-      // process connection to what it measures; a switch lights while its BOOL is TRUE.
+      // process connection to what it measures. A tripped switch (its BOOL TRUE) keeps a white bubble and gets
+      // the equipment's condition badge at its corner: the red alarm with tone 'alarm', else the amber warning.
       const cx = r1(p.x), cy = Y(p.y), R = 3.3;
       const tap = instrumentTap(p, all, sy, lib);
       let conn = "";
@@ -618,7 +619,8 @@ ${label(p.x, p.y + (s / 2 + 2.6) / sy, p.label)}</g>`;
       const [, letters = p.tag, num = ""] = /^([A-Z]+)-?(.*)$/.exec(p.tag) ?? [];
       const rs = p.value ? readingSpot(p, all, sy, lib, tapY(p, all, sy, lib)) : undefined;
       const reading = p.value && rs ? `<rect class="sen-box" x="${r1(rs.x - READING.w / 2)}" y="${r1(rs.y - READING.h / 2)}" width="${READING.w}" height="${READING.h}" rx="${READING.h / 2}"/><text class="sen-num" x="${r1(rs.x)}" y="${r1(rs.y + 0.62)}" ${bind({ kind: "text", v: p.value, decimals: p.decimals ?? 1, unit: p.unit })}>–</text>` : "";
-      return `${conn}<g class="inst tone-${toneOf(p.tone ?? "warn")}" ${p.on ? bind({ kind: "on", v: p.on }) : ""}><circle class="inst-bubble" cx="${cx}" cy="${cy}" r="${R}"/><text class="inst-fn" x="${cx}" y="${r1(cy - 0.2)}">${esc(letters)}</text><text class="inst-no" x="${cx}" y="${r1(cy + 1.9)}">${esc(num)}</text></g>${reading}`;
+      const trip = p.on ? (p.tone === "alarm" ? condBadge(cx + R + 0.3, cy - R - 0.3, p.on, undefined, bind) : condBadge(cx + R + 0.3, cy - R - 0.3, undefined, p.on, bind)) : "";
+      return `${conn}<g class="inst"><circle class="inst-bubble" cx="${cx}" cy="${cy}" r="${R}"/><text class="inst-fn" x="${cx}" y="${r1(cy - 0.2)}">${esc(letters)}</text><text class="inst-no" x="${cx}" y="${r1(cy + 1.9)}">${esc(num)}</text></g>${trip}${reading}`;
     }
     case "sensor": {
       // An ISA-5.1 instrument bubble (its label as the tag, e.g. 'TT-201'), the reading beside it,
@@ -815,7 +817,7 @@ export const HMI_CSS = String.raw`
 .cb-a circle{fill:var(--alarm)}.cb-a path{stroke:var(--on-alarm);stroke-width:.3px;stroke-linecap:round}
 .cb-wt{fill:var(--warn);stroke:var(--warn);stroke-width:.25px;stroke-linejoin:round}.cb-wx{stroke:#1a232d;stroke-width:.28px;stroke-linecap:round}
 .sym.vlv{--state:var(--equip-line)}.sym.vlv.on{--state:var(--surface)}
-.inst-bubble{fill:var(--surface);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke}.inst.on .inst-bubble{fill:color-mix(in srgb,var(--c) 30%,var(--tile));stroke:var(--c)}.inst-fn{font-size:1.75px;font-weight:700;fill:var(--fg);text-anchor:middle;letter-spacing:.04em}.inst-no{font-size:1.45px;fill:var(--muted);text-anchor:middle;font-variant-numeric:tabular-nums}.inst-conn{fill:none;stroke:var(--equip-line);stroke-width:1.5px;vector-effect:non-scaling-stroke}.inst-tap{fill:var(--muted)}.line-arrow{fill:var(--muted)}
+.inst-bubble{fill:var(--surface);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke}.inst-fn{font-size:1.75px;font-weight:700;fill:var(--fg);text-anchor:middle;letter-spacing:.04em}.inst-no{font-size:1.45px;fill:var(--muted);text-anchor:middle;font-variant-numeric:tabular-nums}.inst-conn{fill:none;stroke:var(--equip-line);stroke-width:1.5px;vector-effect:non-scaling-stroke}.inst-tap{fill:var(--muted)}.line-arrow{fill:var(--muted)}
 .signal{fill:none;stroke:var(--equip-line);stroke-width:1.5px;vector-effect:non-scaling-stroke;stroke-dasharray:6 5}.sen-lead{fill:none;stroke:var(--muted);stroke-width:.3}.sen-tap{fill:var(--muted)}.p-line{font-size:1.9px;fill:var(--muted)}
 .pipe-outer{fill:none;stroke:var(--pipe);stroke-width:4px;vector-effect:non-scaling-stroke;stroke-linecap:square;stroke-linejoin:miter}.pipe-inner{display:none}
 .pipe-flow{display:none}.pipe-outer{transition:stroke .3s}.pipe.on .pipe-outer{stroke:var(--equip-line)}

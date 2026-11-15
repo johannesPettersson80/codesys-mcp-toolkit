@@ -112,8 +112,8 @@ const processItem = z.discriminatedUnion("type", [
       value: v.optional().describe("Shown next to the bubble, e.g. a transmitter's reading"),
       unit: z.string().optional(),
       decimals: z.number().int().optional(),
-      on: v.optional().describe("BOOL for a switch (LSH, PSH): the bubble lights while it is TRUE"),
-      tone: tone.optional().describe("Colour when on (default warn)"),
+      on: v.optional().describe("BOOL for a switch (LSH, PSL): TRUE while it has tripped (the abnormal state, e.g. PLC_PRG.xPressureLow, not xPressureOk); the bubble stays white and gets the condition badge at its corner"),
+      tone: tone.optional().describe("'alarm': a tripped switch shows the red alarm badge; anything else (default) the amber warning badge"),
     })
     .describe("A P&ID instrument (ISA-5.1 bubble) joined to the point it measures; signals to valves are pipes with signal: true from '<tag>.c'"),
   z.object({ type: z.literal("lamp"), x: num, y: num, on: v, tone: tone.optional(), label: z.string().optional() }),

@@ -365,9 +365,9 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     els.push(signAt("stop", x, y, px * 0.85, v));
   };
   /** An ISA-5.1 instrument bubble (radius rr px) with its tag: function letters over the loop number. */
-  const bubble = (cx: number, cy: number, rr: number, tag: string, on?: string) => {
+  const bubble = (cx: number, cy: number, rr: number, tag: string) => {
     const [, letters = tag, num0 = ""] = /^([A-Z]+)-?(.*)$/.exec(tag) ?? [];
-    els.push({ kind: "circle", x: r(cx - rr), y: r(cy - rr), w: r(2 * rr), h: r(2 * rr), fill: p.tile, frame: p.equipLine, lineWidth: 2, ...(on ? { props: { "Color variables.Toggle color": on, "Colors.Alarm state.Fill color": c(p.soft.warn), "Colors.Alarm state.Frame color": c(p.tones.warn) } } : {}) });
+    els.push({ kind: "circle", x: r(cx - rr), y: r(cy - rr), w: r(2 * rr), h: r(2 * rr), fill: p.tile, frame: p.equipLine, lineWidth: 2 });
     els.push(text(cx - rr, cy - rr * 0.62, 2 * rr, rr * 0.7, letters, [SEMI, ptPx(Math.max(8, rr * 0.55))], p.text, "HCENTER"));
     els.push(text(cx - rr, cy + rr * 0.08, 2 * rr, rr * 0.6, num0, [FONT, ptPx(Math.max(7, rr * 0.45))], p.muted, "HCENTER"));
   };
@@ -1107,7 +1107,13 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
           if (vertical) leader(tx, ty, Math.abs(tx - cx) < 2 ? tx : cx + (tx < cx ? -rr : rr), Math.abs(tx - cx) < 2 ? cy + (ty < cy ? -rr : rr) : cy, true);
           else leader(tx, ty, cx + (tx < cx ? -rr : rr), ty, false);
         }
-        bubble(cx, cy, rr, tag ?? "XI", it.type === "instrument" ? it.on : undefined);
+        bubble(cx, cy, rr, tag ?? "XI");
+        // A tripped switch: the equipment's condition badge at the bubble's corner (as the browser).
+        if (it.type === "instrument" && it.on) {
+          const [bx, by] = [cx + rr + 0.3 * sx, cy - rr - 0.3 * sx];
+          if (it.tone === "alarm") condBadge(bx, by, 2.4 * sx, it.on);
+          else condBadge(bx, by, 2.4 * sx, undefined, it.on);
+        }
         if (v) {
           // As in the browser (labels.ts readingSpot): right of the bubble, else left, else above or below (away from the connection).
           const rs = readingSpot(it, all, aspect, lib, tapY(it, all, aspect, lib));

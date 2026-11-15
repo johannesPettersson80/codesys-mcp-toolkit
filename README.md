@@ -201,7 +201,8 @@ after ISA-101): colour means a state or something to act on, never decoration.
   own sign, so none hides another: the run state before the name (▶ running,
   ■ stopped), the mode after it (a hand in Manual; Auto shows nothing) and the
   condition at the symbol's corner (an amber warning or a red alarm; OK shows
-  nothing). A closed valve is drawn filled, as on a P&ID. Symbols are never
+  nothing). A tripped switch (LSH, PSL) gets the same badge at its bubble. A
+  closed valve is drawn filled, as on a P&ID. Symbols are never
   filled grey or coloured by state, and nothing moves.
 - **Labels place themselves.** Every name, line name and reading is put where
   it touches no pipe, equipment or other text and stays inside the card; a
@@ -228,7 +229,7 @@ after ISA-101): colour means a state or something to act on, never decoration.
   `<project>.hmi.json`, so they travel with it and can go into version
   control.
 
-![The heat treatment process: feed into tank T-201 with a high level switch LSH-201, pump P-201 with a pressure switch PS-201, filter F-201 with an amber warning (clogged), heat exchanger E-201 heated by steam through control valve TCV-201 (in manual, 46 % open) with the condensate returned, the outlet temperature TT-201 on the line controlling the valve, tank T-202 with its agitator, pump P-202 feeding centrifuge C-202 with motor M-202 on it, and the product out to filling; running equipment has a play sign before its name](docs/images/hmi-process.png)
+![The heat treatment process: feed into tank T-201 with a high level switch LSH-201, pump P-201 with a low pressure switch PSL-201 on its outlet, filter F-201 with an amber warning (clogged), heat exchanger E-201 heated by steam through control valve TCV-201 (in manual, 46 % open) with the condensate returned, the outlet temperature TT-201 on the line controlling the valve, tank T-202 with its agitator, pump P-202 feeding centrifuge C-202 with motor M-202 on it, and the product out to filling; running equipment has a play sign before its name](docs/images/hmi-process.png)
 
 ![The same process page in the dark theme](docs/images/hmi-process-dark.png)
 

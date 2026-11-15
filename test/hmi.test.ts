@@ -275,8 +275,37 @@ describe("texts on a process diagram", () => {
     expect(w).toHaveLength(2);
     expect(w[0]).toMatch(/sensor 'TCV-201 opening' is a value of TCV-201: put it on TCV-201 instead \(\{value: 'PLC_PRG.rOpening', unit: '%', decimals: 0\}\)/);
     expect(w[1]).toMatch(/^filter F-201 has on, but it has no drive/);
+    // A switch drawn as a bubble symbol with on: nothing would show it.
+    const sw = meaningWarnings(items([{ type: "symbol", symbol: "pressure_switch", x: 30, y: 50, size: 8, on: "PLC_PRG.xPressureOk", label: "PS-201" }]));
+    expect(sw).toHaveLength(1);
+    expect(sw[0]).toMatch(/^pressure_switch PS-201 has on, which a bubble symbol doesn't show: draw it as \{type: 'instrument', tag: 'PS-201'/);
     // A real instrument (TT-201) and a driven motor are fine; connectionWarnings carries these notes too.
     expect(connectionWarnings(list, 0.5).some((m) => m.includes("TCV-201 opening"))).toBe(true);
+  });
+
+  it("shows a tripped switch by the condition badge at its bubble, never by colouring it, in the browser and CODESYS", () => {
+    const s = screenSchema.parse({ name: "P", title: "P", widgets: [{ type: "process", at: [1, 1, 12, 8], items: [
+      { type: "pipe", from: [0, 60], to: [100, 60] },
+      { type: "instrument", tag: "PSL-201", x: 30, y: 40, at: [30, 60], on: "PLC_PRG.xPressureLow", tone: "alarm" },
+      { type: "instrument", tag: "LSH-201", x: 60, y: 40, at: [60, 60], on: "PLC_PRG.xHighLevel" },
+      { type: "instrument", tag: "TT-201", x: 80, y: 40, at: [80, 60], value: "PLC_PRG.rTemp", unit: "°C" },
+    ] }] });
+    const { html, bindings } = renderScreen(s);
+    // The bubble is never bound or tinted; the badge carries the state.
+    expect(html).not.toMatch(/<g class="inst[^"]*" data-b/);
+    expect(HMI_CSS).not.toContain(".inst.on");
+    expect(bindings).toContainEqual({ kind: "fault", v: "PLC_PRG.xPressureLow" });
+    expect(bindings).toContainEqual({ kind: "on", v: "PLC_PRG.xHighLevel" });
+    expect(html.match(/<g class="cb"/g)).toHaveLength(2);
+    const plan = nativePlan(s);
+    const sign = (kind: string, v: string) => plan.elements.find((e) => String(e.props?.["Static ID"]).includes(`.sign_${kind}_`) && e.invisible === `NOT (${v})`);
+    expect(sign("alarm", "PLC_PRG.xPressureLow")).toBeDefined();
+    expect(sign("warning", "PLC_PRG.xHighLevel")).toBeDefined();
+    expect(plan.elements.some((e) => e.kind === "circle" && e.props?.["Color variables.Toggle color"])).toBe(false);
+    // A pressure switch symbol without a tag prints PS (ISA-5.1), not PI.
+    const sym = renderScreen(screenSchema.parse({ name: "P", title: "P", widgets: [{ type: "process", at: [1, 1, 12, 8], items: [{ type: "symbol", symbol: "pressure_switch", x: 50, y: 50, size: 8 }] }] })).html;
+    expect(sym).toContain(">PS<");
+    expect(sym).not.toContain(">PI<");
   });
 
   it("gives an alarm's message room in a narrow alarms card in CODESYS (time and state on a second line)", () => {

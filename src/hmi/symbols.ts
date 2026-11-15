@@ -189,7 +189,7 @@ export function pictogramSize(d: SymbolDef, ph: number): { w: number; h: number 
 }
 
 /** Symbols that are instruments: drawn as ISA-5.1 bubbles (the label is the tag, e.g. 'LSH-201'). */
-export const INSTRUMENT_SYMBOLS: Record<string, string> = { level_switch: "LS", pressure_switch: "PI" };
+export const INSTRUMENT_SYMBOLS: Record<string, string> = { level_switch: "LS", pressure_switch: "PS" };
 
 /** Letters kept upright in a turned symbol: data-upright="cx cy" becomes the counter-rotation. */
 export function upright(svg: string, rotate: number): string {

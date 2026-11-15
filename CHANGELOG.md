@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- A tripped switch (an `instrument` with `on`) keeps a white bubble and gets
+  the same condition badge as equipment at its corner: the red alarm with
+  `tone: 'alarm'`, else the amber warning. It used to fill the bubble with
+  the tone's colour. The same in the browser, in CODESYS and (hidden) on the
+  P&ID sheet. `on` is documented as TRUE when tripped (`xPressureLow`, not
+  `xPressureOk`).
+- Saving a screen warns when a `level_switch` or `pressure_switch` symbol has
+  `on`, which a bubble symbol doesn't show, and says how to draw it as an
+  `instrument` instead.
+
 ### Fixed
+- A `pressure_switch` symbol without a tag prints "PS" (ISA-5.1), not "PI",
+  which means a pressure indicator.
 - A tank's level number no longer has a halo, which showed as a white rim
   cutting into the liquid, and no scale mark runs through it (the marks are
   at a quarter and three quarters). The contrast theme's liquid is a deeper
