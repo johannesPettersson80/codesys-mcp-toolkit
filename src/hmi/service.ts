@@ -157,7 +157,7 @@ export class HmiService {
     const symbols = this.symbols();
     const translations = this.translations();
     return {
-      pages: all.map((x) => ({ name: x.name, title: x.title })),
+      pages: all.map((x) => ({ name: x.name, title: x.title, ...(x.icon ? { icon: x.icon } : {}) })),
       alarms: allAlarms(all),
       ...(Object.keys(symbols).length ? { symbols } : {}),
       ...(Object.keys(translations).length ? { languages: Object.keys(translations) } : {}),

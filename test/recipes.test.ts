@@ -58,7 +58,9 @@ describe("the recipe widget", () => {
 
   it("renders buttons with ST in CODESYS", () => {
     const els = nativePlan(screen).elements;
-    expect(els.find((e) => e.text === "Apply" && e.click?.includes("iApply := 1"))).toBeDefined();
+    // The label is drawn on the button; a clear shape on top runs the ST.
+    expect(els.filter((e) => e.text === "Apply")).toHaveLength(2);
+    expect(els.find((e) => e.fill === null && e.click === "PRG_Recipe_Pump.iApply := 1;")).toBeDefined();
     expect(els.find((e) => e.props?.["Text variables.Text variable"] === "PRG_Recipe_Pump.sActive")).toBeDefined();
   });
 

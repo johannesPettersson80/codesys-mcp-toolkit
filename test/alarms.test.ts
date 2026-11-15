@@ -32,7 +32,7 @@ describe("the HMI's alarm rows", () => {
   it("carry an acknowledge button and a state label for CODESYS alarms", () => {
     const s = screenSchema.parse({ name: "A", title: "A", widgets: [{ type: "alarms", at: [1, 1, 4, 4], items: [{ active: "PLC_PRG.xFault", text: "Pump fault" }] }] });
     const r = renderScreen(s);
-    expect(r.html).toMatch(/<span class="al-st"><\/span><button class="al-ack" data-ack="PLC_PRG.xFault">ACK<\/button>/);
-    expect(r.css).toMatch(/\.al\.can-ack \.al-ack\{display:inline-block\}/);
+    expect(r.html).toMatch(/<span class="al-st"><\/span><button class="al-ack" data-ack="PLC_PRG.xFault" title="Acknowledge"><svg[^>]*><path d="M5 12\.5/);
+    expect(r.css).toMatch(/\.al\.can-ack \.al-ack\{display:inline-flex\}/);
   });
 });

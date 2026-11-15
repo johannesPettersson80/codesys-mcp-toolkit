@@ -8,9 +8,9 @@ import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { ProjectCache } from "../src/codesys/cache.js";
 import { renderScreen } from "../src/hmi/render.js";
 import { accessRights, GAUGE_STEPS, nativePlan, onColor, paletteFor, type NativeElement } from "../src/hmi/native.js";
-import { bottomTaken, connectionWarnings, overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
+import { connectionWarnings, labelSpots, overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
 import { TEMPLATES } from "../src/hmi/templates.js";
-import { canvasOf } from "../src/hmi/render.js";
+import { canvasOf, tileBox } from "../src/hmi/render.js";
 import type { ProcessItem } from "../src/hmi/spec.js";
 import { findBrowser } from "../src/hmi/service.js";
 import { layoutProblems, plcValue, screenSchema, screenVariables } from "../src/hmi/spec.js";
@@ -41,7 +41,7 @@ const SCREEN = {
 describe("HMI spec and renderer", () => {
   it("parses a screen with defaults and lists its variables", () => {
     const s = screenSchema.parse(SCREEN);
-    expect(s.theme).toBe("dark");
+    expect(s.theme).toBe("light");
     expect(s.grid).toEqual([12, 8]);
     expect(screenVariables(s).sort()).toEqual(["PLC_PRG.rLevel", "PLC_PRG.xHigh", "PLC_PRG.xRun", "PLC_PRG.xStart", "PLC_PRG.xStop"]);
     expect(layoutProblems(s)).toEqual([]);
@@ -80,11 +80,14 @@ describe("HMI structure", () => {
     }
   });
 
-  it("puts the other pages and an alarm count in the header", () => {
+  it("puts the other pages in a rail and an alarm count in the top bar", () => {
     const r = renderScreen(screenSchema.parse(SCREEN), { pages: [{ name: "Overview", title: "Pump Station" }, { name: "Alarms", title: "Alarms" }], alarms: [{ active: "PLC_PRG.xHigh" }, { active: "PLC_PRG.xFault" }] });
-    expect(r.html).toMatch(/<button class="h-page cur" data-nav="Overview">Pump Station<\/button><button class="h-page" data-nav="Alarms">Alarms<\/button>/);
+    // Each page with its icon (its own, or one from its title) and its title.
+    expect(r.html).toMatch(/<button class="r-page cur" data-nav="Overview"><svg[^>]*><path d="M3\.5 11[^"]*"\/><\/svg><span>Pump Station<\/span><\/button><button class="r-page" data-nav="Alarms"><svg[^>]*><path d="M6 16\.5/);
     expect(r.bindings).toContainEqual({ kind: "count", vars: ["PLC_PRG.xHigh", "PLC_PRG.xFault"] });
-    expect(renderScreen(screenSchema.parse(SCREEN)).html).not.toMatch(/h-nav/); // a single page needs no navigation
+    expect(renderScreen(screenSchema.parse(SCREEN)).html).not.toMatch(/h-rail/); // a single page needs no navigation
+    // The rail moves the cards right.
+    expect(tileBox(screenSchema.parse(SCREEN), [1, 1, 1, 1], true).x).toBe(tileBox(screenSchema.parse(SCREEN), [1, 1, 1, 1]).x + 84);
   });
 
   it("opens a faceplate from a symbol, with its controls bound", () => {
@@ -172,7 +175,10 @@ describe("process checks: is the diagram a process?", () => {
       { type: "symbol", symbol: "motor", x: 80, y: 40, size: 6, label: "M-2" },
       { type: "pipe", from: "T-1.bottom", to: "P-1.in" },
     ]);
-    expect([...bottomTaken(items)].sort()).toEqual(["m-1", "t-1"]);
+    const spots = labelSpots(items, 0.5);
+    expect(spots.get("t-1")?.side).toBe("below-left");
+    expect(spots.get("m-1")?.side).toBe("beside");
+    expect(spots.has("m-2")).toBe(false);
   });
 });
 
@@ -188,14 +194,14 @@ describe("pipe routing", () => {
 
   it("puts ports on the symbols' edges", () => {
     expect(portsOf(items[0]!, 0.5).right).toEqual({ at: [40, 71], dir: "r" });
-    expect(portsOf(items[1]!, 0.5).in).toEqual({ at: [55, 71], dir: "l" });
+    expect(portsOf(items[1]!, 0.5).in).toEqual({ at: [55.9, 71], dir: "l" }); // the inlet on the casing, inside the nozzle's box
     expect(portsOf(items[2]!, 0.5).in).toEqual({ at: [85, 48], dir: "d" }); // vertical: 4 x units = 8 y units at aspect 0.5
   });
 
   it("routes pipes with right angles from port to port", () => {
     const [, , , a, b, c] = items;
-    expect(routePipe(a as never, items, 0.5)).toEqual([[40, 71], [55, 71]]); // same height: straight
-    expect(routePipe(b as never, items, 0.5)).toEqual([[65, 71], [85, 71], [85, 48]]); // out to the right, up into the valve
+    expect(routePipe(a as never, items, 0.5)).toEqual([[40, 71], [55.9, 71]]); // same height: straight
+    expect(routePipe(b as never, items, 0.5)).toEqual([[65, 62.8], [85, 62.8], [85, 48]]); // out of the nozzle at the casing's top, right, up into the valve
     expect(routePipe(c as never, items, 0.5)).toEqual([[85, 32], [85, 10], [98, 10]]); // up, then out through the edge
   });
 
@@ -234,9 +240,11 @@ describe("native CODESYS visualization plan", () => {
     const withIdx = nativePlan(screenSchema.parse(SCREEN), [], {}, { "PLC_PRG.xHigh": 0 });
     expect(withIdx.helper.implementation).toMatch(/iAs\d+ := TO_INT\(__Alm__GVL\.g_inst\.gen_Inst_AG_HMI_AlarmGroup\.gen_ArrAllAlarms\[0\]\.m_eState\);/);
     expect(withIdx.helper.implementation).toMatch(/LINT_TO_DT\(.*m_liTimestampActive \/ 10000000 - 11644473600 \+ INT_TO_LINT\(.*m_iOffsetActive\) \* 60\)/);
-    const ack = withIdx.elements.find((e) => e.text === "ACK")!;
+    const ack = withIdx.elements.find((e) => e.click?.includes("m_xToAcknowledge"))!;
     expect(ack.click).toBe("__Alm__GVL.g_inst.gen_Inst_AG_HMI_AlarmGroup.gen_ArrAllAlarms[0].m_xToAcknowledge := TRUE;");
     expect(ack.invisible).toMatch(/^NOT PRG_HMI_Overview\.xAk\d+$/);
+    // The acknowledge button shows a tick, hidden with it.
+    expect(withIdx.elements.find((e) => e.kind === "image" && String(e.props?.["Static ID"]).includes(".ic_check_") && e.invisible === ack.invisible)).toBeDefined();
     expect(withIdx.elements.find((e) => e.text === "No active alarms")!.invisible).toMatch(/PRG_HMI_Overview\.xAo\d+/);
   });
 
@@ -248,15 +256,16 @@ describe("native CODESYS visualization plan", () => {
   });
 
   it("uses SVG symbols for pumps, with buttons, alarms and texts bound to the program", () => {
-    const pump = plan.elements.find((e) => e.kind === "image")!;
+    const pump = plan.elements.find((e) => e.kind === "image" && String(e.props?.["Static ID"]).includes(".pump_off_"))!;
     // one SVG per symbol size, drawn at exactly the box's size: the stopped picture and 8 running frames
     expect(plan.images.filter((i) => i.id.startsWith("pump")).map((i) => i.id).sort()).toEqual([...Array.from({ length: 8 }, (_, k) => `pump_f${k}_${pump.w}`), `pump_off_${pump.w}`].sort());
     for (const i of plan.images.filter((x) => x.id.startsWith("pump"))) expect(i.svg).toMatch(new RegExp(`^<svg xmlns="http://www.w3.org/2000/svg" width="${pump.w}" height="${pump.w}"`));
     expect(pump.props!["Static ID"]).toBe(`IP_Overview.pump_off_${pump.w}`);
     expect(pump.props!["Bitmap ID variable.Bitmap ID"]).toBe(`SEL(PLC_PRG.xRun, 'IP_Overview.pump_off_${pump.w}', CONCAT('IP_Overview.pump_f', CONCAT(INT_TO_STRING(PRG_HMI_Overview.iF${(plan.helper.implementation.match(/iF(\d+)/) ?? [])[1]}), '_${pump.w}')))`);
     expect(plan.helper.implementation).toMatch(/IF PLC_PRG\.xRun THEN iF\d+ := DINT_TO_INT\(\(TIME_TO_DINT\(TIME\(\)\) \/ 100\) MOD 8\); END_IF/);
-    expect(plan.elements.find((e) => e.text === "Start")!.props).toMatchObject({ "Input configuration.Tap.Variable": "PLC_PRG.xStart" });
-    expect(flat(plan.elements).find((e) => e.invisible === "NOT PLC_PRG.xHigh")!.text).toMatch(/High level <T-101>/);
+    expect(plan.elements.some((e) => e.text === "Start")).toBe(true);
+    expect(plan.elements.find((e) => e.props?.["Input configuration.Tap.Variable"] === "PLC_PRG.xStart")!.fill).toBeNull();
+    expect(flat(plan.elements).find((e) => e.invisible === "NOT PLC_PRG.xHigh" && e.text)!.text).toMatch(/High level <T-101>/);
     for (const e of plan.elements) expect(e.x + e.w).toBeLessThanOrEqual(1280);
   });
 });
@@ -268,7 +277,7 @@ describe("alarm history on the alarms widget", () => {
     const plan = nativePlan(s, [], {}, { "PLC_PRG.xHigh": 0 }, [], ["Level high", "Pump fault"]);
     expect(plan.helper.implementation).toContain("IF GVL_AlarmHistory.aEvents[iHi].sGroup = 'AG_HMI' AND GVL_AlarmHistory.aEvents[iHi].sAlarm = '2' THEN sHx := 'Pump fault'; END_IF");
     expect(plan.helper.declaration.match(/sHt\d+ : STRING\(12\);/g)).toHaveLength(3);
-    expect(plan.elements.some((e) => e.text === "HISTORY")).toBe(true);
+    expect(plan.elements.some((e) => e.text === "History")).toBe(true);
     // Without CODESYS alarms there is no history in the PLC.
     expect(nativePlan(s).helper.implementation).not.toContain("GVL_AlarmHistory");
     expect(renderScreen(s).html).toContain('<ul class="al-hist" data-hist="3"></ul>');
@@ -297,11 +306,11 @@ describe("themes, brand colour and pipe flow", () => {
   it("high contrast and a brand colour in the browser", () => {
     const contrast = renderScreen(screenSchema.parse({ ...SCREEN, theme: "contrast" }));
     expect(contrast.html).toContain('class="hmi theme-contrast');
-    expect(contrast.css).toContain(".theme-contrast{--bg:#000;--fg:#fff");
+    expect(contrast.html).toContain("--bg:#000000;--surface:#000000;--surface2:#111111;--line:#ffffff;--fg:#ffffff");
     const red = renderScreen(screenSchema.parse({ ...SCREEN, accent: "#e30613" }));
-    expect(red.html).toContain("--accent:#e30613;--on-accent:#fff");
+    expect(red.html).toMatch(/--accent:#e30613;--accent-soft:#[0-9a-f]{6};--on-accent:#ffffff/);
     const yellow = renderScreen(screenSchema.parse({ ...SCREEN, accent: "#ffd400" }));
-    expect(yellow.html).toContain("--accent:#ffd400;--on-accent:#04121f");
+    expect(yellow.html).toMatch(/--accent:#ffd400;--accent-soft:#[0-9a-f]{6};--on-accent:#111820/);
     expect(() => screenSchema.parse({ ...SCREEN, accent: "red" })).toThrow();
   });
 
@@ -309,13 +318,15 @@ describe("themes, brand colour and pipe flow", () => {
     expect(paletteFor({ theme: "contrast" }).bg).toBe(0xff000000);
     expect(paletteFor({ theme: "contrast" }).border).toBe(0xffffffff);
     expect(paletteFor({ theme: "light", accent: "#e30613" }).tones.accent).toBe(0xffe30613);
-    expect(paletteFor({ theme: "dark" }).tones.accent).toBe(0xff38bdf8);
+    expect(paletteFor({ theme: "dark" }).tones.accent).toBe(0xff00bde3);
     expect(onColor(0xffe30613)).toBe(0xffffffff);
-    expect(onColor(0xffffd400)).toBe(0xff04121f);
+    expect(onColor(0xffffd400)).toBe(0xff111820);
     const plan = nativePlan(screenSchema.parse({ ...SCREEN, theme: "contrast", accent: "#e30613" }), [{ name: "Overview", title: "A" }, { name: "Other", title: "B" }]);
-    const nav = plan.elements.find((e) => e.name === "Nav_Overview")!;
-    expect(nav.fill).toBe(0xffe30613);
-    expect(nav.color).toBe(0xffffffff);
+    // The rail: the current page marked in the brand colour, the other one a link.
+    expect(plan.elements.find((e) => e.kind === "round" && e.x === 0 && e.w === 3)!.fill).toBe(0xffe30613);
+    expect(plan.elements.find((e) => e.text === "A")!.color).toBe(0xffe30613);
+    expect(plan.elements.find((e) => e.name === "Nav_Other")!.goto).toBe("Visu_Other");
+    expect(plan.elements.find((e) => e.name === "Nav_Overview")).toBeUndefined();
   });
 
   it("native pipes with flow get dashes that slide with the clock", () => {
@@ -405,7 +416,7 @@ describe("HMI actions over MCP (fake CODESYS)", () => {
     if (findBrowser()) expect(ok.images).toHaveLength(1);
     const list = await call("hmi_symbols", { names: ["centrifuge", "heat_exchanger"] });
     expect(list.text).toMatch(/centrifuge \(project\): Decanter centrifuge \[100x100; ports: in left, out right\]/);
-    expect(list.text).toMatch(/heat_exchanger: Heat exchanger/);
+    expect(list.text).toMatch(/heat_exchanger: Shell-and-tube heat exchanger/);
     const plant = { name: "Plant", title: "Plant", widgets: [{ type: "process", at: [1, 1, 8, 5], items: [{ type: "symbol", symbol: "centrifuge", label: "C-1", x: 50, y: 50, size: 16, on: "PLC_PRG.xRun" }, { type: "pipe", from: [0, 50], to: "C-1.in" }] }] };
     expect((await call("hmi_save_screen", { screen: plant })).isError).toBe(false);
     const h = await panel("get_hmi", { screen: "Plant" });

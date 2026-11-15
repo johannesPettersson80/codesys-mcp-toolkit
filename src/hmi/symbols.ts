@@ -62,16 +62,22 @@ export const BUILTIN_SYMBOLS: SymbolLib = {
 <g class="spin"><path d="M19 23v14M12 30h14" stroke="var(--line)" stroke-width="2"/></g>
 <circle cx="62" cy="30" r="4" fill="var(--line)"/><circle cx="100" cy="30" r="4" fill="var(--line)"/><circle cx="138" cy="30" r="4" fill="var(--line)"/>
 <path d="M42 44l-6 14M158 44l6 14" stroke="var(--line)" stroke-width="3.5" stroke-linecap="round"/>`,
-    { in: [5, 30, "left"], out: [195, 30, "right"] },
+    {},
     [200, 60],
-    "Belt conveyor (twice as wide as high)",
+    "Belt conveyor (solids are dropped onto it: no pipe ports)",
   ),
   heat_exchanger: def(
-    `<circle cx="50" cy="50" r="38" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
-<path d="M12 50h14l10-18 14 36 14-36 10 18h14" fill="none" stroke="var(--line)" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>`,
-    { in: [12, 50, "left"], out: [88, 50, "right"], top: [50, 12, "up"], bottom: [50, 88, "down"] },
-    [100, 100],
-    "Heat exchanger: tube side in/out, shell side top/bottom",
+    // Shell and tube: the product runs through the tubes from head to head, the heating or
+    // cooling medium through the shell, in at the top and out at the bottom (counterflow).
+    // The ports sit on the outline: a pipe runs up to the shell and ends under it, like a nozzle.
+    `<rect x="8" y="22" width="22" height="36" rx="9" fill="var(--body2)" stroke="var(--line)" stroke-width="3"/>
+<rect x="130" y="22" width="22" height="36" rx="9" fill="var(--body2)" stroke="var(--line)" stroke-width="3"/>
+<rect x="26" y="16" width="108" height="48" rx="6" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
+<path d="M36 28h88M36 40h88M36 52h88" stroke="var(--line)" stroke-width="2.5" stroke-linecap="round"/>
+<path d="M36 18v44M124 18v44" stroke="var(--line)" stroke-width="3"/>`,
+    { in: [8, 40, "left"], out: [152, 40, "right"], top: [116, 16, "up"], bottom: [44, 64, "down"] },
+    [160, 80],
+    "Shell-and-tube heat exchanger (twice as wide as high): product through the tubes (in left, out right), heating or cooling medium through the shell (top in, bottom out)",
   ),
   mixer: def(
     `<rect x="32" y="4" width="36" height="24" rx="5" fill="var(--body)" stroke="var(--state)" stroke-width="3.5"/>
@@ -84,9 +90,9 @@ export const BUILTIN_SYMBOLS: SymbolLib = {
   filter: def(
     `<rect x="18" y="12" width="64" height="76" rx="9" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
 <path d="M24 82L76 18" stroke="var(--line)" stroke-width="3.5" stroke-dasharray="7 5" stroke-linecap="round"/>`,
-    { in: [18, 50, "left"], out: [82, 50, "right"], top: [50, 12, "up"], bottom: [50, 88, "down"] },
+    { in: [18, 50, "left"], out: [82, 50, "right"] },
     [100, 100],
-    "Filter or strainer",
+    "Filter or strainer, flow left to right",
   ),
   compressor: def(
     `<circle cx="50" cy="50" r="40" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
@@ -111,7 +117,7 @@ export const BUILTIN_SYMBOLS: SymbolLib = {
 <path d="M16 93h68" stroke="var(--line)" stroke-width="3" stroke-dasharray="6 4"/>`,
     {},
     [100, 100],
-    "Float level switch: place it inside a tank",
+    "Float level switch as a picture (HMI). On a P&ID use an instrument: {type: 'instrument', tag: 'LSH-201', at: 'T-201.left-high'}",
   ),
   pressure_switch: def(
     `<circle cx="50" cy="40" r="33" fill="var(--body)" stroke="var(--state)" stroke-width="4"/>
@@ -121,7 +127,7 @@ export const BUILTIN_SYMBOLS: SymbolLib = {
 <rect x="45" y="73" width="10" height="23" fill="var(--line)"/>`,
     { bottom: [50, 96, "down"] },
     [100, 100],
-    "Pressure switch or gauge on a stem",
+    "Pressure gauge as a picture (HMI). On a P&ID use an instrument: {type: 'instrument', tag: 'PSH-201', at: [x, y] on the line}",
   ),
   check_valve: def(
     `<path d="M4 30v40l46-20zM96 30v40L50 50z" fill="var(--state)" stroke="var(--line)" stroke-width="2.5" stroke-linejoin="round"/>
@@ -134,9 +140,9 @@ export const BUILTIN_SYMBOLS: SymbolLib = {
     `<path d="M50 50V22" stroke="var(--line)" stroke-width="4"/>
 <path d="M22 22a28 20 0 0 1 56 0z" fill="var(--body)" stroke="var(--line)" stroke-width="3" stroke-linejoin="round"/>
 <path d="M4 32v36l46-18zM96 32v36L50 50z" fill="var(--state)" stroke="var(--line)" stroke-width="2.5" stroke-linejoin="round"/>`,
-    { in: [4, 50, "left"], out: [96, 50, "right"] },
+    { in: [4, 50, "left"], out: [96, 50, "right"], actuator: [50, 2, "up"] },
     [100, 100],
-    "Control valve with diaphragm actuator",
+    "Control valve with diaphragm actuator; a signal line from its controller or transmitter goes to actuator",
   ),
 };
 

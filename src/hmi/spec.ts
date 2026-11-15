@@ -6,6 +6,7 @@
  */
 import * as z from "zod/v4";
 import { routeProblems } from "./route.js";
+import { ICON_NAMES } from "./icons.js";
 import { BUILTIN_SYMBOLS, type SymbolLib } from "./symbols.js";
 
 const v = z.string().min(1).describe("PLC variable, full path, e.g. 'PLC_PRG.fbPump.xRunning' or 'GVL.rLevel'");
@@ -28,7 +29,8 @@ const access = z
   })
   .optional()
   .describe("Who may operate this tile in CODESYS's visualization, after Login, e.g. {min: 'Maintenance'} for setpoints only maintenance changes");
-const base = { at, title: z.string().optional().describe("Tile title"), access };
+const icon = z.enum(ICON_NAMES).optional();
+const base = { at, title: z.string().optional().describe("Card title, in sentence case"), icon: icon.describe("Line icon before the title, e.g. 'temperature'"), access };
 
 const id = z.string().optional().describe("Name pipes connect to (default: the label, e.g. 'P-101')");
 const faceplate = z
@@ -78,17 +80,44 @@ const processItem = z.discriminatedUnion("type", [
       via: z.array(z.tuple([num, num])).optional().describe("Points the pipe must pass, in order"),
       points: z.array(z.tuple([num, num])).min(2).optional().describe("Raw points instead of from/to (avoid: ends rarely meet the symbols)"),
       flow: v.optional().describe("BOOL: animate flow while TRUE"),
+      label: z.string().optional().describe("Name of a line that enters or leaves at the diagram's edge, drawn at that end, e.g. 'Steam' or 'To filling'"),
+      signal: z.boolean().optional().describe("An instrument signal, drawn thin and dashed, e.g. from 'TT-201.c' (a sensor) to 'TCV-201.actuator'"),
     })
     .refine((p) => (p.from && p.to) || p.points, { message: "a pipe needs from and to (ports or points), or points" }),
   z.object({ type: z.literal("sensor"), x: num, y: num, value: v, unit: z.string().optional(), label: z.string().optional(), decimals: z.number().int().optional() }),
+  z
+    .object({
+      type: z.literal("instrument"),
+      tag: z.string().regex(/^[A-Z]{1,5}-?\d{1,5}[A-Z]?$/).describe("ISA tag: function letters and loop number, e.g. 'TT-201', 'LSH-201', 'PSH-201', 'TIC-201'"),
+      x: num,
+      y: num,
+      at: end.optional().describe("What it measures: a port on the vessel ('T-201.left-high') or a point [x, y] on a pipe. Left out: the nearest line or vessel wall"),
+      value: v.optional().describe("Shown next to the bubble, e.g. a transmitter's reading"),
+      unit: z.string().optional(),
+      decimals: z.number().int().optional(),
+      on: v.optional().describe("BOOL for a switch (LSH, PSH): the bubble lights while it is TRUE"),
+      tone: tone.optional().describe("Colour when on (default warn)"),
+    })
+    .describe("A P&ID instrument (ISA-5.1 bubble) joined to the point it measures; signals to valves are pipes with signal: true from '<tag>.c'"),
   z.object({ type: z.literal("lamp"), x: num, y: num, on: v, tone: tone.optional(), label: z.string().optional() }),
   z.object({ type: z.literal("label"), x: num, y: num, text: z.string() }),
 ]);
 
 export const widgetSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("value"), ...base, value: v, unit: z.string().optional(), decimals: z.number().int().optional(), bands: z.array(band).optional(), trend: z.boolean().optional().describe("Small sparkline under the value") }),
+  z.object({
+    type: z.literal("value"),
+    ...base,
+    value: v,
+    unit: z.string().optional(),
+    decimals: z.number().int().optional(),
+    bands: z.array(band).optional(),
+    min: num.optional().describe("With max: a thin scale under the number"),
+    max: num.optional(),
+    set: v.optional().describe("The set-point: a marker on the scale and 'Set' under the number"),
+    trend: z.boolean().optional().describe("Small sparkline under the value"),
+  }),
   z.object({ type: z.literal("gauge"), ...base, value: v, min: num.default(0), max: num.default(100), unit: z.string().optional(), decimals: z.number().int().optional(), bands: z.array(band).optional() }),
-  z.object({ type: z.literal("bar"), ...base, value: v, min: num.default(0), max: num.default(100), unit: z.string().optional(), vertical: z.boolean().optional(), bands: z.array(band).optional() }),
+  z.object({ type: z.literal("bar"), ...base, value: v, min: num.default(0), max: num.default(100), unit: z.string().optional(), vertical: z.boolean().optional(), bands: z.array(band).optional(), set: v.optional().describe("The set-point, as a marker on the bar") }),
   z.object({ type: z.literal("status"), ...base, items: z.array(z.object({ label: z.string(), on: v, tone: tone.optional(), invert: z.boolean().optional() })).min(1) }),
   z.object({
     type: z.literal("buttons"),
@@ -100,12 +129,37 @@ export const widgetSchema = z.discriminatedUnion("type", [
           variable: v,
           action: z.enum(["tap", "toggle", "set", "reset"]).default("tap").describe("tap: TRUE while pressed; toggle: flips; set: writes TRUE; reset: writes FALSE"),
           tone: tone.optional(),
+          icon,
         }),
       )
       .min(1),
   }),
   z.object({ type: z.literal("switch"), ...base, variable: v, label: z.string().optional() }),
-  z.object({ type: z.literal("setpoint"), ...base, variable: v, min: num, max: num, step: num.optional(), unit: z.string().optional() }),
+  z.object({ type: z.literal("setpoint"), ...base, variable: v, min: num, max: num, step: num.optional(), unit: z.string().optional(), actual: v.optional().describe("The measured value, shown beside the set value"), decimals: z.number().int().optional() }),
+  z
+    .object({
+      type: z.literal("state"),
+      ...base,
+      states: z
+        .array(z.object({ on: v, text: z.string(), tone }))
+        .min(1)
+        .max(6)
+        .describe("Machine states, most important first: the first whose BOOL is TRUE is shown, e.g. fault (alarm), manual (accent), running (ok), ready (warn)"),
+      idle: z.object({ text: z.string(), tone }).default({ text: "Stopped", tone: "neutral" }).describe("Shown when no state is TRUE"),
+      start: v.optional().describe("BOOL tapped by the Start button"),
+      stop: v.optional().describe("BOOL tapped by the Stop button"),
+      reset: v.optional().describe("BOOL tapped by the Reset button"),
+    })
+    .describe("A unit's state on a card (an icon in the state's colour, a thin line on top), with Start, Stop and Reset; the machine's own state goes in the screen's machine"),
+  z
+    .object({
+      type: z.literal("mode"),
+      ...base,
+      variable: v,
+      options: z.array(z.string()).min(2).max(4).describe("Labels, e.g. ['Manual', 'Auto']"),
+      values: z.array(z.string()).optional().describe("What each option writes; default FALSE/TRUE for two options, else 0, 1, 2, 3"),
+    })
+    .describe("A segmented switch for an operating mode"),
   z.object({
     type: z.literal("trend"),
     ...base,
@@ -133,16 +187,46 @@ export const widgetSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("process"), ...base, items: z.array(processItem).min(1) }),
 ]);
 
+const modeOf = {
+  variable: v,
+  options: z.array(z.string()).min(2).max(4).describe("Labels, e.g. ['Manual', 'Auto']"),
+  values: z.array(z.string()).optional().describe("What each option writes; default FALSE/TRUE for two options, else 0, 1, 2, 3"),
+};
+
+/** The machine as a whole: its state in the top bar's corner, its commands in the bottom bar. */
+export const machineSchema = z
+  .object({
+    states: z
+      .array(z.object({ on: v, text: z.string(), tone, icon: icon.describe("Default by tone: play (ok), fault (alarm), warning (warn), manual (accent), stop (neutral)") }))
+      .min(1)
+      .max(6)
+      .describe("Machine states, most important first: the first whose BOOL is TRUE is shown, e.g. Fault (alarm), Manual (accent), Production (ok), Ready (warn)"),
+    idle: z.object({ text: z.string(), tone, icon }).default({ text: "Stopped", tone: "neutral" }).describe("Shown when no state is TRUE"),
+    detail: v.optional().describe("STRING shown under the state, e.g. 'error-free for 2 h 23 min'"),
+    start: v.optional().describe("BOOL tapped by the Start button"),
+    stop: v.optional().describe("BOOL tapped by the Stop button"),
+    reset: v.optional().describe("BOOL tapped by the Reset button"),
+    mode: z.object(modeOf).optional().describe("The operating mode, a segmented switch in the bottom bar"),
+  })
+  .describe("The machine's state, shown small in the top bar's left corner with a thin line in its colour under the bar, and Start / Stop / Reset and the mode in a bar along the bottom. Give it the same on every page.");
+
 export const screenSchema = z.object({
   name: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/).describe("Screen name, e.g. 'Overview'"),
   title: z.string().describe("Shown in the header"),
   subtitle: z.string().optional(),
-  theme: z.enum(["dark", "light", "contrast"]).default("dark").describe("contrast: black and white with strong colours and no glow, for bright light or poor eyesight"),
+  theme: z.enum(["light", "dark", "contrast"]).default("light").describe("light (default), dark, or contrast: black and white with strong colours, for bright light or poor eyesight"),
+  icon: icon.describe("The page's icon in the navigation rail, e.g. 'home', 'process', 'trend', 'alarm', 'recipe', 'settings'"),
+  info: z
+    .array(z.object({ label: z.string(), value: v.optional(), text: z.string().optional(), unit: z.string().optional(), decimals: z.number().int().optional() }))
+    .max(4)
+    .optional()
+    .describe("Fields in the top bar, e.g. order, recipe, end of production: a label with a PLC value or a fixed text"),
   accent: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
     .optional()
     .describe("Brand colour for highlights (current page, accent tiles, flow), e.g. '#e30613'; text on it turns black or white to stay readable"),
+  machine: machineSchema.optional(),
   size: z.enum(["1280x720", "1920x1080", "1024x768", "800x480"]).default("1280x720").describe("Panel resolution; use the same on every page"),
   grid: z.tuple([z.number().int().min(2).max(24), z.number().int().min(2).max(16)]).default([12, 8]).describe("[columns, rows]"),
   widgets: z.array(widgetSchema).min(1),
@@ -155,6 +239,13 @@ export type Screen = z.infer<typeof screenSchema>;
 export type ScreenInput = z.input<typeof screenSchema>;
 export type Tone = z.infer<typeof tone>;
 export type Faceplate = z.infer<typeof faceplate>;
+export type Machine = z.infer<typeof machineSchema>;
+
+/** Whether a screen has the bottom bar: a machine with Start, Stop, Reset or a mode. */
+export function hasDock(s: { machine?: { start?: string; stop?: string; reset?: string; mode?: unknown } }): boolean {
+  const m = s.machine;
+  return !!m && !!(m.start || m.stop || m.reset || m.mode);
+}
 
 /** Every alarm on any screen, for the header's alarm count. */
 export function allAlarms(screens: Screen[]): { active: string; text: string; severity: string }[] {
@@ -167,12 +258,18 @@ export function allAlarms(screens: Screen[]): { active: string; text: string; se
 export function screenVariables(s: Screen): string[] {
   const out = new Set<string>();
   const add = (x?: string) => x && out.add(x);
+  for (const f of s.info ?? []) add(f.value);
+  if (s.machine) {
+    s.machine.states.forEach((x) => add(x.on));
+    [s.machine.detail, s.machine.start, s.machine.stop, s.machine.reset, s.machine.mode?.variable].forEach(add);
+  }
   for (const w of s.widgets) {
     switch (w.type) {
       case "value":
       case "gauge":
       case "bar":
         add(w.value);
+        if (w.type !== "gauge") add(w.set);
         break;
       case "status":
         w.items.forEach((i) => add(i.on));
@@ -181,8 +278,16 @@ export function screenVariables(s: Screen): string[] {
         w.items.forEach((i) => add(i.variable));
         break;
       case "switch":
+      case "mode":
+        add(w.variable);
+        break;
       case "setpoint":
         add(w.variable);
+        add(w.actual);
+        break;
+      case "state":
+        w.states.forEach((x) => add(x.on));
+        [w.start, w.stop, w.reset].forEach(add);
         break;
       case "trend":
         w.series.forEach((i) => add(i.value));

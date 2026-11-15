@@ -221,6 +221,25 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, n
         if (lbl) lbl.textContent = st === "waiting" ? "cleared · confirm" : st === "unacknowledged" ? "cleared · acknowledge" : st === "acknowledged" ? "acknowledged" : "";
         break;
       }
+      case "state": {
+        // The first state whose BOOL is TRUE, else the idle one: its tone colours the panel.
+        const i = b.states.findIndex((x) => truthy(val(x.v)));
+        const s = b.states[i] ?? b.idle;
+        el.dataset.tone = s.tone;
+        // Which state's icon shows: 0 the idle one, 1.. the states in order.
+        el.dataset.i = String(i + 1);
+        const t = el.querySelector(".st-text");
+        if (t) t.textContent = s.text;
+        break;
+      }
+      case "eq": {
+        // A mode option is lit while the variable holds its value (TRUE/FALSE or a number).
+        const x = val(b.v);
+        const want = b.val.toUpperCase();
+        const on = typeof x === "boolean" ? x === (want === "TRUE") : typeof x === "number" ? want !== "" && Number(want) === x : x !== undefined && String(x).toUpperCase() === want;
+        el.classList.toggle("on", on);
+        break;
+      }
       case "count": {
         const open = (v: string) => truthy(val(v)) || ["waiting", "unacknowledged"].includes(last[`@alarm:${v}`] ?? "");
         const n = b.vars.filter(open).length;
@@ -254,11 +273,11 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, n
       case "trend": {
         const svg = el as unknown as SVGSVGElement;
         const r = drawLine(svg, [...svg.querySelectorAll<SVGPathElement>(".tr-line")], b.series.map((s) => history.get(s) ?? []), b.seconds, b.min, b.max);
-        const axis = svg.parentElement?.querySelector(".tr-axis");
-        if (axis) {
-          axis.querySelector(".tr-max")!.textContent = fmt(r.max);
-          axis.querySelector(".tr-min")!.textContent = fmt(r.min);
-        }
+        // The range at the plot's top and bottom left.
+        const box = svg.closest(".t-body") ?? svg.parentElement;
+        const hi = box?.querySelector(".tr-max"), lo = box?.querySelector(".tr-min");
+        if (hi) hi.textContent = fmt(r.max);
+        if (lo) lo.textContent = fmt(r.min);
         break;
       }
     }

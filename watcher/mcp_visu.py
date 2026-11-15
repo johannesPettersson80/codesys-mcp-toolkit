@@ -7,7 +7,7 @@
 # - CODESYS's element creators (the objects its toolbox uses) for what the property paths
 #   can't set: a static font, a gradient, a hidden frame or fill. Added through CODESYS's
 #   object manager, like the toolbox does.
-# Rounded corners and the canvas background are members of CODESYS's element objects that
+# Rounded corners (radius type and value), the text format and the canvas background are members of CODESYS's element objects that
 # were checked alone. Nothing here writes other raw members (some raise assertion dialogs).
 # A property that fails is reported, not fatal. render paints a visualization into a PNG.
 #
@@ -158,6 +158,8 @@ def _simple_creator(el):
     if el.get("text") is not None:
         _pset(cr, "Text", el["text"])
         _pset(cr, "HorizontalAlignment", _enum("_3S.CoDeSys.VisualElem.VisuEnumHorizontalAlignment", el.get("align") or "HCENTER"))
+        if el.get("valign"):
+            _pset(cr, "VerticalAlignment", _enum("_3S.CoDeSys.VisualElem.VisuEnumVerticalAlignment", el["valign"]))
         if el.get("font"):
             m = cr.GetType().GetInterface("ITextElementCreator").GetMethod("SetFont")
             m.Invoke(cr, System.Array[object]([_font(el["font"]), _argb(el.get("color", 0xFF0F172A))]))
@@ -327,6 +329,7 @@ def op_visu_build(args):
             warnings.append("size/dialog: %s" % to_text(ex))
     T = se.VisualElementType
     corners = []
+    wrapped = []
     access = []
     queue = list(args.get("elements") or [])
     editor = {}
@@ -366,7 +369,13 @@ def op_visu_build(args):
             continue
         if el.get("access"):
             access.append((eid, el["access"]))
-        for path, v in (el.get("props") or {}).items():
+        props = list((el.get("props") or {}).items())
+        if el.get("linebreak"):
+            wrapped.append(eid)
+        if el["kind"] not in _SIMPLE and el.get("invisible"):
+            # Shapes take it when created; pictures through their state variables.
+            props.append(("State variables.Invisible", el["invisible"]))
+        for path, v in props:
             try:
                 _set_prop(e, path, _value(v))
             except Exception as ex:
@@ -427,10 +436,17 @@ def op_visu_build(args):
                 bg.UseBackgroundColor = True
                 v = int(args["background"])
                 bg.BackgroundColor = System.Int32(v - 0x100000000 if v >= 0x80000000 else v)
+            # A radius only counts with the Explicit radius type (else the style's rounding is drawn).
             for eid, r in corners:
                 el = vo.FindElementById(eid)
                 if el is not None:
+                    el.GetVisualElemMember("m_Radius.m_RadiusSelectedValue", True, "VISU_ST_EXPLICIT").Value = "VISU_ST_EXPLICIT"
                     el.GetVisualElemMember("m_Radius.m_iRadius", True, r).Value = r
+            # Text format: Line break (VisuEnumTextFlag NONE, LINEBREAK, ELLIPSIS).
+            for eid in wrapped:
+                el = vo.FindElementById(eid)
+                if el is not None:
+                    el.GetVisualElemMember("m_pStaticTextProperties..TextFlag", True, "LINEBREAK").Value = "LINEBREAK"
     except Exception as ex:
         warnings.append("background/corners: %s" % to_text(ex))
     return {"name": name_of(visu), "path": name_of(visu), "kind": "visualization", "elements": len(visu.visual_element_list), "warnings": warnings, "saved": c.save_if(args)}

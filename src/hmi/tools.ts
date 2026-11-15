@@ -26,13 +26,14 @@ export const missingFpu = (): string =>
   "This CODESYS's library repository has no FloatingPointUtils, which CODESYS's visualization libraries need, so a visualization can't compile here. Install it into this CODESYS (with the CODESYS Installer, or in Tools > Library Repository > Install), then run hmi_export_codesys again. The browser HMI (open_hmi) works without it.";
 
 const GUIDE = `A screen is a ${"12x8"} grid of tiles (change with grid). Each widget has at: [column, row, width, height], 1-based, no overlaps.
-Widgets: value (big number, optional sparkline), gauge, bar, status (LED list), buttons (tap/toggle/set/reset), switch, setpoint (+/- and slider), trend (up to 6 series), alarms, text, and process: a mimic diagram whose items sit in a 0..100 x 0..100 box (x across, y down): tank, pump, fan, valve, junction, pipe, sensor, lamp, label, and symbol: {type: 'symbol', symbol: 'heat_exchanger', x, y, size, label: 'E-201', on: 'PLC_PRG.xHeating', fault: '...', rotate: 90} for the standard symbols (motor, conveyor, heat_exchanger, mixer, filter, compressor, cylinder, level_switch, pressure_switch, check_valve, control_valve) and the project's own (hmi_save_symbol). hmi_symbols shows them all with their ports.
+The machine (screen machine, the same on every page): its state small in the top bar's left corner (an icon in a ring and the text, detail: a STRING under it such as 'error-free for 2 h 23 min', and a thin line in the state's colour under the bar), and Start, Stop, Reset and the mode in a bar along the bottom: {states: [{on, text, tone}] most important first (Fault alarm, Manual accent, Production ok, Ready warn), idle: {text: 'Stopped', tone: 'neutral'}, detail, start, stop, reset, mode: {variable, options: ['Manual', 'Auto']}}. Never show the machine's state as a big coloured card.
+Widgets: state (a unit's state on a card: icon in a ring, a thin line in the state's colour on top, optional Start/Stop/Reset), mode (segmented switch, e.g. options ['Manual', 'Auto'] on a BOOL), value (big number in the accent and its unit; min/max add a thin scale, set shows Actual and Set side by side and a set-point marker; trend: true a sparkline), gauge (half circle), bar (with an optional set marker), status (lamps), buttons (tap/toggle/set/reset; Start in the accent, Stop dark, the rest outlined, with icons; tone only for a real state colour), switch, setpoint (set value with - and +; actual: the measured value large beside it), trend (up to 6 series), alarms, text, and process: a mimic diagram whose items sit in a 0..100 x 0..100 box (x across, y down): tank, pump, fan, valve, junction, pipe, sensor, lamp, label, and symbol: {type: 'symbol', symbol: 'heat_exchanger', x, y, size, label: 'E-201', on: 'PLC_PRG.xHeating', fault: '...', rotate: 90} for the standard symbols (motor, conveyor, heat_exchanger, mixer, filter, compressor, cylinder, level_switch, pressure_switch, check_valve, control_valve) and the project's own (hmi_save_symbol). hmi_symbols shows them all with their ports.
 Connect pipes to ports, never by guessing points: {type: 'pipe', from: 'T-101.right', to: 'P-101.in', flow: 'PLC_PRG.xRun'}. The toolkit routes it with right angles and it meets the symbols exactly. A symbol's name is its id, or its label. Ports: tank top, bottom, left, right, left-high, right-high; pump and fan in (left), out (right), top, bottom; valve in, out (left/right, or bottom/top when vertical: true); junction c (for tees). A pipe end can also be a point [x, y] at the diagram's edge. via: [[x, y]] makes it pass points. For straight runs give connected symbols the same y (or x); a valve on a vertical pipe is vertical: true.
 Variables are full instance paths: 'PLC_PRG.fbPump.xRunning', 'GVL.rLevel'. bands colour a value by range: [{from: 0, tone: 'accent'}, {from: 90, tone: 'alarm'}]. Tones: accent, ok, warn, alarm, neutral.
-Look: theme 'dark' (default), 'light' or 'contrast' (black and white, strong colours, no glow: bright light, poor eyesight), per page; accent: '#e30613' puts the company colour on highlights, flow and the current page (text on it turns black or white to stay readable). Pipes with flow show moving dashes, in the browser and in CODESYS.
+Look: a calm, flat design system shared by the browser and CODESYS: colour means state (running, warning, alarm, manual) or what the operator can act on, never decoration. theme 'light' (default), 'dark' or 'contrast' (black and white, strong colours: bright light, poor eyesight), the same on every page; accent: '#e30613' puts the company colour on the current page, set-points and primary buttons (text on it turns black or white to stay readable). Every card can have an icon before its title (icon: 'temperature', 'pressure', 'flow', 'level', 'speed', 'power', 'energy', 'time', 'count', 'pump', 'valve', 'heater', 'tank', 'machine', 'alarm', 'info', 'settings', 'recipe', 'trend', ...); titles in sentence case (cards show them in small capitals). The top bar shows the screen's title and info: up to 4 fields such as {label: 'Order', text: '4711'} or {label: 'Produced', value: 'PLC_PRG.rLitres', unit: 'l'}. With more than one page a navigation rail on the left links them, each with the page's icon (screen icon: 'home', 'process', 'trend', 'alarm', 'recipe', 'settings'). Pipes with flow show moving dashes, in the browser and in CODESYS.
 access: {min: 'Maintenance'} on a tile lets only that group and up operate it in CODESYS (after Login; lower groups and nobody logged in see it greyed out, or not at all with below: 'hide'). Groups: Operator, Maintenance, Admin.
 Make the diagram a process: every piece of equipment on a pipe (in and out), tanks fed and emptied, a heat exchanger with both circuits (product in/out, heating medium top/bottom), instruments on the line or vessel they measure (a pressure switch through a short pipe to a junction), a motor's shaft against the machine it drives, line ends at the diagram's edge with a label (Feed, Steam, To filling); hmi_save_screen lists what doesn't fit.
-Good screens: the process diagram large on the left (about 8x5), key numbers and status on the right, controls and trends along the bottom; titles short; tag names on symbols (P-101, T-101).`;
+Good screens: the machine's state and commands in the frame (machine), an overview with key values (with their scale and set-point) in a row of equal cards, alarms and status below; the process diagram large on its own page; titles short; tag names on symbols (P-101, T-101).`;
 
 export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: HmiService, run: (fn: () => Promise<string>) => Promise<ActionResult>): void {
   reg(
@@ -50,14 +51,16 @@ export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: Hm
       const roots = new Set(vars.map((v) => v.split(".")[0]!.toLowerCase()));
       const unknown = ctx.cache ? [...roots].filter((r) => !ctx.cache!.get(r) && !/^(gvl|io|hmi)/i.test(r)) : [];
       const r = hmi.save(screen);
+      // The cards sit right of the navigation rail when the HMI has more than one page.
+      const rail = hmi.screens().length > 1;
       const looks = screen.widgets.flatMap((w) => {
         if (w.type !== "process") return [];
-        const b = tileBox(screen, w.at);
+        const b = tileBox(screen, w.at, rail);
         return overlapWarnings(w.items, (b.h - 46) / (b.w - 32), lib);
       });
       const flow = screen.widgets.flatMap((w) => {
         if (w.type !== "process") return [];
-        const b = tileBox(screen, w.at);
+        const b = tileBox(screen, w.at, rail);
         return connectionWarnings(w.items, (b.h - 46) / (b.w - 32), lib);
       });
       const warn0 = (looks.length ? `\nLayout: ${looks.join(" ")}` : "") + (flow.length ? `\nProcess (check these: a diagram should show how the product flows):\n- ${flow.join("\n- ")}` : "");
@@ -213,7 +216,7 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
     "hmi_export_codesys",
     {
       description:
-        "Build the HMI as native CODESYS visualizations in the project, one per page (Visu_<screen>), so it ships with the application: the header links the pages, the first page is the start page of TargetVisu and WebVisu at the panel size, pumps and fans turn while running (8-frame animation), and a symbol with a faceplate opens it as a dialog (Dlg_<screen>_<tag>). Cards with gradients, SVG symbols in an embedded image pool, live values, bars and tank levels, colour states, buttons, switches, setpoints and alarm rows. A generated program PRG_HMI_<screen> per page scales values and turns the impellers; it runs in VISU_TASK. Returns a picture of the first page. Trends are shown as values. Rebuilds what exists.",
+        "Build the HMI as native CODESYS visualizations in the project, one per page (Visu_<screen>), so it ships with the application: the same design as the browser HMI (top bar, navigation rail linking the pages, cards with icons, the machine state and its Start/Stop bar, mode switch, scales with set-point markers); the first page is the start page of TargetVisu and WebVisu at the panel size, pumps and fans turn while running (8-frame animation), and a symbol with a faceplate opens it as a dialog (Dlg_<screen>_<tag>). SVG icons and symbols in an embedded image pool, live values, bars and tank levels, colour states, buttons, switches, setpoints and alarm rows. A generated program PRG_HMI_<screen> per page scales values and turns the impellers; it runs in VISU_TASK. Returns a picture of the first page. Trends are shown as values. Rebuilds what exists.",
       inputSchema: z.object({ screen: z.string().optional().describe("One page only (default: every page)") }),
     },
     async ({ screen: name }) => {
@@ -222,7 +225,7 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
       if (!targets.length) return text(name ? `No screen named '${name}'.` : "This project has no HMI screens yet: create one with hmi_save_screen.", true);
       const b = ctx.bridge;
       if (!(await b.waitReady(ctx.startWaitMs))) return text("CODESYS is still starting; try again shortly.", true);
-      const pages = all.map((x) => ({ name: x.name, title: x.title }));
+      const pages = all.map((x) => ({ name: x.name, title: x.title, ...(x.icon ? { icon: x.icon } : {}) }));
       // Visualizations don't compile without FloatingPointUtils: say so before minutes of building.
       reportProgress("checking the library repository");
       const fpu = await b.call<{ matches: unknown[]; repositories: string[] }>("library.find", { name: "FloatingPointUtils" }).catch(() => undefined);
@@ -262,7 +265,7 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
         // The first page is built last, so a CODESYS window ends up showing the start page.
         for (const [k, s] of [...targets].reverse().entries()) {
           reportProgress(`page ${k + 1}/${targets.length}: Visu_${s.name}`);
-          const plan = nativePlan(s, pages, hmi.symbols(), alarmIndex, Object.keys(translations), alarms.map((a) => a.text));
+          const plan = nativePlan(s, pages, hmi.symbols(), alarmIndex, Object.keys(translations), alarms.map((a) => a.text), Object.fromEntries(alarms.map((a) => [a.active, a.severity])));
           const images = plan.images.map((img) => {
             const path = join(dir, `${img.id}.svg`);
             writeFileSync(path, img.svg, "utf8");
@@ -275,14 +278,14 @@ Draw in the symbol's box (viewBox, default 100x100) with g, path, rect, circle, 
             await b.call("object.create", { kind: "program", name: plan.helper.name, declaration: plan.helper.declaration, implementation: plan.helper.implementation });
           }
           for (const d of plan.dialogs) {
-            const r = await b.call<{ warnings: string[] }>("visu.build", { name: d.name, replace: true, background: d.background, elements: d.elements, size: d.size, dialog: true, save: false }, { timeoutMs: 300_000 });
+            const r = await b.call<{ warnings: string[] }>("visu.build", { name: d.name, replace: true, background: d.background, elements: d.elements, size: d.size, dialog: true, save: false }, { timeoutMs: 900_000 });
             warnings.push(...r.warnings.map((w) => `${d.name}: ${w}`));
             builtNames.push(d.name);
           }
           const built = await b.call<{ name: string; elements: number; warnings: string[] }>(
             "visu.build",
             { name: plan.visu, replace: true, background: plan.background, elements: plan.elements, image_pool: plan.imagePool, images, size: plan.size, save: ctx.autosave },
-            { timeoutMs: 300_000 },
+            { timeoutMs: 900_000 },
           );
           warnings.push(...built.warnings.map((w) => `${plan.visu}: ${w}`));
           builtNames.push(`${built.name} (${built.elements} elements)`);
