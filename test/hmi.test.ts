@@ -11,7 +11,8 @@ import { accessRights, GAUGE_STEPS, nativePlan, onColor, paletteFor, type Native
 import { connectionWarnings, labelSpots, meaningWarnings, overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
 import { TEMPLATES } from "../src/hmi/templates.js";
 import { BUILTIN_SYMBOLS } from "../src/hmi/symbols.js";
-import { canvasOf, tileBox } from "../src/hmi/render.js";
+import { canvasOf, HMI_CSS, tileBox } from "../src/hmi/render.js";
+import { THEMES } from "../src/hmi/theme.js";
 import type { ProcessItem } from "../src/hmi/spec.js";
 import { findBrowser } from "../src/hmi/service.js";
 import { layoutProblems, plcValue, screenSchema, screenVariables } from "../src/hmi/spec.js";
@@ -532,6 +533,20 @@ describe("themes, brand colour and pipe flow", () => {
     const yellow = renderScreen(screenSchema.parse({ ...SCREEN, accent: "#ffd400" }));
     expect(yellow.html).toMatch(/--accent:#ffd400;--accent-soft:#[0-9a-f]{6};--on-accent:#111820/);
     expect(() => screenSchema.parse({ ...SCREEN, accent: "red" })).toThrow();
+  });
+
+  it("a tank's level number reads on the liquid without a halo, clear of the scale marks", () => {
+    // WCAG 2 contrast: the number is large text (3:1); the contrast theme keeps 4.5:1.
+    const lum = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)).reduce((s, c, i) => s + c * [0.2126, 0.7152, 0.0722][i], 0);
+    const ratio = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+    for (const [name, t] of Object.entries(THEMES)) {
+      expect(ratio(t.text, t.liquid), name).toBeGreaterThanOrEqual(name === "contrast" ? 4.5 : 3);
+      expect(ratio(t.liquid, t.surface), name).toBeGreaterThanOrEqual(1.5);
+    }
+    const html = renderScreen(screenSchema.parse({ ...SCREEN, widgets: [{ type: "process", at: [1, 1, 12, 8], items: [{ type: "tank", x: 10, y: 10, w: 10, h: 60, level: "PLC_PRG.rLevel", label: "T-1" }] }] })).html;
+    expect(HMI_CSS.match(/\.tank-num\{[^}]*\}/)![0]).not.toContain("stroke");
+    const ticks = html.match(/<g class="tank-ticks">(.*?)<\/g>/)![1];
+    expect(ticks.match(/<line/g)).toHaveLength(2);
   });
 
   it("the native palette follows the theme and the brand colour", () => {

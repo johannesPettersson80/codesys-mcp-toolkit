@@ -111,7 +111,8 @@ export const THEMES: Record<ThemeName, Theme> = {
     ctl: "#ffffff",
     tones: { accent: "#3ab0ff", ok: "#22e06a", warn: "#ffd400", alarm: "#ff4136", neutral: "#a6a6a6" },
     pipe: "#a6a6a6",
-    liquid: "#3ab0ff",
+    // Deep enough for white text (the level number) and still clear on black.
+    liquid: "#1f78d1",
     equip: "#000000",
     equipOn: "#000000",
     equipLine: "#ffffff",

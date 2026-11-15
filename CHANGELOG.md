@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A tank's level number no longer has a halo, which showed as a white rim
+  cutting into the liquid, and no scale mark runs through it (the marks are
+  at a quarter and three quarters). The contrast theme's liquid is a deeper
+  blue (`#1f78d1`) so its white number reads without the halo (4.5:1).
+
 ## [2.11.0] - 2026-11-15
 
 A redesign of the HMI: a design system, symbols from the standards, a station

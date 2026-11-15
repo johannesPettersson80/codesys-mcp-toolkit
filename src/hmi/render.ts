@@ -562,7 +562,8 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
     case "tank": {
       const x = r1(p.x), y = Y(p.y), w = r1(p.w), h = Y(p.h);
       const clip = id("tk");
-      const ticks = [0.25, 0.5, 0.75].map((f) => `<line x1="${r1(x + w - 2.2)}" x2="${r1(x + w - 0.8)}" y1="${r1(y + h * (1 - f))}" y2="${r1(y + h * (1 - f))}"/>`).join("");
+      // Scale marks at a quarter and three quarters: the level number marks the middle, so no tick runs into it.
+      const ticks = [0.25, 0.75].map((f) => `<line x1="${r1(x + w - 2.2)}" x2="${r1(x + w - 0.8)}" y1="${r1(y + h * (1 - f))}" y2="${r1(y + h * (1 - f))}"/>`).join("");
       // ISO 10628-2 1.5: a vessel with dished ends; the level as a flat fill and its value in the text colour.
       const dish = r1(Math.min(w * 0.18, h * 0.12));
       const shell = `M${x} ${r1(y + dish)}Q${x} ${y} ${r1(x + w / 2)} ${y}Q${r1(x + w)} ${y} ${r1(x + w)} ${r1(y + dish)}V${r1(y + h - dish)}Q${r1(x + w)} ${r1(y + h)} ${r1(x + w / 2)} ${r1(y + h)}Q${x} ${r1(y + h)} ${x} ${r1(y + h - dish)}Z`;
@@ -821,7 +822,7 @@ export const HMI_CSS = String.raw`
 .tank{--p:0}.tank-shell{fill:var(--surface)}.tank-out{fill:none;stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke}.tank-liq{transform:scaleY(var(--p));transition:transform .8s cubic-bezier(.2,.8,.2,1)}
 .tank-liq rect{fill:var(--liquid)}.tank[data-tone=warn] .tank-liq rect{fill:var(--warn)}.tank[data-tone=alarm] .tank-liq rect{fill:var(--alarm)}
 .tank-ticks line{stroke:var(--equip-line);stroke-width:1px;vector-effect:non-scaling-stroke}
-.tank-num{font-size:3.2px;font-weight:600;fill:var(--fg);text-anchor:middle;paint-order:stroke;stroke:var(--surface);stroke-width:.8px;font-variant-numeric:tabular-nums}
+.tank-num{font-size:3.2px;font-weight:600;fill:var(--fg);text-anchor:middle;font-variant-numeric:tabular-nums}
 .sym{--state:var(--equip);--body:var(--surface);--body2:var(--equip);--line:var(--equip-line);transition:filter .3s}
 .sym.on{--state:var(--equip-on);--line:var(--equip-line-on)}.sym.nostat{--state:var(--surface);--line:var(--equip-line)}
 .sym .spin{transform-box:fill-box;transform-origin:center}.sym.on .spin{animation:spin 1.2s linear infinite}
