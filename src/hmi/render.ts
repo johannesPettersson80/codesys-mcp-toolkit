@@ -529,7 +529,9 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
     if (pl) {
       // The name line: the run sign, the name, the mode hand.
       const parts = nameParts(p);
-      return `${parts.run ? runSign(pl.x0, pl.y, parts.run, bind) : ""}${t ? `<text class="p-label left" x="${r1(pl.textX)}" y="${r1(pl.y + 0.6)}">${esc(t)}</text>` : ""}${parts.manual ? handSign(pl.textEnd + 0.5, pl.y, parts.manual, bind) : ""}${parts.value ? `<text class="p-val" x="${r1(pl.x0)}" y="${r1(pl.valueY + 0.62)}" ${bind({ kind: "text", v: parts.value, decimals: "decimals" in p ? (p.decimals ?? 1) : 1, unit: "unit" in p ? p.unit : undefined })}>–</text>` : ""}`;
+      // A name inside a vessel sits on the liquid: the text colour reads there (muted grey doesn't).
+      const inside = p.type === "tank" && pl.y > p.y * sy && pl.y < (p.y + p.h) * sy;
+      return `${parts.run ? runSign(pl.x0, pl.y, parts.run, bind) : ""}${t ? `<text class="p-label left${inside ? " in-vessel" : ""}" x="${r1(pl.textX)}" y="${r1(pl.y + 0.6)}">${esc(t)}</text>` : ""}${parts.manual ? handSign(pl.textEnd + 0.5, pl.y, parts.manual, bind) : ""}${parts.value ? `<text class="p-val" x="${r1(pl.x0)}" y="${r1(pl.valueY + 0.62)}" ${bind({ kind: "text", v: parts.value, decimals: "decimals" in p ? (p.decimals ?? 1) : 1, unit: "unit" in p ? p.unit : undefined })}>–</text>` : ""}`;
     }
     if (!t) return "";
     if (spot?.side === "below-left") return text(spot.x - 1.4, y, t, "end");
@@ -807,7 +809,7 @@ export const HMI_CSS = String.raw`
 .theme-contrast .tile,.theme-contrast .h-bar,.theme-contrast .h-rail,.theme-contrast .h-dock{border-width:2px}
 .clickable{cursor:pointer}.clickable:hover .pump-ring,.clickable:hover .valve-body{stroke:var(--accent)}
 .proc{width:100%;height:100%;overflow:visible}
-.p-label{font-size:1.75px;fill:var(--muted);text-anchor:middle;font-weight:600;letter-spacing:.05em}.p-label.left{text-anchor:start}.p-label.right{text-anchor:end}.p-text{font-size:2px;fill:var(--fg);font-weight:600}
+.p-label{font-size:1.75px;fill:var(--muted);text-anchor:middle;font-weight:600;letter-spacing:.05em}.p-label.left{text-anchor:start}.p-label.in-vessel{fill:var(--fg)}.p-label.right{text-anchor:end}.p-text{font-size:2px;fill:var(--fg);font-weight:600}
 .junction{fill:var(--pipe)}
 .pump-body{fill:var(--equip);stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke;transition:fill .3s}.pump.on .pump-body{fill:var(--equip-on)}
 .pump-tri{fill:none;stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke;stroke-linejoin:round}.pump.on .pump-tri{stroke:var(--equip-line-on)}

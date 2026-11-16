@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A tank's name inside the vessel is drawn in the text colour, not the muted
+  grey, so it reads on the liquid (8.5:1 in the light theme, 4.3:1 in dark;
+  the grey was 2.0:1 and 1.6:1). Other names stay muted. The same in the
+  browser and in CODESYS.
+- The heat treatment screenshots in the README: pump P-202 no longer overlaps
+  separator C-202.
+
 ## [2.11.1] - 2026-11-15
 
 Tanks and switches on process diagrams, after a look at the 2.11.0 screens.

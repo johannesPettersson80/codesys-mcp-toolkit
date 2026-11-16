@@ -578,6 +578,19 @@ describe("themes, brand colour and pipe flow", () => {
     expect(ticks.match(/<line/g)).toHaveLength(2);
   });
 
+  it("a tank's name inside the vessel has the text colour; other names stay quiet", () => {
+    const items = [{ type: "tank", x: 10, y: 10, w: 10, h: 60, level: "PLC_PRG.rLevel", label: "T-1" }, { type: "pump", x: 60, y: 50, running: "PLC_PRG.xRun", label: "P-1" }];
+    const screen = screenSchema.parse({ ...SCREEN, widgets: [{ type: "process", at: [1, 1, 12, 8], items }] });
+    const html = renderScreen(screen).html;
+    expect(html).toMatch(/class="p-label left in-vessel"[^>]*>T-1</);
+    expect(html).toMatch(/class="p-label left"[^>]*>P-1</);
+    expect(HMI_CSS).toContain(".p-label.in-vessel{fill:var(--fg)}");
+    const plan = nativePlan(screen, [{ name: "Overview", title: "A" }]);
+    const pal = paletteFor(screen);
+    expect(plan.elements.find((e) => e.text === "T-1")!.color).toBe(pal.text);
+    expect(plan.elements.find((e) => e.text === "P-1")!.color).toBe(pal.muted);
+  });
+
   it("the native palette follows the theme and the brand colour", () => {
     expect(paletteFor({ theme: "contrast" }).bg).toBe(0xff000000);
     expect(paletteFor({ theme: "contrast" }).border).toBe(0xffffffff);

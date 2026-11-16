@@ -973,7 +973,9 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         const parts = nameParts(it);
         const ly = oy + pl.y * sx;
         if (parts.run) runSign(ox + (pl.x0 + SIGN.run / 2) * sx, ly, SIGN.run * 1.15 * sx, parts.run);
-        if (t) els.push(text(ox + pl.textX * sx, ly - LH / 2, LW, LH, t, LF, p.muted, "LEFT"));
+        // A name inside a vessel sits on the liquid: the text colour reads there (muted grey doesn't).
+        const inside = it.type === "tank" && pl.y > it.y * aspect && pl.y < (it.y + it.h) * aspect;
+        if (t) els.push(text(ox + pl.textX * sx, ly - LH / 2, LW, LH, t, LF, inside ? p.text : p.muted, "LEFT"));
         if (parts.manual) els.push(icon("manual", ox + (pl.textEnd + 0.5) * sx, ly - (SIGN.hand / 2) * sx, SIGN.hand * sx, p.tones.accent, `NOT (${parts.manual})`));
         // The equipment's own value under the name, as plain text.
         if (parts.value) {
