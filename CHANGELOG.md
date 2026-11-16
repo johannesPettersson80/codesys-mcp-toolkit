@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.2] - 2026-11-16
+
+Readability fixes on process diagrams and the symbol sheet.
+
 ### Fixed
 - A tank's name inside the vessel is drawn in the text colour, not the muted
   grey, so it reads on the liquid (8.5:1 in the light theme, 4.3:1 in dark;
