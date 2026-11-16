@@ -468,7 +468,7 @@ export function isTag(s: string | undefined): boolean {
 }
 
 /** An ISA-5.1 bubble's text: function letters over the loop number. */
-function bubbleText(tag: string, cx: number, cy: number, r: number): string {
+export function bubbleText(tag: string, cx: number, cy: number, r: number): string {
   // ISA-5.1: the function letters on top, the loop number below, sized to the bubble.
   const [, letters = tag, num = ""] = /^([A-Z]+)-?(.*)$/.exec(tag) ?? [];
   const f = r / 3.3;

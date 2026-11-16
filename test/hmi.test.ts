@@ -14,7 +14,7 @@ import { BUILTIN_SYMBOLS } from "../src/hmi/symbols.js";
 import { canvasOf, HMI_CSS, tileBox } from "../src/hmi/render.js";
 import { THEMES } from "../src/hmi/theme.js";
 import type { ProcessItem } from "../src/hmi/spec.js";
-import { findBrowser } from "../src/hmi/service.js";
+import { findBrowser, symbolSheet } from "../src/hmi/service.js";
 import { layoutProblems, plcValue, screenSchema, screenVariables } from "../src/hmi/spec.js";
 import { createServer } from "../src/server.js";
 import type { AppContext } from "../src/tools.js";
@@ -281,6 +281,13 @@ describe("texts on a process diagram", () => {
     expect(sw[0]).toMatch(/^pressure_switch PS-201 has on, which a bubble symbol doesn't show: draw it as \{type: 'instrument', tag: 'PS-201'/);
     // A real instrument (TT-201) and a driven motor are fine; connectionWarnings carries these notes too.
     expect(connectionWarnings(list, 0.5).some((m) => m.includes("TCV-201 opening"))).toBe(true);
+  });
+
+  it("the symbol sheet prints an instrument bubble's letters, as a screen does", () => {
+    const { html } = symbolSheet([["level_switch", BUILTIN_SYMBOLS.level_switch], ["pressure_switch", BUILTIN_SYMBOLS.pressure_switch], ["filter", BUILTIN_SYMBOLS.filter]]);
+    expect(html).toMatch(/class="inst-fn"[^>]*>LS</);
+    expect(html).toMatch(/class="inst-fn"[^>]*>PS</);
+    expect(html.match(/class="inst-fn"/g)).toHaveLength(2);
   });
 
   it("shows a tripped switch by the condition badge at its bubble, never by colouring it, in the browser and CODESYS", () => {

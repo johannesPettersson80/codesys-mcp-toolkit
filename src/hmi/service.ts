@@ -15,9 +15,9 @@ import { currentCodesysSim } from "../codesys/simulation.js";
 /** The alarm group hmi_export_codesys puts the HMI's alarms in. */
 export const HMI_ALARM_GROUP = "AG_HMI";
 import type { AppContext } from "../tools.js";
-import { canvasOf, HMI_CSS, symbolMarkup, type PageContext } from "./render.js";
+import { bubbleText, canvasOf, HMI_CSS, symbolMarkup, type PageContext } from "./render.js";
 import { allAlarms, screenSchema, screenVariables, type Screen } from "./spec.js";
-import { BUILTIN_SYMBOLS, svgProblems, symbolPorts, symbolSchema, type SymbolDef, type SymbolLib } from "./symbols.js";
+import { BUILTIN_SYMBOLS, INSTRUMENT_SYMBOLS, svgProblems, symbolPorts, symbolSchema, type SymbolDef, type SymbolLib } from "./symbols.js";
 import { themeCss, themeFor } from "./theme.js";
 
 export type Values = Record<string, string | undefined>;
@@ -269,7 +269,9 @@ export function symbolSheet(entries: [string, SymbolDef][], theme: "dark" | "lig
             .map(([pn, p]) => `<circle cx="${p.at[0]}" cy="${p.at[1]}" r="1.6" fill="#f472b6"/><text x="${p.at[0]}" y="${p.at[1] - 2.6}" class="pn">${pn}</text>`)
             .join("")
         : "";
-      return `<svg width="190" height="114" viewBox="-40 -24 80 48"><g class="${cls}">${symbolMarkup(name, d, fit)}</g>${marks}</svg>`;
+      // An instrument bubble prints its letters, as on a screen (LS, PS).
+      const inst = INSTRUMENT_SYMBOLS[name];
+      return `<svg width="190" height="114" viewBox="-40 -24 80 48"><g class="${cls}">${symbolMarkup(name, d, fit)}${inst ? bubbleText(inst, 0, 0, (fit / 2) * 0.8) : ""}</g>${marks}</svg>`;
     };
     const valve = /valve/i.test(name);
     return `<div class="row" style="top:${44 + k * rowH}px"><div class="nm">${name.replace(/[<&]/g, "")}<div class="ds">${(d.description ?? "").replace(/[<&]/g, "")}</div><div class="ds">ports: ${Object.keys(d.ports).join(", ") || "none"}</div></div>${cell("sym", true)}${valve ? `${cell("sym vlv on", false)}${cell("sym vlv", false)}` : ""}</div>`;

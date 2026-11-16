@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   browser and in CODESYS.
 - The heat treatment screenshots in the README: pump P-202 no longer overlaps
   separator C-202.
+- The symbol sheet (`hmi_symbols`) prints the letters in an instrument
+  bubble, "LS" and "PS", as a screen does; the bubbles were blank. The
+  README's sheet shows only the built-in symbols.
 
 ## [2.11.1] - 2026-11-15
 
