@@ -179,6 +179,25 @@ describe("live CODESYS: its own simulation", () => {
     expect(r).toMatch(/\[6\/9\] codesys_sim_read:\nPLC_PRG\.xTimerDone = TRUE/);
   }, LONG);
 
+  it("runs again after single cycles, and run while running changes nothing", async () => {
+    await ok("codesys_sim_cycle", { count: 3 });
+    expect(await ok("codesys_sim_control", { action: "run" })).toMatch(/application run/);
+    expect(await ok("codesys_sim_control", { action: "run" })).toMatch(/application run/);
+    const before = await count();
+    await sleep(300);
+    expect(await count()).toBeGreaterThan(before);
+  }, LONG);
+
+  it("a test mixes exact cycles and real-time waits", async () => {
+    const r = await ok("codesys_sim_test", {
+      cases: [
+        { name: "cycles, then a wait", steps: [{ write: { [`${P}xInput`]: "TRUE" }, cycles: 2 }, { waitMs: 2_300, expect: { [`${P}xTimerDone`]: "TRUE" } }] },
+        { name: "a wait while running, then cycles", steps: [{ waitMs: 200 }, { write: { [`${P}xInput`]: "FALSE" }, cycles: 2, expect: { [`${P}xTimerDone`]: "FALSE" } }] },
+      ],
+    });
+    expect(r).toMatch(/2 passed, 0 failed/);
+  }, LONG);
+
   it("reports a bad name and keeps the good ones", async () => {
     const r = await ok("codesys_sim_read", { names: [`${P}nCount`, `${P}nope`] });
     log.push(`bad name: ${r}`);

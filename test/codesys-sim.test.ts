@@ -68,8 +68,10 @@ describe("CODESYS's own simulation", () => {
     expect((await call("codesys_sim_cycle", { count: 3 })).isError).toBe(false);
     expect(await read()).toBe(`${COUNT} = INT#3`);
 
+    // From single cycles back to run (CODESYS refuses start() there), and run while running is fine.
     expect((await call("codesys_sim_control", { action: "run" })).text).toMatch(/application run\./);
-    expect((await call("codesys_sim_cycle")).text).toMatch(/application stop\./); // stops first, then one cycle
+    expect((await call("codesys_sim_control", { action: "run" })).text).toMatch(/application run\./);
+    expect((await call("codesys_sim_cycle")).text).toMatch(/application single_cycle\./); // stops first, then one cycle
     expect(await read()).toBe(`${COUNT} = INT#4`);
 
     await call("codesys_sim_write", { values: { "GVL_IO.rLevel": "REAL#1.5" } });

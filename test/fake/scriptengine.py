@@ -115,10 +115,14 @@ class _OnlineApp(object):
         self.is_logged_in = False
 
     def start(self):
+        # As CODESYS: start only from stop (not while running, not after single cycles).
+        if self.application_state != "stop":
+            raise RuntimeError("Cannot start if application state is %s" % self.application_state)
         self.application_state = "run"
 
     def stop(self):
-        self.application_state = "stop"
+        # CODESYS's online.stop() now and then hangs for a minute; the watcher uses the Stop command.
+        raise RuntimeError("FAKE: use the Stop command (stopactiveapp), online.stop() can hang")
 
     def reset(self, option, force):
         self.values["PLC_PRG.nCount"] = "INT#0"
@@ -150,7 +154,11 @@ class _OnlineApp(object):
     def unforce_all_values(self):
         self.forced = {}
 
+    def halt(self):
+        self.application_state = "stop"
+
     def cycle(self):
+        self.application_state = "single_cycle"
         if "PLC_PRG.nCount" not in self.forced:
             self.values["PLC_PRG.nCount"] = "INT#%d" % (int(self.values["PLC_PRG.nCount"].split("#")[1]) + 1)
 
@@ -179,6 +187,8 @@ class _Commands(object):
     def __getitem__(self, tokens):
         if tuple(tokens) == ("online", "singlecycleactiveapp"):
             return _Command(lambda: online.active.cycle())
+        if tuple(tokens) == ("online", "stopactiveapp"):
+            return _Command(lambda: online.active.halt())
         raise KeyError(tokens)
 
 

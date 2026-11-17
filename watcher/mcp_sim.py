@@ -134,13 +134,34 @@ def op_sim_status(args):
     return _status()
 
 
+def _halt(online):
+    """Stop the application. online.stop() now and then hangs for a minute (the script
+    engine waits on CODESYS); the Stop command, as single cycles use, returns at once."""
+    se.system.commands["online", "stopactiveapp"].execute()
+    for _ in range(30):
+        if to_text(online.application_state).lower() == "stop":
+            return
+        _pause(100)
+
+
+def _run(online):
+    """Let the application run. CODESYS refuses start() when it already runs, and after
+    single cycles until it is stopped."""
+    state = to_text(online.application_state).lower()
+    if state == "run":
+        return
+    if state != "stop":
+        _halt(online)
+    online.start()
+
+
 def op_sim_control(args):
     online = _online()
     action = args["action"]
     if action == "run":
-        online.start()
+        _run(online)
     elif action == "stop":
-        online.stop()
+        _halt(online)
     elif action in ("reset_warm", "reset_cold"):
         online.reset(se.ResetOption.Warm if action == "reset_warm" else se.ResetOption.Cold, True)
         SIM["forced"].clear()  # a reset releases forced values
@@ -155,7 +176,7 @@ def op_sim_cycle(args):
     if count < 1 or count > MAX_CYCLES:
         raise OpError("bad_request", "count must be between 1 and %d." % MAX_CYCLES)
     if to_text(online.application_state).lower() == "run":
-        online.stop()
+        _halt(online)
     command = se.system.commands["online", "singlecycleactiveapp"]
     for _ in range(count):
         command.execute()

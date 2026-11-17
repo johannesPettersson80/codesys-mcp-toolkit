@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `codesys_sim_test` with more than one `waitMs` step, or a `waitMs` step
+  after `cycles`, failed with "Cannot start if application state is run" or
+  "... single_cycle". `codesys_sim_control` `run` now leaves a running
+  application alone and stops single cycling first. Stopping uses CODESYS's
+  Stop command, as single cycles do: `online.stop()` now and then hung for a
+  minute and ended the call with "The operation has timed out".
+
 ## [2.11.2] - 2026-11-16
 
 Readability fixes on process diagrams and the symbol sheet.
