@@ -28,6 +28,7 @@ panel to one tool.
 | --- | --- |
 | `help` | Lists the actions and their arguments, or one action's. |
 | `batch` | Runs up to 50 actions in one call, in order. Much faster than separate calls: nearly all of a session's time is the round trip between calls. Every step is checked first; it stops at the first failure unless `continueOnError`. |
+| `result` | Waits up to 50 s for a call that replied "still running" and returns its result. |
 | `wait` | Pauses up to 60 s, so a batch can let a simulation timer elapse. |
 | `codesys_status` | Connection state, CODESYS version, last project. Never waits on CODESYS. |
 | `open_project` | Open a `.project`, or a `.projectarchive` (extracted next to it, never over an existing project). Opened without version upgrades. Reports the compiler version and defines. Refuses to drop unsaved changes unless `discardChanges`. |
@@ -85,6 +86,8 @@ panel to one tool.
 | `compare_sources` | The open project compared with an `export_sources` folder or another `.project` file (opened without updates for the comparison, then the open project is opened again): objects only in one of them, and a line diff per changed object (`max_lines` in all). `path` limits it to one object or folder. |
 
 Long actions send MCP progress notifications (`notifications/progress`) when the client asks for them with a progress token: the steps of an HMI export or a batch, and a heartbeat every 10 s.
+
+Some clients (Claude Desktop) end a call after 60 s whether or not progress arrives. So a call still running after 50 s replies that it is still running and carries on in CODESYS; `{"action": "result"}` waits for it and returns its result. Until then other calls aren't run: each waits for the running call up to 50 s, and returns its result first, or replies that CODESYS is still busy.
 
 The simulation actions are listed under [CODESYS simulation](#codesys-simulation).
 

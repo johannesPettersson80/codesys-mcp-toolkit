@@ -60,7 +60,37 @@ export function usage(name: string, a: ActionConfig): string {
   return [`${name}: ${a.description}`, ...params].join("\n");
 }
 
-const HOW_TO_CALL = `Everything this toolkit does in CODESYS V3.5. Call it as {"action": "<name>", "args": {...}}, with the action's arguments in args. Leave args out when the action takes none. Example: {"action": "read_objects", "args": {"paths": ["PLC_PRG"]}}. Use batch to send several actions in one call: it is much faster than separate calls. Some actions change or delete project code. {"action": "help"} returns this list, and {"action": "help", "args": {"action": "write_object"}} one action, for when a client shortens this text.`;
+const HOW_TO_CALL = `Everything this toolkit does in CODESYS V3.5. Call it as {"action": "<name>", "args": {...}}, with the action's arguments in args. Leave args out when the action takes none. Example: {"action": "read_objects", "args": {"paths": ["PLC_PRG"]}}. Use batch to send several actions in one call: it is much faster than separate calls. Some actions change or delete project code. {"action": "help"} returns this list, and {"action": "help", "args": {"action": "write_object"}} one action, for when a client shortens this text. A call still running after about 50 s (an HMI export, a long batch) replies that it is still running, before the client's time limit; {"action": "result"} then waits for it and returns its result.`;
+
+/** Many clients (Claude Desktop) give up on a call after 60 s, progress or not: reply before that. */
+export const REPLY_AFTER_MS = 50_000;
+
+interface Running {
+  action: string;
+  started: number;
+  promise: Promise<ActionResult>;
+  /** Stops the progress heartbeat once the request has been answered. */
+  answered: { done: boolean };
+}
+
+const secs = (r: Running) => Math.round((Date.now() - r.started) / 1000);
+
+/** The result, or undefined if it isn't there within ms. */
+async function within(r: Running, ms: number): Promise<ActionResult | undefined> {
+  if (ms <= 0) return r.promise;
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<undefined>((res) => (timer = setTimeout(res, ms, undefined)));
+  try {
+    return await Promise.race([r.promise, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const stillRunning = (r: Running): ActionResult =>
+  reply(`${r.action} is still running in CODESYS (${secs(r)} s so far) and carries on. Call {"action": "result"} to wait for its result; until then other calls are not run.`);
+
+const withHeader = (header: string, r: ActionResult): ActionResult => ({ ...r, content: [{ type: "text", text: header }, ...r.content] });
 
 const MAX_BATCH = 50;
 
@@ -107,16 +137,30 @@ function batchAction(actions: Map<string, Action>): Action {
   };
 }
 
-export function registerActionTool(server: McpServer, actions: Map<string, Action>): void {
+export function registerActionTool(server: McpServer, actions: Map<string, Action>, opts: { replyAfterMs?: number } = {}): void {
   const all = new Map<string, Action>([["batch", batchAction(actions)], ...actions]);
   const names = [...all.keys()];
-  const catalog = names.map((n) => usage(n, all.get(n)!)).join("\n\n");
+  const replyAfterMs = opts.replyAfterMs ?? REPLY_AFTER_MS;
+  /** The call that replied "still running" and hasn't handed over its result yet. */
+  let running: Running | undefined;
+  /** Waits for the running call: its result with a header, or undefined if it is still running. */
+  const collect = async (): Promise<ActionResult | undefined> => {
+    const r = running!;
+    const out = await within(r, replyAfterMs);
+    if (!out) return undefined;
+    running = undefined;
+    return withHeader(`${r.action} finished after ${secs(r)} s${out.isError ? " and FAILED" : ""}:`, out);
+  };
+  const catalog = [
+    ...names.map((n) => usage(n, all.get(n)!)),
+    'result: Wait for a call that replied "still running" (up to about 50 s) and return its result.',
+  ].join("\n\n");
   server.registerTool(
     TOOL_NAME,
     {
       description: `${HOW_TO_CALL}\n\nActions:\n\n${catalog}`,
       inputSchema: z.object({
-        action: z.enum(["help", ...names]).describe("The action to run"),
+        action: z.enum(["help", "result", ...names]).describe("The action to run"),
         args: z.record(z.string(), z.unknown()).optional().describe("The action's arguments, as listed for it in this tool's description"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
@@ -128,12 +172,31 @@ export function registerActionTool(server: McpServer, actions: Map<string, Actio
         const known = all.get(wanted);
         return known ? reply(usage(wanted, known)) : reply(`Unknown action '${wanted}'. Actions: ${names.join(", ")}.`, true);
       }
+      if (action === "result") {
+        if (!running) return reply("Nothing is running: every call has returned its result.");
+        return (await collect()) ?? stillRunning(running);
+      }
       const a = all.get(action)!;
       const parsed = checkArgs(a, args);
       if (!parsed.success) return reply(`Invalid arguments for ${action}:\n${z.prettifyError(parsed.error)}\n\n${usage(action, a)}`, true);
+      // CODESYS does one thing at a time: a new call waits for the running one, and brings its result along.
+      let earlier: ActionResult | undefined;
+      if (running) {
+        earlier = await collect();
+        if (!earlier) return reply(`Not run: ${running.action} is still running in CODESYS (${secs(running)} s so far). Call {"action": "result"} to wait for it, then send this call again.`, true);
+      }
+      const answered = { done: false };
       const token = ctx?.mcpReq?._meta?.progressToken as string | number | undefined;
-      const req: ProgressRequest | undefined = token === undefined ? undefined : { progressToken: token, notify: (n) => ctx.mcpReq.notify(n) };
-      return withProgress(req, action, () => a.run(parsed.data));
+      const req: ProgressRequest | undefined = token === undefined ? undefined : { progressToken: token, notify: (n) => (answered.done ? Promise.resolve() : ctx.mcpReq.notify(n)) };
+      const call: Running = { action, started: Date.now(), promise: withProgress(req, action, () => a.run(parsed.data)), answered };
+      const out = await within(call, replyAfterMs);
+      answered.done = true;
+      if (!out) {
+        running = call;
+        return earlier ? withHeader(earlier.content.map((c) => (c.type === "text" ? c.text : "")).join("\n"), stillRunning(call)) : stillRunning(call);
+      }
+      if (!earlier) return out;
+      return { content: [...earlier.content, { type: "text", text: `\n${action}:` }, ...out.content], ...(out.isError ? { isError: true } : {}) };
     },
   );
 }

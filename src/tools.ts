@@ -44,6 +44,8 @@ export interface AppContext {
   codesys?: { exe: string; profile: string; label: string };
   /** How long a tool call waits for CODESYS to finish starting. */
   startWaitMs: number;
+  /** A call still running after this long replies "still running" and keeps going (default 50 s, 0 = never). */
+  replyAfterMs?: number;
   /** Last project opened through these tools (status never queries CODESYS). */
   project?: ProjectInfo;
   /** CODESYS's own simulation, while it runs. */
@@ -1215,7 +1217,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   registerRecipeAction(reg, ctx, (fn) => run(ctx, fn));
   if (ctx.hmi) registerHmiActions(reg, ctx, ctx.hmi, (fn) => run(ctx, fn));
 
-  registerActionTool(server, actions);
+  registerActionTool(server, actions, { replyAfterMs: ctx.replyAfterMs });
 }
 
 /**

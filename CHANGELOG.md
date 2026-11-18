@@ -31,6 +31,12 @@ see where the toolkit falls short.
   and Set overlap.
 
 ### Fixed
+- A call still running after 50 s replies that it is still running, and
+  `{"action": "result"}` waits for it and returns its result. Claude Desktop
+  gives up on a call after 60 s, progress or not, so an HMI export, or a batch
+  with long waits, ended in "Request timed out" and its result was lost while
+  CODESYS carried on. While a call runs, others are not run: they wait for it
+  up to 50 s, bring its result along, or say it is still busy.
 - In CODESYS, a top-bar `info` value with neither `decimals` nor `unit` is
   shown as it is, as in the browser. Every value went through a REAL, so a
   STRING (a batch step's name) read 0.

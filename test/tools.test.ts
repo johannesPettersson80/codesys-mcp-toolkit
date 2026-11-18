@@ -103,6 +103,7 @@ describe("MCP tools over the real watcher", () => {
         "read_objects",
         "remove_library",
         "rename_object",
+        "result",
         "rename_symbol",
         "revert_object",
         "save_project",
