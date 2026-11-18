@@ -604,6 +604,14 @@ describe("themes, brand colour and pipe flow", () => {
     expect(plan.helper.implementation).toContain("IF NOT (PLC_PRG.xAuto) THEN iMachine := 1;");
   });
 
+  it("a top-bar value without decimals or unit shows as text natively (a STRING step name)", () => {
+    const screen = screenSchema.parse({ ...SCREEN, info: [{ label: "Step", value: "GVL_Batch.sStep" }, { label: "Weight", value: "GVL_Batch.rWeight", unit: "kg", decimals: 1 }] });
+    const plan = nativePlan(screen, [{ name: "Overview", title: "A" }]);
+    expect(plan.helper.implementation).toMatch(/sV\d+ := TO_STRING\(GVL_Batch\.sStep\);/);
+    expect(plan.helper.implementation).toMatch(/rV\d+ := ANY_TO_REAL\(GVL_Batch\.rWeight\);/);
+    expect(plan.elements.some((e) => e.text === "%s")).toBe(true);
+  });
+
   it("notes value cards too small for their number", () => {
     const small = screenSchema.parse({ ...SCREEN, widgets: [{ type: "value", title: "A", at: [1, 1, 2, 1], value: "PLC_PRG.rA", set: "PLC_PRG.rSetA", unit: "kg" }] });
     const notes = cardWarnings(small);

@@ -11,8 +11,10 @@ From a batch mixing unit Claude built from one prompt, start to finish, to
 see where the toolkit falls short.
 
 ### Changed
-- `hmi_export_codesys` is about ten times faster: a 256-element page took
-  377 s, now 38 s. Every element went into the visualization in its own
+- `hmi_export_codesys` is about four times faster: the batch mixer's 4-page
+  HMI (724 elements) took 689 s, now 176 s; building one 256-element page
+  took 377 s, now 38 s (the alarms, alarm history and image pools take what
+  they took). Every element went into the visualization in its own
   transaction, and CODESYS commits the whole visualization each time, so the
   build grew with the square of the page's size and a 4-page HMI ran past
   client time-outs. Now a page's elements are created in one transaction,
@@ -29,6 +31,9 @@ see where the toolkit falls short.
   and Set overlap.
 
 ### Fixed
+- In CODESYS, a top-bar `info` value with neither `decimals` nor `unit` is
+  shown as it is, as in the browser. Every value went through a REAL, so a
+  STRING (a batch step's name) read 0.
 - `create_project` creates the project's folder
   (`BatchMixer/BatchMixer.project`); it failed with ENOENT.
 - `create_graphical` accepts comments before `PROGRAM` or `FUNCTION_BLOCK`,

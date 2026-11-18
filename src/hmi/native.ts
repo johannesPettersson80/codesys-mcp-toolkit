@@ -233,6 +233,13 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     impl.push(`${name} := ANY_TO_REAL(${v});`);
     return `${helperName}.${name}`;
   };
+  /** A STRING copy of a variable for display as it is (a STRING, an INT, a BOOL). */
+  const str = (v: string) => {
+    const name = `sV${++n}`;
+    decl.push(`    ${name} : STRING(80); // ${v}`);
+    impl.push(`${name} := TO_STRING(${v});`);
+    return `${helperName}.${name}`;
+  };
   /** Pixels for a value between min and max over a length. */
   const pixels = (v: string, min: number, max: number, len: number, negative = false) => {
     const name = `iP${++n}`;
@@ -453,12 +460,15 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
   // Info fields that don't fit before the alarm counters and Login are left out (the browser wraps them away).
   const infoEnd = cv.w - cv.pad - 96 * k - 8 * k - 3 * 50 * k - 16 * k;
   for (const f of screen.info ?? []) {
-    const shown = f.value ? `%.${f.decimals ?? 0}f${f.unit ? ` ${f.unit}` : ""}` : (f.text ?? "");
-    const fw = Math.max(f.label.length * TYPE.tiny * 0.56, (f.value ? 6 + (f.unit?.length ?? 0) : shown.length) * TYPE.body * 0.6) * k + 32 * k;
+    // A value with neither decimals nor a unit is shown as it is, as in the browser: a STRING
+    // (the batch step's name) would read 0 through a REAL.
+    const asText = !!f.value && f.decimals === undefined && !f.unit;
+    const shown = f.value ? (asText ? "%s" : `%.${f.decimals ?? 0}f${f.unit ? ` ${f.unit}` : ""}`) : (f.text ?? "");
+    const fw = Math.max(f.label.length * TYPE.tiny * 0.56, (f.value ? (asText ? 16 : 6 + (f.unit?.length ?? 0)) : shown.length) * TYPE.body * 0.6) * k + 32 * k;
     if (fx + fw > infoEnd) break;
     els.push({ kind: "rect", x: r(fx), y: r(cv.bar / 2 - 17 * k), w: 1, h: r(34 * k), fill: p.border, frame: null });
     els.push(text(fx + 16 * k, cv.bar / 2 - 18 * k, fw - 16 * k, 16 * k, f.label, F.tiny, p.muted));
-    els.push(text(fx + 16 * k, cv.bar / 2 - 2 * k, fw - 16 * k, 20 * k, shown, F.bodyB, p.text, "LEFT", f.value ? { props: { "Text variables.Text variable": real(f.value) } } : {}));
+    els.push(text(fx + 16 * k, cv.bar / 2 - 2 * k, fw - 16 * k, 20 * k, shown, F.bodyB, p.text, "LEFT", f.value ? { props: { "Text variables.Text variable": asText ? str(f.value) : real(f.value) } } : {}));
     fx += fw;
   }
   // No language buttons yet: checked on SP21, VisuElems.VisuFctChangeLanguage runs, but
