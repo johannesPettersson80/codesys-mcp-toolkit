@@ -11,7 +11,7 @@
  * the chart (alternative and parallel paths, jumps). What has no place in the
  * description (function boxes in LD) is reported.
  */
-import type { Fbd, Logic, SfcAction, SfcElement } from "./graphical.js";
+import { SFC_ELEMENT, SFC_ENTRY, SFC_EXIT, type Fbd, type Logic, type SfcAction, type SfcElement } from "./graphical.js";
 
 interface El {
   name: string;
@@ -54,10 +54,22 @@ const allText = (e: El | undefined): string => (e ? e.text + e.children.map(allT
 /** The connections of an element's (first) connectionPointIn. */
 const inputsOf = (e: El | undefined): { ref: string; param?: string }[] => kids(kid(e, "connectionPointIn"), "connection").map((c) => ({ ref: c.attrs.refLocalId!, ...(c.attrs.formalParameter ? { param: c.attrs.formalParameter } : {}) }));
 
+/** A step's entry and exit actions (attributes naming an action of the POU), as their ST. */
+function onceActions(step: El, bodies: Map<string, string>): { entry?: string; exit?: string } {
+  const data = kids(kid(step, "addData"), "data").find((d) => d.attrs.name === SFC_ELEMENT);
+  const attrs = kids(kid(data, "attributes"), "attribute");
+  const body = (guid: string) => {
+    const name = allText(attrs.find((a) => a.attrs.guid === guid)).trim();
+    return name ? (bodies.get(name) ?? "") : undefined;
+  };
+  const entry = body(SFC_ENTRY), exit = body(SFC_EXIT);
+  return { ...(entry !== undefined ? { entry } : {}), ...(exit !== undefined ? { exit } : {}) };
+}
+
 export type GraphicalDescription =
   | { kind: "ladder"; spec: { rungs: { when: Logic; then: { coil: string; kind: "coil" | "set" | "reset" | "negated" }[] }[] }; notes: string[] }
   | { kind: "fbd" | "cfc"; spec: { networks: { expr: Fbd; to?: string; assign?: Record<string, string> }[] }; notes: string[] }
-  | { kind: "sfc"; spec: { steps: { name: string; initial?: boolean; actions?: { name: string; qualifier: string; st: string }[]; next: string; when: string }[] } | { chart: SfcElement[] }; notes: string[] };
+  | { kind: "sfc"; spec: { steps: { name: string; initial?: boolean; actions?: { name: string; qualifier: string; st: string }[]; entry?: string; exit?: string; next: string; when: string }[] } | { chart: SfcElement[] }; notes: string[] };
 
 /** A graphical POU's PLCopenXML as create_graphical's description; undefined when the body isn't LD, FBD or SFC. */
 export function describeGraphical(xml: string): GraphicalDescription | undefined {
@@ -239,7 +251,7 @@ function readSfc(sfc: El, pou: El | undefined): GraphicalDescription {
         next = to?.name === "step" ? to.attrs.name! : to?.name === "jumpStep" ? to.attrs.targetName! : "";
         if (!to || !next) notes.add(`the transition after step ${s.attrs.name} leads into a branch`);
       }
-      return { name: s.attrs.name!, ...(s.attrs.initialStep === "true" ? { initial: true } : {}), ...(acts.length ? { actions: acts } : {}), next, when };
+      return { name: s.attrs.name!, ...(s.attrs.initialStep === "true" ? { initial: true } : {}), ...(acts.length ? { actions: acts } : {}), ...onceActions(s, bodies), next, when };
     });
   return { kind: "sfc", spec: { steps }, notes: [...notes] };
 }
@@ -277,7 +289,7 @@ function readSfcChart(sfc: El, byId: Map<string, El>, bodies: Map<string, string
       seen.add(id);
       if (node.name === "step") {
         const acts = actionsOf(id);
-        seq.push({ step: node.attrs.name!, ...(node.attrs.initialStep === "true" ? { initial: true } : {}), ...(acts.length ? { actions: acts } : {}) });
+        seq.push({ step: node.attrs.name!, ...(node.attrs.initialStep === "true" ? { initial: true } : {}), ...(acts.length ? { actions: acts } : {}), ...onceActions(node, bodies) });
         node = after(id)[0];
       } else if (node.name === "transition") {
         seq.push({ when: condition(node) });

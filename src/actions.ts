@@ -108,12 +108,20 @@ const batchInput = z.object({
 function batchAction(actions: Map<string, Action>): Action {
   return {
     description:
-      "Run several actions in one call, in order, and get all their results back. Use this whenever you already know the next steps, for example several create_object or write_object calls and then compile, or a simulation step (codesys_sim_force, wait, codesys_sim_cycle, codesys_sim_read). Every step is checked first, and nothing runs if one is invalid. It stops at the first step that fails, unless continueOnError is true. A batch can't contain help or another batch.",
+      "Run several actions in one call, in order, and get all their results back. Use this whenever you already know the next steps, for example several create_object or write_object calls and then compile, or a simulation step (codesys_sim_force, wait, codesys_sim_cycle, codesys_sim_read). Every step is checked first, and nothing runs if one is invalid. It stops at the first step that fails, unless continueOnError is true. A batch can't contain another batch.",
     inputSchema: batchInput,
     run: async (raw) => {
       const { calls, continueOnError } = raw as z.infer<typeof batchInput>;
       const steps: { name: string; action: Action; args: unknown }[] = [];
       for (const [i, c] of calls.entries()) {
+        if (c.action === "help") {
+          // Often sent along with the first steps, to read one action's arguments.
+          const wanted = c.args?.action === undefined ? undefined : String(c.args.action);
+          const known = wanted === undefined ? undefined : actions.get(wanted);
+          const help = wanted === undefined ? reply(`Actions: ${[...actions.keys()].join(", ")}. Call help on its own for their descriptions.`) : known ? reply(usage(wanted, known)) : reply(`Unknown action '${wanted}'. Actions: ${[...actions.keys()].join(", ")}.`, true);
+          steps.push({ name: "help", action: { description: "", inputSchema: z.object({}), run: async () => help }, args: {} });
+          continue;
+        }
         const action = actions.get(c.action);
         if (!action) return reply(`Step ${i + 1}: '${c.action}' can't run in a batch, so nothing was run. Actions: ${[...actions.keys()].join(", ")}.`, true);
         const parsed = checkArgs(action, c.args);

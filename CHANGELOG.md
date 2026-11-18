@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 From a batch mixing unit Claude built from one prompt, start to finish, to
 see where the toolkit falls short.
 
+### Added
+- `codesys_screenshot`: with `--show-window`, a picture of the CODESYS window
+  as it is, so Claude can look at the native HMI running in the simulation (or
+  an editor) itself. `show` opens an object first. In the batch mixer run
+  Claude had no way to see the CODESYS window and asked for computer use to
+  look at it.
+- SFC steps take `entry` and `exit`: ST that runs once when the step becomes
+  active or is left (CODESYS's step entry and exit actions). CODESYS has no
+  IEC P1 and P0 qualifiers; `create_graphical` accepted them and the build
+  failed with "'P1' is not a valid qualifier". An action with P1 or P0 now
+  becomes the step's entry or exit action. `read_objects` reads them back.
+
 ### Changed
 - `hmi_export_codesys` is about four times faster: the batch mixer's 4-page
   HMI (724 elements) took 689 s, now 176 s; building one 256-element page
@@ -29,13 +41,24 @@ see where the toolkit falls short.
 - `hmi_save_screen` notes value cards too small for their number: one row
   high, the number runs into the title; too narrow with a set value, Actual
   and Set overlap.
+- `codesys_sim_write`, `codesys_sim_force` and `codesys_sim_test` take JSON
+  booleans and numbers (`true`, `5`) as well as Structured Text (`'TRUE'`).
+- `help` runs as a step of a batch; it made the whole batch fail.
 
 ### Fixed
-- `show_in_codesys` zooms a visualization so the whole page fits the editor.
-  At 100 % a 1280-pixel page is wider than the editor pane between the
-  Devices and Toolbox panes, so the window showed its top-left corner and the
-  Start and Stop buttons and the alarms were off-screen. It uses the editor's
-  own zoom and says how far it zoomed.
+- `show_in_codesys` zooms a visualization so the whole page fits the editor,
+  also while the simulation runs. At 100 % a 1280-pixel page is wider than
+  the editor pane between the Devices and Toolbox panes, so the window showed
+  its top-left corner and the Start and Stop buttons and the alarms were
+  off-screen. Offline it sets the editor's zoom; online the page is drawn by a
+  web view that keeps the zoom of the moment the simulation started, so its
+  own zoom is set on top.
+- After a visualization was opened in the CODESYS window while the
+  simulation ran, every later build failed with "Error while processing the
+  visualization: Sending service failed, status: 404" until the project was
+  opened again; a clean build didn't help. `compile` and `codesys_sim_start`
+  now save and reopen the project when that is the only error, and build
+  again.
 - A call still running after 50 s replies that it is still running, and
   `{"action": "result"}` waits for it and returns its result. Claude Desktop
   gives up on a call after 60 s, progress or not, so an HMI export, or a batch

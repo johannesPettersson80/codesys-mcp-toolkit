@@ -51,7 +51,7 @@ describe("the codesys tool", () => {
     expect(tool.description).toMatch(/\n {2}path: string - Path to the \.project or \.projectarchive file/);
     expect(tool.description).toMatch(/\n {2}discardChanges\?: boolean/);
     expect(tool.description).toMatch(/\n {2}names: string\[\] - Variables as CODESYS expressions/);
-    expect(tool.description).toMatch(/\n {2}values: \{ \[name\]: string \} - Variable to value/);
+    expect(tool.description).toMatch(/\n {2}values: \{ \[name\]: string \| boolean \| number \} - Variable to value/);
     expect(tool.description).toMatch(/\n {2}priority\?: string \| number - 0 \(highest\)/);
     expect(tool.description).toMatch(/\n {2}kind\?: "cyclic" \| "freewheeling"/);
   });

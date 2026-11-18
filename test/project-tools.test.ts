@@ -273,12 +273,28 @@ describe("project tools over MCP (fake CODESYS)", () => {
       expect((await call("read_objects", { paths: ["PLC_PRG"] })).text).toBe(before);
     });
 
-    it("refuses help, a nested batch and unknown actions", async () => {
-      for (const action of ["help", "batch", "nope"]) {
+    it("refuses a nested batch and unknown actions", async () => {
+      for (const action of ["batch", "nope"]) {
         const r = await call("batch", { calls: [write("f := 1;"), { action }] });
         expect(r.isError, action).toBe(true);
         expect(r.text, action).toMatch(new RegExp(`^Step 2: '${action}' can't run in a batch, so nothing was run\\.`));
       }
+    });
+
+    it("runs help as a step: one action's arguments next to the other results", async () => {
+      const r = await call("batch", { calls: [read, { action: "help", args: { action: "codesys_sim_write" } }] });
+      expect(r.isError).toBeFalsy();
+      expect(r.text).toMatch(/\[1\/2\] read_objects:\n/);
+      expect(r.text).toMatch(/\[2\/2\] help:\ncodesys_sim_write: Write values once/);
+      const unknown = await call("batch", { calls: [{ action: "help", args: { action: "nope" } }] });
+      expect(unknown.isError).toBe(true);
+      expect(unknown.text).toMatch(/Unknown action 'nope'/);
+    });
+
+    it("takes JSON booleans and numbers as values to write", async () => {
+      const r = await call("batch", { calls: [{ action: "codesys_sim_write", args: { values: { "PLC_PRG.xStart": true, "PLC_PRG.nSpeed": 5 } } }] });
+      // Accepted by the schema: the step runs (and fails here only because no simulation runs).
+      expect(r.text).not.toMatch(/invalid arguments/);
     });
 
     it("respects Pause Claude for each step", async () => {

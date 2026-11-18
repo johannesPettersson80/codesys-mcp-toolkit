@@ -6,7 +6,7 @@ import * as z from "zod/v4";
 import type { ActionResult, RegisterAction } from "../actions.js";
 import { plcValue } from "../hmi/value.js";
 import type { AppContext } from "../tools.js";
-import { currentCodesysSim } from "./simulation.js";
+import { currentCodesysSim, stValue } from "./simulation.js";
 
 const expectation = z.union([
   z.string().describe("Exact value: 'TRUE', '42', 'T#2S'"),
@@ -21,8 +21,8 @@ export const testSchema = z.object({
         steps: z
           .array(
             z.object({
-              write: z.record(z.string(), z.string()).optional().describe("Write values once"),
-              force: z.record(z.string(), z.string()).optional().describe("Force values (held until unforced)"),
+              write: z.record(z.string(), stValue).optional().describe("Write values once ('TRUE' or true, '5' or 5)"),
+              force: z.record(z.string(), stValue).optional().describe("Force values (held until unforced)"),
               unforce: z.array(z.string()).optional(),
               cycles: z.number().int().min(1).max(10_000).optional().describe("Run exactly n cycles (the simulation is stopped between steps)"),
               waitMs: z.number().int().min(1).max(60_000).optional().describe("Let it run for this long"),

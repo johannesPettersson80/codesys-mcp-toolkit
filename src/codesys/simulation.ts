@@ -46,7 +46,9 @@ export function describeSim(s: Status): string {
 }
 
 const names = z.array(z.string()).min(1).describe("Variables as CODESYS expressions relative to the application, e.g. 'PLC_PRG.nCount' or 'GVL_IO.xValve'");
-const values = z.record(z.string(), z.string()).describe("Variable to value, with values as Structured Text: { 'PLC_PRG.xStart': 'TRUE', 'PLC_PRG.nSpeed': '5' }");
+/** A value as Structured Text; JSON booleans and numbers are taken too (true becomes 'TRUE'). */
+export const stValue = z.union([z.string(), z.boolean(), z.number()]).transform((v) => (typeof v === "boolean" ? (v ? "TRUE" : "FALSE") : String(v)));
+const values = z.record(z.string(), stValue).describe("Variable to value, as Structured Text or JSON: { 'PLC_PRG.xStart': 'TRUE' (or true), 'PLC_PRG.nSpeed': '5' (or 5) }");
 
 export function registerCodesysSim(ctx: AppContext, deps: SimToolDeps): void {
   const b = ctx.bridge;

@@ -54,6 +54,7 @@ describe("MCP tools over the real watcher", () => {
         "codesys_sim_stop",
         "codesys_sim_test",
         "codesys_sim_unforce",
+        "codesys_screenshot",
         "codesys_sim_write",
         "codesys_status",
         "compare_sources",

@@ -46,6 +46,11 @@ export const fbdSchema = z.object({
     .min(1),
 });
 
+/** CODESYS's PLCopenXML: an SFC element's attributes, and the step's entry and exit action (as CODESYS V3.5 SP21 exports them). */
+export const SFC_ELEMENT = "http://www.3s-software.com/plcopenxml/sfc/element";
+export const SFC_ENTRY = "a6b08bd8-b696-47e3-9cbf-7408b61c9ff8";
+export const SFC_EXIT = "a2621e18-7de3-4ea6-ae6d-89e9e0b7befd";
+
 const sfcAction = z.object({ name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), qualifier: z.enum(["N", "S", "R", "P", "P0", "P1"]).default("N"), st: z.string() });
 export type SfcAction = z.infer<typeof sfcAction>;
 
@@ -56,14 +61,16 @@ export type SfcAction = z.infer<typeof sfcAction>;
  * transition and each path starts with a step; a jump ends a path.
  */
 export type SfcElement =
-  | { step: string; initial?: boolean; actions?: SfcAction[] }
+  | { step: string; initial?: boolean; actions?: SfcAction[]; entry?: string; exit?: string }
   | { when: string }
   | { alternative: SfcElement[][] }
   | { parallel: SfcElement[][] }
   | { jump: string };
+const ENTRY_DOC = "ST that runs once when the step becomes active (CODESYS's step entry action; IEC's P1 qualifier, which CODESYS doesn't have, is turned into this)";
+const EXIT_DOC = "ST that runs once when the step is left (CODESYS's step exit action; IEC's P0 qualifier is turned into this)";
 const sfcElement: z.ZodType<SfcElement> = z.lazy(() =>
   z.union([
-    z.object({ step: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), initial: z.boolean().optional(), actions: z.array(sfcAction).optional() }),
+    z.object({ step: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), initial: z.boolean().optional(), actions: z.array(sfcAction).optional(), entry: z.string().optional().describe(ENTRY_DOC), exit: z.string().optional().describe(EXIT_DOC) }),
     z.object({ when: z.string().min(1) }),
     z.object({ alternative: z.array(z.array(sfcElement).min(1)).min(2) }),
     z.object({ parallel: z.array(z.array(sfcElement).min(1)).min(2) }),
@@ -78,6 +85,8 @@ export const sfcSchema = z.object({
         name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
         initial: z.boolean().optional(),
         actions: z.array(sfcAction).optional(),
+        entry: z.string().optional().describe(ENTRY_DOC),
+        exit: z.string().optional().describe(EXIT_DOC),
         next: z.string().describe("Step this one goes to"),
         when: z.string().describe("Transition condition in ST, e.g. 'xStart AND NOT xFault'. CODESYS checks it in the same cycle the step becomes active, before a value its entry action sets (a tare, a timer start) is there: base it on a flag the step sets, not on that value"),
       }),
@@ -244,7 +253,7 @@ export function cfcXml(name: string, pouType: "program" | "functionBlock", spec:
 export function stepsToChart(steps: NonNullable<z.infer<typeof sfcSchema>["steps"]>): SfcElement[] {
   const chart: SfcElement[] = [];
   steps.forEach((s, k) => {
-    chart.push({ step: s.name, ...(s.initial ? { initial: true } : {}), ...(s.actions?.length ? { actions: s.actions } : {}) }, { when: s.when });
+    chart.push({ step: s.name, ...(s.initial ? { initial: true } : {}), ...(s.actions?.length ? { actions: s.actions } : {}), ...(s.entry !== undefined ? { entry: s.entry } : {}), ...(s.exit !== undefined ? { exit: s.exit } : {}) }, { when: s.when });
     if (k === steps.length - 1) chart.push({ jump: s.next });
   });
   return chart;
@@ -337,10 +346,22 @@ export function sfcXml(name: string, pouType: "program" | "functionBlock", spec:
       if ("step" in e) {
         const st = ++id;
         const initial = e.initial || (initialAll && e === first);
-        parts.push(`<step localId="${st}"${initial ? ' initialStep="true"' : ""} name="${esc(e.step)}"><position x="0" y="${y}" /><connectionPointIn>${conns(cur)}</connectionPointIn><connectionPointOut formalParameter="sfc" /></step>`);
-        if (e.actions?.length) {
+        // Entry and exit actions are attributes of the step that name an action of the POU.
+        const once = (kind: "entry" | "exit", q: "P1" | "P0", own: string | undefined): string => {
+          const pulses = (e.actions ?? []).filter((a) => a.qualifier === q);
+          if (own === undefined && !pulses.length) return "";
+          const actName = own === undefined && pulses.length === 1 ? pulses[0]!.name : `${e.step}_${kind}`;
+          const body = [own, ...pulses.map((a) => a.st)].filter((s) => s !== undefined).join("\n");
+          actionDefs.push(`<action name="${esc(actName)}"><body><ST><xhtml xmlns="http://www.w3.org/1999/xhtml">${esc(body)}</xhtml></ST></body></action>`);
+          return `<attribute guid="${kind === "entry" ? SFC_ENTRY : SFC_EXIT}">${esc(actName)}</attribute>`;
+        };
+        const attrs = once("entry", "P1", e.entry) + once("exit", "P0", e.exit);
+        const stepData = attrs ? `<addData><data name="${SFC_ELEMENT}" handleUnknown="implementation"><attributes xmlns="">${attrs}</attributes></data></addData>` : "";
+        parts.push(`<step localId="${st}"${initial ? ' initialStep="true"' : ""} name="${esc(e.step)}"><position x="0" y="${y}" /><connectionPointIn>${conns(cur)}</connectionPointIn><connectionPointOut formalParameter="sfc" />${stepData}</step>`);
+        const assoc = (e.actions ?? []).filter((a) => a.qualifier !== "P1" && a.qualifier !== "P0");
+        if (assoc.length) {
           const blk = ++id;
-          const acts = e.actions.map((a) => {
+          const acts = assoc.map((a) => {
             actionDefs.push(`<action name="${esc(a.name)}"><body><ST><xhtml xmlns="http://www.w3.org/1999/xhtml">${esc(a.st)}</xhtml></ST></body></action>`);
             return `<action localId="${++id}" qualifier="${a.qualifier}"><relPosition x="0" y="0" /><reference name="${esc(a.name)}" /><connectionPointOut /></action>`;
           });
@@ -414,8 +435,8 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
         "ladder: {rungs: [{when: 'xStart' | 'NOT xStop' | {and: [...]} (series) | {or: [...]} (parallel), then: [{coil: 'xMotor', kind: 'coil'|'set'|'reset'|'negated'}]}]}. " +
         "fbd: {networks: [{expr: 'xA' | {fn: 'AND', args: [...]} | {fb: 'TON', instance: 'tonDelay', inputs: {IN: ..., PT: 'T#2S'}, output: 'Q'}, to: 'xOut', assign: {ET: 'tEt'}}]}. " +
         "cfc: the same description as fbd, drawn as CFC (boxes run in the order listed, inputs first). " +
-        "sfc: {steps: [{name, initial?, actions?: [{name, qualifier: 'N'|'S'|'R'|'P', st: 'ST code'}], next: 'NextStep', when: 'ST condition'}]}, one sequence: each step goes to the next listed, the last jumps back. " +
-        "sfc with branches: {chart: [...]}, top to bottom: {step: 'Idle', actions?}, {when: 'xStart'}, {alternative: [[{when: 'xA'}, {step: 'A'}, {when: 'xDoneA'}], [{when: 'NOT xA'}, {jump: 'Idle'}]]} (one path is taken), {parallel: [[{step: 'Fill'}], [{step: 'Heat'}]]} (all paths run, after a {when}; they join before the next {when}), {jump: 'Idle'}. Steps and transitions alternate; a chart ending with a {when} goes back to its first step. " +
+        "sfc: {steps: [{name, initial?, actions?: [{name, qualifier: 'N'|'S'|'R'|'P', st: 'ST code'}], entry?: 'ST run once when the step becomes active', exit?: 'ST run once when it is left', next: 'NextStep', when: 'ST condition'}]}, one sequence: each step goes to the next listed, the last jumps back. CODESYS has no P1/P0 qualifiers: an action with P1 becomes the step's entry action, P0 its exit action. " +
+        "sfc with branches: {chart: [...]}, top to bottom: {step: 'Idle', actions?, entry?, exit?},{when: 'xStart'}, {alternative: [[{when: 'xA'}, {step: 'A'}, {when: 'xDoneA'}], [{when: 'NOT xA'}, {jump: 'Idle'}]]} (one path is taken), {parallel: [[{step: 'Fill'}], [{step: 'Heat'}]]} (all paths run, after a {when}; they join before the next {when}), {jump: 'Idle'}. Steps and transitions alternate; a chart ending with a {when} goes back to its first step. " +
         "declaration is the POU's ST declaration (PROGRAM or FUNCTION_BLOCK with its variables, FB instances included). Compile afterwards.",
       inputSchema: z.object({
         name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),

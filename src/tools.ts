@@ -11,6 +11,7 @@ import { condition, listAlarms, registerAlarmActions } from "./codesys/alarm-too
 import { projectReport } from "./codesys/report.js";
 import { registerRecipeAction } from "./codesys/recipes.js";
 import { describeGraphical } from "./codesys/graphical-read.js";
+import { codesysWindowShot } from "./codesys/window-shot.js";
 import { compareSources, describeComparison, readSourceDir } from "./codesys/compare.js";
 import { screenVariables } from "./hmi/spec.js";
 import { reportProgress } from "./progress.js";
@@ -305,6 +306,23 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     await sessionStart(info.path);
   };
   const savedNote = (r: { saved?: boolean }) => (r.saved ? " Project saved." : ctx.autosave ? "" : " (not saved; call save_project)");
+  /**
+   * A build. A visualization opened in CODESYS's window while the simulation ran makes every
+   * later build fail with "Error while processing the visualization: Sending service failed,
+   * status: 404" until the project is opened again (CODESYS V3.5 SP21; a clean build doesn't
+   * clear it). That isn't the user's code: save, open the project again and build again.
+   */
+  const buildWithReopen = async (args: Record<string, unknown>) => {
+    const build = () => b.call<{ messages: BuildMessage[]; steps?: string[] }>("build", args, { timeoutMs: 900_000 });
+    const r = await build();
+    const errors = r.messages.filter((m) => /error/i.test(m.severity));
+    if (!errors.length || !errors.every((m) => /Sending service failed, status: 404/.test(m.text)) || !ctx.project?.path || ctx.codesysSim) return r;
+    reportProgress("opening the project again (CODESYS's visualization build fails after a visualization was shown online)");
+    await b.call("project.save", {}, { timeoutMs: 300_000 });
+    await b.call("project.close", { discard_changes: false });
+    await b.call("project.open", { path: ctx.project.path }, { timeoutMs: 300_000 });
+    return build();
+  };
 
   let caps: { restarts: number; list: Record<string, boolean | null> } | undefined;
   reg(
@@ -634,7 +652,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     },
     async ({ check_all, deep, clean }) =>
       run(ctx, async () => {
-        const r = await b.call<{ messages: BuildMessage[]; steps?: string[] }>("build", { check_all: check_all ?? true, deep: !!deep, clean: !!clean }, { timeoutMs: 900_000 });
+        const r = await buildWithReopen({ check_all: check_all ?? true, deep: !!deep, clean: !!clean });
         const f = formatBuild(r.messages);
         if (cache) {
           const counted = r.messages.filter((m) => /error|warning/i.test(m.severity));
@@ -1185,6 +1203,36 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   );
 
   reg(
+    "codesys_screenshot",
+    {
+      description:
+        "With --show-window: a picture of the CODESYS window as it is now, to see what the user sees there, e.g. a visualization running in the simulation (the native HMI) or an editor with live values. show opens an object first, as show_in_codesys does. Captured even when other windows cover CODESYS.",
+      inputSchema: z.object({ show: pathArg.optional().describe("An object to open first, e.g. 'Visu_Overview'") }),
+    },
+    async ({ show }) => {
+      if (!b.visible && !b.attachScript) return text("CODESYS runs without its window. Start the toolkit with --show-window to see it.", true);
+      let opened = "";
+      if (show) {
+        const r = await run(ctx, async () => {
+          const o = await b.call<{ path: string; zoom?: number }>("ui.open", { path: show });
+          return `Opened ${o.path}${o.zoom ? ` at ${o.zoom} %` : ""}.`;
+        });
+        if (r.isError) return r;
+        opened = r.content.map((c) => (c.type === "text" ? c.text : "")).join("") + " ";
+        await new Promise((res) => setTimeout(res, 800));
+      }
+      const pid = b.health().pid;
+      if (!pid) return text("CODESYS isn't running yet. Call the tool again once it has started (codesys_status).", true);
+      try {
+        const { png, size } = await codesysWindowShot(pid);
+        return { content: [{ type: "image", data: png.toString("base64"), mimeType: "image/png" }, { type: "text", text: `${opened}The CODESYS window (${size} pixels).` }] };
+      } catch (e) {
+        return text((e as Error).message, true);
+      }
+    },
+  );
+
+  reg(
     "open_workspace",
     {
       description: "Open the live CODESYS workspace in the user's browser: the project tree, the code as you write it, compile problems and the changes to review. Call this only when the user asks for it there.",
@@ -1201,7 +1249,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     reg,
     run: (fn) => run(ctx, fn),
     compileErrors: async () => {
-      const f = formatBuild((await b.call<{ messages: BuildMessage[] }>("build", {}, { timeoutMs: 900_000 })).messages);
+      const f = formatBuild((await buildWithReopen({})).messages);
       return f.errors ? f.text : undefined;
     },
   });

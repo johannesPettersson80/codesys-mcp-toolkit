@@ -757,7 +757,7 @@ def op_ui_open(args):
             o = _object_mgr().GetObjectToRead(c.proj.handle, obj.guid).Object
             if o.GetType().FullName == "_3S.CoDeSys.VisualObject.VisualObject":
                 se.system.delay(300)
-                zoom = mcp_ui.fit_visualization(se, (o.Size.Width, o.Size.Height))
+                zoom = mcp_ui.fit_visualization(se, (o.Size.Width, o.Size.Height), str(obj.guid))
                 if zoom is not None:
                     out["zoom"] = round(zoom * 100)
         except Exception as e:

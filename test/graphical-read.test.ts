@@ -67,6 +67,25 @@ describe("round trips through create_graphical's generator", () => {
     expect(describeGraphical(sfcXml("SFC_X", "program", spec))!.spec).toEqual(spec);
   });
 
+  it("SFC step entry and exit actions, and P1/P0 turned into them", () => {
+    const spec = sfcSchema.parse({ steps: [
+      { name: "Idle", initial: true, entry: "nEntries := nEntries + 1;", next: "Run", when: "xGo" },
+      { name: "Run", actions: [{ name: "A_Run", qualifier: "N", st: "nCount := nCount + 1;" }, { name: "A_Tare", qualifier: "P1", st: "rTare := rWeight;" }, { name: "A_Left", qualifier: "P0", st: "nExits := nExits + 1;" }], next: "Idle", when: "nCount > 10" },
+    ] });
+    const x = sfcXml("SFC_E", "program", spec);
+    // As CODESYS SP21 exports them: attributes of the step that name an action of the POU.
+    expect(x).toContain('<attribute guid="a6b08bd8-b696-47e3-9cbf-7408b61c9ff8">Idle_entry</attribute>');
+    expect(x).toContain('<attribute guid="a6b08bd8-b696-47e3-9cbf-7408b61c9ff8">A_Tare</attribute>');
+    expect(x).toContain('<attribute guid="a2621e18-7de3-4ea6-ae6d-89e9e0b7befd">A_Left</attribute>');
+    expect(x).toContain('<action name="A_Tare"><body><ST><xhtml xmlns="http://www.w3.org/1999/xhtml">rTare := rWeight;</xhtml>');
+    // P1 and P0 aren't associated with the step: CODESYS rejects those qualifiers.
+    expect(x).not.toMatch(/qualifier="P[01]"/);
+    expect(describeGraphical(x)!.spec).toEqual({ steps: [
+      { name: "Idle", initial: true, entry: "nEntries := nEntries + 1;", next: "Run", when: "xGo" },
+      { name: "Run", actions: [{ name: "A_Run", qualifier: "N", st: "nCount := nCount + 1;" }], entry: "rTare := rWeight;", exit: "nExits := nExits + 1;", next: "Idle", when: "nCount > 10" },
+    ] });
+  });
+
   it("SFC with branches as a chart, round trip included", () => {
     const chart = [
       { step: "Idle", initial: true },
