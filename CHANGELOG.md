@@ -37,6 +37,11 @@ see where the toolkit falls short.
   with long waits, ended in "Request timed out" and its result was lost while
   CODESYS carried on. While a call runs, others are not run: they wait for it
   up to 50 s, bring its result along, or say it is still busy.
+- In CODESYS, a tank's liquid fills the vessel's rounded bottom: a full tank
+  showed a white band under the liquid, and a low level floated above the
+  bottom. CODESYS can't clip the liquid to the vessel as the browser does, so
+  the liquid now has the vessel's shape and a strip in the tile's colour
+  covers the empty part from the top; the surface stays flat.
 - In CODESYS, a top-bar `info` value with neither `decimals` nor `unit` is
   shown as it is, as in the browser. Every value went through a REAL, so a
   STRING (a batch step's name) read 0.

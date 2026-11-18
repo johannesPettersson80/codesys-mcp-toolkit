@@ -1065,7 +1065,14 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         // A vessel with rounded ends (CODESYS has no dished end: a radius stands in), the level a flat fill.
         const rad = r(Math.min(w * 0.3, h * 0.15));
         els.push({ kind: "round", x: r(x), y: r(y), w: r(w), h: r(h), fill: p.tile, frame: null, radius: rad });
-        els.push({ kind: "rect", x: r(x + 2), y: r(y + h - rad / 2), w: r(w - 4), h: 1, fill: p.liquid[0], frame: null, props: { "Relative movement.Movement top-left.Y": pixels(it.level, 0, it.max, r(h - rad), true) } });
+        // CODESYS can't clip the liquid to the vessel as the browser does. So the liquid fills the
+        // whole vessel, and a strip in the tile's colour covers the empty part from the top, its
+        // bottom edge moving up as the level rises: the liquid follows the rounded ends at every
+        // level, with a flat surface. The vessel's line is drawn over both. (The tile around the
+        // vessel has the same colour, so the strip's square corners don't show.)
+        const vx = r(x), vy = r(y), vw = r(w), vh = r(h);
+        els.push({ kind: "round", x: vx + 1, y: vy + 1, w: vw - 2, h: vh - 2, fill: p.liquid[0], frame: null, radius: Math.max(1, rad - 1) });
+        els.push({ kind: "rect", x: vx + 1, y: vy, w: vw - 2, h: 1, fill: p.tile, frame: null, props: { "Relative movement.Movement bottom-right.Y": pixels(it.level, it.max, 0, vh - 1) } });
         els.push({ kind: "round", x: r(x), y: r(y), w: r(w), h: r(h), fill: null, frame: p.equipLine, lineWidth: 2, radius: rad });
         els.push(text(x, y + h / 2 - 2.2 * sx, w, 4.4 * sx, `%.0f${it.unit ? ` ${it.unit}` : ""}`, [SEMI, ptPx(3.2 * sx)], p.text, "HCENTER", { props: { "Text variables.Text variable": real(it.level) } }));
         condBadge(x + w + 0.3 * sx, y - 0.3 * sx, 2.4 * sx, it.fault, it.warning);

@@ -597,6 +597,25 @@ describe("themes, brand colour and pipe flow", () => {
     expect(JSON.stringify(plan.elements)).toContain("PLC_PRG.xTankFault");
   });
 
+  it("a native tank's liquid reaches the vessel's rounded bottom", () => {
+    const items = [{ type: "tank", x: 10, y: 10, w: 10, h: 60, level: "PLC_PRG.rLevel", max: 100, label: "T-1" }];
+    const screen = screenSchema.parse({ ...SCREEN, widgets: [{ type: "process", at: [1, 1, 12, 8], items }] });
+    const plan = nativePlan(screen, [{ name: "Overview", title: "A" }]);
+    const helper = plan.helper.implementation;
+    const els = plan.elements as NativeElement[];
+    const i = els.findIndex((e) => e.kind === "rect" && e.props?.["Relative movement.Movement bottom-right.Y"]);
+    const [vessel, liquid, strip, line] = [els[i - 2]!, els[i - 1]!, els[i]!, els[i + 1]!];
+    // The liquid is the vessel's shape inside its line, down to its rounded bottom.
+    expect(liquid).toMatchObject({ kind: "round", x: vessel.x + 1, y: vessel.y + 1, w: vessel.w - 2, h: vessel.h - 2, radius: vessel.radius! - 1 });
+    expect(liquid.fill).not.toEqual(vessel.fill);
+    // A strip in the tile's colour covers the empty part from the top, growing down by (1 - level / max).
+    expect(strip).toMatchObject({ x: vessel.x + 1, y: vessel.y, w: vessel.w - 2, h: 1, fill: vessel.fill });
+    const v = String(strip.props!["Relative movement.Movement bottom-right.Y"]).split(".").pop();
+    expect(helper).toContain(`${v} := REAL_TO_INT(LIMIT(0.0, (ANY_TO_REAL(PLC_PRG.rLevel) - (100.0)) / (-100.0), 1.0) * ${vessel.h - 1}.0);`);
+    // The vessel's line is drawn over both.
+    expect(line).toMatchObject({ kind: "round", x: vessel.x, y: vessel.y, w: vessel.w, h: vessel.h, fill: null });
+  });
+
   it("a machine state can show while its BOOL is FALSE (invert)", () => {
     const screen = screenSchema.parse({ ...SCREEN, machine: { states: [{ on: "PLC_PRG.xAuto", invert: true, text: "Manual", tone: "accent" }] } });
     expect(JSON.stringify(renderScreen(screen).bindings)).toContain('"invert":true');
