@@ -154,13 +154,13 @@ BUILTIN_SYMBOLS.level_switch = def(
   `<circle cx="50" cy="50" r="40" fill="var(--body)" ${OUT}/>`,
   { left: [10, 50, "left"], right: [90, 50, "right"], bottom: [50, 90, "down"] },
   [100, 100],
-  "Level switch as an ISA-5.1 instrument bubble; its label is the tag (e.g. 'LSH-201'). Better: {type: 'instrument', tag: 'LSH-201', at: 'T-201.left-high'}",
+  "Level switch as an ISA-5.1 instrument bubble; its label is the tag (e.g. 'LSH-201'). Better: {type: 'instrument', tag: 'LSH-201', x, y (the bubble), at: 'T-201.left-high' (what it measures)}",
 );
 BUILTIN_SYMBOLS.pressure_switch = def(
   `<circle cx="50" cy="50" r="40" fill="var(--body)" ${OUT}/>`,
   { bottom: [50, 90, "down"] },
   [100, 100],
-  "Pressure switch or gauge as an ISA-5.1 instrument bubble; its label is the tag (e.g. 'PSH-201'). Better: {type: 'instrument', tag: 'PSH-201', at: [x, y] on the line}",
+  "Pressure switch or gauge as an ISA-5.1 instrument bubble; its label is the tag (e.g. 'PSH-201'). Better: {type: 'instrument', tag: 'PSH-201', x, y (the bubble), at: [x, y] on the line}",
 );
 
 /**

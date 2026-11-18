@@ -65,7 +65,7 @@ export type Binding =
   | { kind: "setpoint"; v: string; decimals: number }
   | { kind: "alarm"; v: string }
   | { kind: "count"; vars: string[] }
-  | { kind: "state"; states: { v: string; text: string; tone: Tone }[]; idle: { text: string; tone: Tone } }
+  | { kind: "state"; states: { v: string; text: string; tone: Tone; invert?: boolean }[]; idle: { text: string; tone: Tone } }
   | { kind: "eq"; v: string; val: string };
 
 export interface Rendered {
@@ -85,6 +85,25 @@ export function tileBox(screen: Screen, at: [number, number, number, number], ra
   const ch = (h - header - pad - dock - (rows - 1) * gap) / rows;
   const [c, r, wd, ht] = at;
   return { x: left + (c - 1) * (cw + gap), y: header + (r - 1) * (ch + gap), w: wd * cw + (wd - 1) * gap, h: ht * ch + (ht - 1) * gap };
+}
+
+/**
+ * Cards too small for what they show (hmi_save_screen's layout notes): a value card's number
+ * shrinks to fit, but below these sizes it runs into the title, or Actual and Set overlap.
+ */
+export function cardWarnings(screen: Screen, rail = false): string[] {
+  const k = scaleOf(canvasOf(screen, rail));
+  const out: string[] = [];
+  screen.widgets.forEach((w, i) => {
+    if (w.type !== "value") return;
+    const b = tileBox(screen, w.at, rail);
+    const name = `widget ${i + 1} (value${w.title ? ` "${w.title}"` : ""})`;
+    const tall = (w.set || (w.min !== undefined && w.max !== undefined) ? 150 : 100) * k;
+    if (b.h < tall) out.push(`${name} is ${Math.round(b.h)} px high and needs about ${Math.round(tall)}: its number runs into the title. Give it another row.`);
+    const wide = (w.set ? 300 : 160) * k;
+    if (b.w < wide) out.push(`${name} is ${Math.round(b.w)} px wide and needs about ${Math.round(wide)}${w.set ? ": Actual and Set overlap" : ""}. Give it more columns.`);
+  });
+  return out;
 }
 
 /** A page's icon in the rail: its own, else one that fits its title. */
@@ -187,7 +206,7 @@ export function renderScreen(screen: Screen, page: PageContext = {}): Rendered {
   // The machine: its state in the top bar's corner (with a line in its colour under the bar), its commands at the bottom.
   const m = screen.machine;
   const corner = m
-    ? `<div class="h-state" ${bind({ kind: "state", states: m.states.map((s) => ({ v: s.on, text: s.text, tone: s.tone })), idle: m.idle })} data-tone="${m.idle.tone}" data-i="0"><span class="hs-ring">${stateIcons(m, r1(20 * k))}</span><span class="hs-t"><span class="st-text">${esc(m.idle.text)}</span>${m.detail ? `<span class="hs-d" ${bind({ kind: "text", v: m.detail })}></span>` : ""}</span></div>`
+    ? `<div class="h-state" ${bind({ kind: "state", states: m.states.map((s) => ({ v: s.on, text: s.text, tone: s.tone, invert: s.invert })), idle: m.idle })} data-tone="${m.idle.tone}" data-i="0"><span class="hs-ring">${stateIcons(m, r1(20 * k))}</span><span class="hs-t"><span class="st-text">${esc(m.idle.text)}</span>${m.detail ? `<span class="hs-d" ${bind({ kind: "text", v: m.detail })}></span>` : ""}</span></div>`
     : "";
   const dockBtn = (label: string, v: string | undefined, kind: ButtonKind, ic: IconName) => (v ? button(label, v, "tap", kind, ic, bind) : "");
   const dock =
@@ -341,7 +360,7 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
       // Labels where they fit: else Reset becomes an icon, and on a very narrow card all three do.
       const { resetIcon, allIcons } = stateButtonFit(bodyW, k, w);
       const btns = [w.start ? button("Start", w.start, "tap", "primary", "play", bind, allIcons) : "", w.stop ? button("Stop", w.stop, "tap", "secondary", "stop", bind, allIcons) : "", w.reset ? button("Reset", w.reset, "tap", "secondary", "reset", bind, resetIcon) : ""].join("");
-      return `<div class="st" ${bind({ kind: "state", states: w.states.map((s) => ({ v: s.on, text: s.text, tone: s.tone })), idle: w.idle })} data-tone="${w.idle.tone}" data-i="0"><div class="st-row"><span class="hs-ring">${stateIcons(w, r1(20 * k))}</span><span class="st-text" style="font-size:${r1(fs)}px">${esc(w.idle.text)}</span></div>${btns ? `<div class="btns st-btns">${btns}</div>` : ""}</div>`;
+      return `<div class="st" ${bind({ kind: "state", states: w.states.map((s) => ({ v: s.on, text: s.text, tone: s.tone, invert: s.invert })), idle: w.idle })} data-tone="${w.idle.tone}" data-i="0"><div class="st-row"><span class="hs-ring">${stateIcons(w, r1(20 * k))}</span><span class="st-text" style="font-size:${r1(fs)}px">${esc(w.idle.text)}</span></div>${btns ? `<div class="btns st-btns">${btns}</div>` : ""}</div>`;
     }
     case "setpoint": {
       const dec = w.decimals ?? (w.step !== undefined && !Number.isInteger(w.step) ? String(w.step).split(".")[1]!.length : 0);
@@ -576,6 +595,7 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
 <path class="tank-out" d="${shell}"/>
 <g class="tank-ticks">${ticks}</g>
 <text class="tank-num" x="${r1(x + w / 2)}" y="${r1(y + h / 2 + 1.5)}" ${bind({ kind: "text", v: p.level, decimals: 0, unit: p.unit })}>–</text>
+${condBadge(p.x + p.w + 0.3, y - 0.3, p.fault, p.warning, bind)}
 ${label(x + w / 2, p.y + p.h + 2.8 / sy, p.label)}</g>`;
     }
     case "pump": {

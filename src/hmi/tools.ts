@@ -15,7 +15,7 @@ import { findBrowser, hmiScript, previewValues, printPdf, screenshot, staticPage
 import { PID_SIZE, pidSheet, processOf } from "./pid.js";
 import { BUILTIN_SYMBOLS, importSvg, svgProblems, symbolSchema, type SymbolDef } from "./symbols.js";
 import { nativePlan } from "./native.js";
-import { canvasOf, tileBox } from "./render.js";
+import { canvasOf, cardWarnings, tileBox } from "./render.js";
 import { textWarnings } from "./labels.js";
 import { connectionWarnings, overlapWarnings } from "./route.js";
 import { TEMPLATES } from "./templates.js";
@@ -34,7 +34,7 @@ Connect pipes to ports, never by guessing points: {type: 'pipe', from: 'T-101.ri
 Variables are full instance paths: 'PLC_PRG.fbPump.xRunning', 'GVL.rLevel'. bands colour a value by range: [{from: 0, tone: 'accent'}, {from: 90, tone: 'alarm'}]. Tones: accent, ok, warn, alarm, neutral.
 Look: a calm, flat design system shared by the browser and CODESYS: colour means state (running, warning, alarm, manual) or what the operator can act on, never decoration. theme 'light' (default), 'dark' or 'contrast' (black and white, strong colours: bright light, poor eyesight), the same on every page; accent: '#e30613' puts the company colour on the current page, set-points and primary buttons (text on it turns black or white to stay readable). Every card can have an icon before its title (icon: 'temperature', 'pressure', 'flow', 'level', 'speed', 'power', 'energy', 'time', 'count', 'pump', 'valve', 'heater', 'tank', 'machine', 'alarm', 'info', 'settings', 'recipe', 'trend', ...); titles in sentence case (cards show them in small capitals). The top bar shows the screen's title and info: up to 4 fields such as {label: 'Order', text: '4711'} or {label: 'Produced', value: 'PLC_PRG.rLitres', unit: 'l'}. With more than one page a navigation rail on the left links them, each with the page's icon (screen icon: 'home', 'process', 'trend', 'alarm', 'recipe', 'settings'). Equipment state is three separate things, each with its own sign (never a coloured or grey-filled symbol, never words): the run state before the name (▶ running, ■ stopped; driven equipment: running on pumps and fans, on on symbols and stations), a valve's position as its fill (closed filled, open hollow, as on a P&ID), the mode after the name (manual: a hand in Manual, nothing in Auto) and the condition at the symbol's corner (warning: an amber triangle, fault: a red alarm circle, which wins; nothing when OK). A switch is an instrument with on (TRUE when tripped: xPressureLow, not xPressureOk): its bubble stays white and gets the same badge, red with tone: 'alarm', else amber. Station tiles use the same signs and turn their top edge amber or red for a warning or alarm. A value that belongs to the equipment (a control valve's opening, a pump's speed) goes on it as value/unit/decimals, shown under its name, not as a separate sensor. Pipes with flow turn darker; nothing moves.
 access: {min: 'Maintenance'} on a tile lets only that group and up operate it in CODESYS (after Login; lower groups and nobody logged in see it greyed out, or not at all with below: 'hide'). Groups: Operator, Maintenance, Admin.
-Make the diagram a process: every piece of equipment on a pipe (in and out), tanks fed and emptied, a heat exchanger with both circuits (product in/out, heating medium top/bottom), instruments on the line or vessel they measure ({type: 'instrument', tag: 'PSL-201', at: 'J1.c'} on a junction in the line), a motor's shaft against the machine it drives, line ends at the diagram's edge with a label (Feed, Steam, To filling); hmi_save_screen lists what doesn't fit.
+Make the diagram a process: every piece of equipment on a pipe (in and out), tanks fed and emptied, a heat exchanger with both circuits (product in/out, heating medium top/bottom), instruments on the line or vessel they measure ({type: 'instrument', tag: 'PSL-201', x, y, at: 'J1.c'}: x, y place the bubble, at is the junction in the line it measures), a motor's shaft against the machine it drives, line ends at the diagram's edge with a label (Feed, Steam, To filling); hmi_save_screen lists what doesn't fit.
 For documentation, hmi_pid exports a screen's process diagram as an engineering P&ID sheet (PDF, SVG or PNG).
 Good screens: the machine's state and commands in the frame (machine), an overview with the line of stations across the top and key values (with their scale and set-point) in a row of equal cards, alarms and status below; the process diagram large on its own page; titles short; tag names on symbols (P-101, T-101).`;
 
@@ -56,11 +56,14 @@ export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: Hm
       const r = hmi.save(screen);
       // The cards sit right of the navigation rail when the HMI has more than one page.
       const rail = hmi.screens().length > 1;
-      const looks = screen.widgets.flatMap((w) => {
-        if (w.type !== "process") return [];
-        const b = tileBox(screen, w.at, rail);
-        return [...overlapWarnings(w.items, (b.h - 46) / (b.w - 32), lib), ...textWarnings(w.items, (b.h - 46) / (b.w - 32), lib)];
-      });
+      const looks = [
+        ...cardWarnings(screen, rail),
+        ...screen.widgets.flatMap((w) => {
+          if (w.type !== "process") return [];
+          const b = tileBox(screen, w.at, rail);
+          return [...overlapWarnings(w.items, (b.h - 46) / (b.w - 32), lib), ...textWarnings(w.items, (b.h - 46) / (b.w - 32), lib)];
+        }),
+      ];
       const flow = screen.widgets.flatMap((w) => {
         if (w.type !== "process") return [];
         const b = tileBox(screen, w.at, rail);

@@ -7,8 +7,12 @@
 # - CODESYS's element creators (the objects its toolbox uses) for what the property paths
 #   can't set: a static font, a gradient, a hidden frame or fill. Added through CODESYS's
 #   object manager, like the toolbox does.
-# Rounded corners (radius type and value), the text format and the canvas background are members of CODESYS's element objects that
-# were checked alone. Nothing here writes other raw members (some raise assertion dialogs).
+# A page's elements are created in one transaction with their bindings (_create_all): one
+# transaction per element made a page take minutes.
+# Rounded corners (radius type and value), the text format, the canvas background and an image
+# switcher's position are members of CODESYS's element objects that were checked alone (read back
+# through the script driver, the build compiled). Nothing here writes other raw members (some
+# raise assertion dialogs).
 # A property that fails is reported, not fatal. render paints a visualization into a PNG.
 #
 # Keep this file ASCII-only (IronPython 2.7 inside CODESYS).
@@ -293,6 +297,98 @@ def _complex_element(c, visu, el, label, cache):
     return e
 
 
+_POS = (("m_StaticPosition.iX", "x"), ("m_StaticPosition.iY", "y"), ("m_StaticPosition.iWidth", "w"), ("m_StaticPosition.iHeight", "h"))
+
+
+# Properties CODESYS's element creators take when they create an element (set_property path ->
+# creator property), so they cost no extra transaction.
+_AT_CREATION = {
+    "Text variables.Text variable": "TextVariableExpression",
+    "Color variables.Toggle color": "ToggleColorExpression",
+    "Colors.Alarm state.Fill color": "ColorAlarm",
+    "Colors.Alarm state.Frame color": "FrameColorAlarm",
+    "Relative movement.Movement top-left.X": "RelativeMovementTopLeftX",
+    "Relative movement.Movement top-left.Y": "RelativeMovementTopLeftY",
+    "Relative movement.Movement bottom-right.X": "RelativeMovementBottomRightX",
+    "Relative movement.Movement bottom-right.Y": "RelativeMovementBottomRightY",
+    "State variables.Invisible": "InvisibleExpression",
+    "Static ID": "BitmapID",
+    "Bitmap ID variable.Bitmap ID": "BitmapIDExpression",
+}
+
+
+def _with_creator(cr, el):
+    """Set what the creator can take; returns the properties it took."""
+    done = []
+    props = dict(el.get("props") or {})
+    if el["kind"] not in _SIMPLE and el.get("invisible"):
+        props["State variables.Invisible"] = el["invisible"]
+    for path, v in props.items():
+        name = _AT_CREATION.get(path)
+        if name is None:
+            continue
+        try:
+            _pset(cr, name, _value(v))
+            done.append(path)
+        except Exception:
+            pass  # left to set_property
+    return tuple(done)
+
+
+def _create_all(c, visu, elements, warnings):
+    """Every element of the plan in one transaction, in the plan's order. Adding them one by one
+    made a page take minutes: CODESYS commits the whole visualization each time, so the build grew
+    with the square of its size (256 elements: 377 s). Shapes and pictures come from CODESYS's
+    element creators, with their bindings (_AT_CREATION). Image switchers have no creator: they are
+    copies of one the script driver made, each with its own identification and name (copies sharing
+    them fail the build: 'non unique ids', 'already has the name'), placed through the plain members
+    iX..iHeight. What a creator can't take still goes through set_property afterwards.
+    Returns {index: (id, properties already set)}."""
+    import System
+    T = se.VisualElementType
+    templates = {}
+    if any(e["kind"] == "switcher" for e in elements):
+        t = visu.visual_element_list.add_element(T.ImageSwitcher)
+        templates["switcher"] = (t.id, t.ReadOnlyElement)
+    SD = _drawing()
+    made = {}
+    try:
+        with _Modify(c.proj, visu) as vo:
+            lst = vo.VisualElemList
+            for i, el in enumerate(elements):
+                label = el.get("name") or "E%d" % i
+                try:
+                    done = ()
+                    if el["kind"] in _SIMPLE:
+                        cr = _simple_creator(el)
+                        done = _with_creator(cr, el)
+                        elem = cr.CreateVisualElement(label)
+                    elif el["kind"] == "image":
+                        cr = _creator("VisuFbElemImage")
+                        _pset(cr, "Position", SD.Rectangle(int(el["x"]), int(el["y"]), int(el["w"]), int(el["h"])))
+                        done = _with_creator(cr, el)
+                        elem = cr.CreateVisualElement(label)
+                    else:
+                        elem = templates[el["kind"]][1].Clone()
+                        _pset(elem, "Identification", System.Guid.NewGuid())
+                        _pset(elem, "InstanceName", label)  # names are unique per visualization
+                        for member, k in _POS:
+                            elem.GetVisualElemMember(member, True, int(el[k])).Value = int(el[k])
+                    elem.Id = vo.UniqueId
+                    elem.OwningObjectGuid = vo.MetaObject.ObjectGuid
+                    lst.Add(elem)
+                    made[i] = (elem.Id, done)
+                except Exception as ex:
+                    warnings.append("%s: not added: %s" % (label, to_text(ex)))
+    finally:
+        for tid, _ in templates.values():
+            try:
+                visu.visual_element_list.remove_id(tid)
+            except Exception:
+                pass
+    return made
+
+
 def _find_child(c, name):
     for ch in c.app.get_children(False):
         if name_of(ch).lower() == name.lower():
@@ -333,6 +429,12 @@ def op_visu_build(args):
     access = []
     queue = list(args.get("elements") or [])
     editor = {}
+    # All at once unless the plan has editor elements (meters, alarm tables), which need the
+    # visual editor and their own transaction, and may fall back to other elements.
+    pre = by_id = None
+    if not any(el["kind"] == "complex" for el in queue):
+        pre = _create_all(c, visu, queue, warnings)
+        by_id = dict((e.id, e) for e in visu.visual_element_list)
     i = -1
     while queue:
         el = queue.pop(0)
@@ -355,8 +457,14 @@ def op_visu_build(args):
             if el.get("access"):
                 access.append((e.id, el["access"]))
             continue
+        done = ()
         try:
-            if el["kind"] in _SIMPLE:
+            if pre is not None:
+                if i not in pre:
+                    continue  # reported by _create_all
+                eid, done = pre[i]
+                e = by_id[eid]
+            elif el["kind"] in _SIMPLE:
                 eid = _add_created(c.proj, visu, _simple_creator(el), label)
                 e = _script_element(visu, eid)
             else:
@@ -369,10 +477,10 @@ def op_visu_build(args):
             continue
         if el.get("access"):
             access.append((eid, el["access"]))
-        props = list((el.get("props") or {}).items())
+        props = [(p, v) for p, v in (el.get("props") or {}).items() if p not in done]
         if el.get("linebreak"):
             wrapped.append(eid)
-        if el["kind"] not in _SIMPLE and el.get("invisible"):
+        if el["kind"] not in _SIMPLE and el.get("invisible") and "State variables.Invisible" not in done:
             # Shapes take it when created; pictures through their state variables.
             props.append(("State variables.Invisible", el["invisible"]))
         for path, v in props:

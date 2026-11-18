@@ -429,7 +429,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
   if (m) {
     // One state shows at a time (the first whose BOOL is TRUE, else idle): its icon in a ring and a line under the bar in its colour.
     decl.push("    iMachine : INT; // the machine's state: 0 idle, 1.. the states in order");
-    impl.push(`${m.states.map((s, j) => `${j ? "ELSIF" : "IF"} ${s.on} THEN iMachine := ${j + 1};`).join(" ")} ELSE iMachine := 0; END_IF`);
+    impl.push(`${m.states.map((s, j) => `${j ? "ELSIF" : "IF"} ${s.invert ? `NOT (${s.on})` : s.on} THEN iMachine := ${j + 1};`).join(" ")} ELSE iMachine := 0; END_IF`);
     const cw = r(SPACE.corner * k);
     els.push({ kind: "rect", name: "MachineState", x: 0, y: 0, w: cw, h: cv.bar - 1, fill: p.tile2, frame: null });
     els.push({ kind: "rect", x: cw, y: 0, w: 1, h: cv.bar - 1, fill: p.border, frame: null });
@@ -657,7 +657,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         // The first state whose BOOL is TRUE (else the idle one) shows as a panel in its tone.
         const m = ++n;
         decl.push(`    iSt${m} : INT; // state panel`);
-        impl.push(`${w.states.map((s, j) => `${j ? "ELSIF" : "IF"} ${s.on} THEN iSt${m} := ${j + 1};`).join(" ")} ELSE iSt${m} := 0; END_IF`);
+        impl.push(`${w.states.map((s, j) => `${j ? "ELSIF" : "IF"} ${s.invert ? `NOT (${s.on})` : s.on} THEN iSt${m} := ${j + 1};`).join(" ")} ELSE iSt${m} := 0; END_IF`);
         // A calm card: a thin line in the state's colour along the card's top, the icon in a ring, the text in the text colour.
         const fs = stateTextSize([...w.states.map((s) => s.text), w.idle.text], box.w, k);
         const fit = stateButtonFit(box.w, k, w);
@@ -1058,6 +1058,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         els.push({ kind: "rect", x: r(x + 2), y: r(y + h - rad / 2), w: r(w - 4), h: 1, fill: p.liquid[0], frame: null, props: { "Relative movement.Movement top-left.Y": pixels(it.level, 0, it.max, r(h - rad), true) } });
         els.push({ kind: "round", x: r(x), y: r(y), w: r(w), h: r(h), fill: null, frame: p.equipLine, lineWidth: 2, radius: rad });
         els.push(text(x, y + h / 2 - 2.2 * sx, w, 4.4 * sx, `%.0f${it.unit ? ` ${it.unit}` : ""}`, [SEMI, ptPx(3.2 * sx)], p.text, "HCENTER", { props: { "Text variables.Text variable": real(it.level) } }));
+        condBadge(x + w + 0.3 * sx, y - 0.3 * sx, 2.4 * sx, it.fault, it.warning);
         label(x + w / 2, y + h + 1 * sx, it.label);
         break;
       }

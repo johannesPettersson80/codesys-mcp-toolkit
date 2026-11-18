@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+From a batch mixing unit Claude built from one prompt, start to finish, to
+see where the toolkit falls short.
+
+### Changed
+- `hmi_export_codesys` is about ten times faster: a 256-element page took
+  377 s, now 38 s. Every element went into the visualization in its own
+  transaction, and CODESYS commits the whole visualization each time, so the
+  build grew with the square of the page's size and a 4-page HMI ran past
+  client time-outs. Now a page's elements are created in one transaction,
+  with their bindings set by CODESYS's element creators. The result is the
+  same: every property read back equal to the old build's, the rendered page
+  pixel-identical, the build without errors.
+- Tanks take `fault` and `warning` like other equipment: the condition badge
+  at the vessel's corner, in the browser and in CODESYS. They were dropped
+  silently.
+- Machine states (the top bar and the state widget) take `invert`: a state
+  that shows while its BOOL is FALSE, e.g. Manual from `xAuto`.
+- `hmi_save_screen` notes value cards too small for their number: one row
+  high, the number runs into the title; too narrow with a set value, Actual
+  and Set overlap.
+
 ### Fixed
+- `create_project` creates the project's folder
+  (`BatchMixer/BatchMixer.project`); it failed with ENOENT.
+- `create_graphical` accepts comments before `PROGRAM` or `FUNCTION_BLOCK`,
+  as CODESYS does.
+- The instrument examples in the tool texts give the bubble's `x`, `y`
+  besides `at`; without them the screen failed to save.
+- The SFC transition's description says CODESYS checks it in the same cycle
+  the step becomes active, before a value the step's entry action sets.
 - `codesys_sim_test` with more than one `waitMs` step, or a `waitMs` step
   after `cycles`, failed with "Cannot start if application state is run" or
   "... single_cycle". `codesys_sim_control` `run` now leaves a running

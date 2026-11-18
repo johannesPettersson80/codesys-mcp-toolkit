@@ -66,7 +66,7 @@ const shown = {
 
 /** Things placed on a process (mimic) diagram, in a 0..100 x 0..100 box scaled to the tile. */
 const processItem = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("tank"), id, x: num, y: num, w: num, h: num, level: v, max: num.default(100), unit: z.string().optional(), label: z.string().optional(), bands: z.array(band).optional() }),
+  z.object({ type: z.literal("tank"), id, x: num, y: num, w: num, h: num, level: v, max: num.default(100), unit: z.string().optional(), label: z.string().optional(), bands: z.array(band).optional(), fault, warning }),
   z.object({ type: z.literal("pump"), id, x: num, y: num, size: num.default(12), running: v.describe("BOOL: running (▶ before its name; ■ when stopped)"), fault, warning, manual, ...shown, label: z.string().optional(), faceplate: faceplate.optional() }),
   z.object({ type: z.literal("fan"), id, x: num, y: num, size: num.default(12), running: v.describe("BOOL: running (▶ before its name; ■ when stopped)"), fault, warning, manual, ...shown, label: z.string().optional(), faceplate: faceplate.optional() }),
   z.object({ type: z.literal("valve"), id, x: num, y: num, size: num.default(8), open: v.describe("BOOL: open (drawn hollow; closed is drawn filled, as on a P&ID)"), fault, warning, manual, ...shown, vertical: z.boolean().optional(), label: z.string().optional(), faceplate: faceplate.optional() }),
@@ -173,7 +173,7 @@ export const widgetSchema = z.discriminatedUnion("type", [
       type: z.literal("state"),
       ...base,
       states: z
-        .array(z.object({ on: v, text: z.string(), tone }))
+        .array(z.object({ on: v, text: z.string(), tone, invert: z.boolean().optional().describe("TRUE: the state shows while the BOOL is FALSE (e.g. Manual from xAuto)") }))
         .min(1)
         .max(6)
         .describe("Machine states, most important first: the first whose BOOL is TRUE is shown, e.g. fault (alarm), manual (accent), running (ok), ready (warn)"),
@@ -236,7 +236,7 @@ const modeOf = {
 export const machineSchema = z
   .object({
     states: z
-      .array(z.object({ on: v, text: z.string(), tone, icon: icon.describe("Default by tone: play (ok), fault (alarm), warning (warn), manual (accent), stop (neutral)") }))
+      .array(z.object({ on: v, text: z.string(), tone, invert: z.boolean().optional().describe("TRUE: the state shows while the BOOL is FALSE (e.g. Manual from xAuto)"), icon: icon.describe("Default by tone: play (ok), fault (alarm), warning (warn), manual (accent), stop (neutral)") }))
       .min(1)
       .max(6)
       .describe("Machine states, most important first: the first whose BOOL is TRUE is shown, e.g. Fault (alarm), Manual (accent), Production (ok), Ready (warn)"),

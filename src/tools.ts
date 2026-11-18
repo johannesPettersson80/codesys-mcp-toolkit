@@ -371,6 +371,8 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         const target = absPath(ctx, path);
         if (existsSync(target)) throw new Error(`File already exists: ${target}`);
         const t = template ?? "standard";
+        // A project in its own new folder (Projects/BatchMixer/BatchMixer.project) is the usual layout.
+        await mkdir(dirname(target), { recursive: true });
         if (t === "empty") {
           const r = await b.call<{ path: string; application?: string }>("project.create_empty", { path: target }, { timeoutMs: 120_000 });
           ctx.project = { path: r.path, application: r.application };

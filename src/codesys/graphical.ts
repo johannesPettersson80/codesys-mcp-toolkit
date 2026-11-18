@@ -79,7 +79,7 @@ export const sfcSchema = z.object({
         initial: z.boolean().optional(),
         actions: z.array(sfcAction).optional(),
         next: z.string().describe("Step this one goes to"),
-        when: z.string().describe("Transition condition in ST, e.g. 'xStart AND NOT xFault'"),
+        when: z.string().describe("Transition condition in ST, e.g. 'xStart AND NOT xFault'. CODESYS checks it in the same cycle the step becomes active, before a value its entry action sets (a tare, a timer start) is there: base it on a flag the step sets, not on that value"),
       }),
     )
     .min(2)
@@ -432,7 +432,8 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
       run(async () => {
         const kinds = [a.ladder && "ladder", a.fbd && "fbd", a.cfc && "cfc", a.sfc && "sfc"].filter(Boolean);
         if (kinds.length !== 1) throw new Error("Give exactly one of ladder, fbd, cfc or sfc.");
-        const head = /^\s*(?:\{[^}]*\}\s*)*(PROGRAM|FUNCTION_BLOCK)\s+([A-Za-z_][A-Za-z0-9_]*)/i.exec(a.declaration);
+        // Pragmas and comments may come first, as CODESYS allows.
+        const head = /^\s*(?:(?:\{[^}]*\}|\(\*[\s\S]*?\*\)|\/\/[^\n]*)\s*)*(PROGRAM|FUNCTION_BLOCK)\s+([A-Za-z_][A-Za-z0-9_]*)/i.exec(a.declaration);
         if (!head) throw new Error("The declaration must start with PROGRAM or FUNCTION_BLOCK and the name.");
         if (head[2]!.toLowerCase() !== a.name.toLowerCase()) throw new Error(`The declaration names ${head[2]}, not ${a.name}.`);
         const pouType = head[1]!.toUpperCase() === "PROGRAM" ? "program" : "functionBlock";

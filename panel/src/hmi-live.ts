@@ -223,7 +223,7 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, n
       }
       case "state": {
         // The first state whose BOOL is TRUE, else the idle one: its tone colours the panel.
-        const i = b.states.findIndex((x) => truthy(val(x.v)));
+        const i = b.states.findIndex((x) => truthy(val(x.v)) !== !!x.invert);
         const s = b.states[i] ?? b.idle;
         el.dataset.tone = s.tone;
         // Which state's icon shows: 0 the idle one, 1.. the states in order.

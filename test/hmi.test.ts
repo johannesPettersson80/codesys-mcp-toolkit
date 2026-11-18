@@ -11,7 +11,7 @@ import { accessRights, GAUGE_STEPS, nativePlan, onColor, paletteFor, type Native
 import { connectionWarnings, labelSpots, meaningWarnings, overlapWarnings, portsOf, routePipe, routeProblems } from "../src/hmi/route.js";
 import { TEMPLATES } from "../src/hmi/templates.js";
 import { BUILTIN_SYMBOLS } from "../src/hmi/symbols.js";
-import { canvasOf, HMI_CSS, tileBox } from "../src/hmi/render.js";
+import { canvasOf, cardWarnings, HMI_CSS, tileBox } from "../src/hmi/render.js";
 import { THEMES } from "../src/hmi/theme.js";
 import type { ProcessItem } from "../src/hmi/spec.js";
 import { findBrowser, symbolSheet } from "../src/hmi/service.js";
@@ -583,6 +583,34 @@ describe("themes, brand colour and pipe flow", () => {
     expect(HMI_CSS.match(/\.tank-num\{[^}]*\}/)![0]).not.toContain("stroke");
     const ticks = html.match(/<g class="tank-ticks">(.*?)<\/g>/)![1];
     expect(ticks.match(/<line/g)).toHaveLength(2);
+  });
+
+  it("a tank shows its fault and warning as the condition badge, in the browser and natively", () => {
+    const items = [{ type: "tank", x: 10, y: 10, w: 10, h: 60, level: "PLC_PRG.rLevel", label: "T-1", fault: "PLC_PRG.xTankFault", warning: "PLC_PRG.xTankWarn" }];
+    const screen = screenSchema.parse({ ...SCREEN, widgets: [{ type: "process", at: [1, 1, 12, 8], items }] });
+    const r = renderScreen(screen);
+    const bound = JSON.stringify(r.bindings);
+    expect(bound).toContain("PLC_PRG.xTankFault");
+    expect(bound).toContain("PLC_PRG.xTankWarn");
+    expect(r.html.match(/class="cb/g)?.length).toBeGreaterThanOrEqual(1);
+    const plan = nativePlan(screen, [{ name: "Overview", title: "A" }]);
+    expect(JSON.stringify(plan.elements)).toContain("PLC_PRG.xTankFault");
+  });
+
+  it("a machine state can show while its BOOL is FALSE (invert)", () => {
+    const screen = screenSchema.parse({ ...SCREEN, machine: { states: [{ on: "PLC_PRG.xAuto", invert: true, text: "Manual", tone: "accent" }] } });
+    expect(JSON.stringify(renderScreen(screen).bindings)).toContain('"invert":true');
+    const plan = nativePlan(screen, [{ name: "Overview", title: "A" }]);
+    expect(plan.helper.implementation).toContain("IF NOT (PLC_PRG.xAuto) THEN iMachine := 1;");
+  });
+
+  it("notes value cards too small for their number", () => {
+    const small = screenSchema.parse({ ...SCREEN, widgets: [{ type: "value", title: "A", at: [1, 1, 2, 1], value: "PLC_PRG.rA", set: "PLC_PRG.rSetA", unit: "kg" }] });
+    const notes = cardWarnings(small);
+    expect(notes.join(" ")).toMatch(/runs into the title/);
+    expect(notes.join(" ")).toMatch(/Actual and Set overlap/);
+    const fine = screenSchema.parse({ ...SCREEN, widgets: [{ type: "value", title: "A", at: [1, 1, 4, 3], value: "PLC_PRG.rA", set: "PLC_PRG.rSetA", unit: "kg" }] });
+    expect(cardWarnings(fine)).toEqual([]);
   });
 
   it("a tank's name inside the vessel has the text colour; other names stay quiet", () => {

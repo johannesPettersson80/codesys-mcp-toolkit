@@ -166,6 +166,10 @@ describe("create_project", () => {
       expect(await call("create_project", { path: "FromMine.project", template: mine })).not.toMatch(/Device updated/);
       expect(readFileSync(join(workspace, "FromMine.project"), "utf8")).toBe("OLD-TEMPLATE");
 
+      // In its own new folder, as a project usually lives.
+      expect(await call("create_project", { path: "BatchMixer/BatchMixer.project", template: mine })).toMatch(/Created/);
+      expect(readFileSync(join(workspace, "BatchMixer", "BatchMixer.project"), "utf8")).toBe("OLD-TEMPLATE");
+
       const existing = join(workspace, "Existing.project");
       writeFileSync(existing, "OLD-TEMPLATE");
       await call("open_project", { path: existing });
