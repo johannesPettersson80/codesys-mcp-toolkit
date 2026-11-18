@@ -750,7 +750,19 @@ def op_ui_open(args):
     state = mcp_ui.open_editor(se, obj)
     if state == "unavailable":
         raise OpError("unavailable", "This CODESYS doesn't let scripts open editors.")
-    return {"path": c.path_of(obj), "opened": state}
+    out = {"path": c.path_of(obj), "opened": state}
+    if state == "opened":
+        # A visualization: show the whole page, not its top-left corner at 100 %.
+        try:
+            o = _object_mgr().GetObjectToRead(c.proj.handle, obj.guid).Object
+            if o.GetType().FullName == "_3S.CoDeSys.VisualObject.VisualObject":
+                se.system.delay(300)
+                zoom = mcp_ui.fit_visualization(se, (o.Size.Width, o.Size.Height))
+                if zoom is not None:
+                    out["zoom"] = round(zoom * 100)
+        except Exception as e:
+            out["zoom_error"] = to_text(e)[:160]
+    return out
 
 
 mcp_ops.OPS.update({

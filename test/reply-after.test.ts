@@ -1,4 +1,8 @@
-/** A call that runs past the client's time limit replies "still running"; result hands over its result. */
+/**
+ * What the codesys tool replies, with a stub bridge: a call that runs past the client's time
+ * limit replies "still running" and result hands over its result; show_in_codesys says how
+ * far it zoomed a visualization.
+ */
 import { afterEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
@@ -25,6 +29,25 @@ async function connect(replyAfterMs: number) {
   };
   return call;
 }
+
+describe("show_in_codesys", () => {
+  it("says how far it zoomed a visualization to show the whole page", async () => {
+    const calls: string[] = [];
+    const bridge = {
+      health: () => ({ state: "ready" }),
+      waitReady: async () => true,
+      call: async (op: string) => (calls.push(op), op === "ui.open" ? { path: "Visu_Tanks", opened: "opened", zoom: 46 } : {}),
+    } as unknown as AppContext["bridge"];
+    const server = createServer({ bridge, autosave: false, workspace: tempDir(), startWaitMs: 0 } as AppContext);
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(a);
+    client = new Client({ name: "t", version: "1" });
+    await client.connect(b);
+    const r = await client.callTool({ name: "codesys", arguments: { action: "show_in_codesys", args: { path: "Visu_Tanks" } } });
+    expect((r.content as { text: string }[])[0]!.text).toBe("Opened Visu_Tanks in the CODESYS window, zoomed to 46 % so the whole page shows.");
+    expect(calls).toContain("ui.open");
+  });
+});
 
 describe("reply before the client gives up", () => {
   it("replies 'still running' and hands the result over through result", async () => {

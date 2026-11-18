@@ -52,3 +52,34 @@ def open_editor(se, obj):
     stub = objects.GetMetaObjectStub(se.projects.primary.handle, obj.guid)
     engine.Frame.OpenEditorView(stub, Guid.Empty, None)
     return "opened"
+
+
+def fit_visualization(se, size):
+    """Zooms the visualization editor in front so the whole page (size: its width, height)
+    fits its pane. At 100 % a page is wider than the editor pane of a normal window, and the
+    user (or a recording) sees only a corner of it.
+
+    Uses the editor's own zoom (VisualEditor.ZoomFactor, the zoom box under the page).
+    Returns the zoom set, or None if there is no visualization editor in front."""
+    if hasattr(se, "FAKE"):
+        return None
+    env = _env()
+    if env is None:
+        return None
+    frame = env.GetProperty("Engine").GetValue(None, None).Frame
+    ve = getattr(frame.ActiveView, "VisualEditor", None)
+    if ve is None:
+        return None
+    w, h = size
+    pane = None
+    for _ in range(10):
+        pane = ve.ClientSize
+        if pane.Width > 50 and pane.Height > 50:
+            break
+        se.system.delay(100)
+    if pane is None or w <= 0 or h <= 0:
+        return None
+    # A margin for the scroll bars; at most 200 %.
+    zoom = max(0.1, min(2.0, (pane.Width - 24) / float(w), (pane.Height - 24) / float(h)))
+    ve.ZoomFactor = zoom
+    return zoom

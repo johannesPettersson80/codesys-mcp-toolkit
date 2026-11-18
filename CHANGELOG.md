@@ -31,6 +31,11 @@ see where the toolkit falls short.
   and Set overlap.
 
 ### Fixed
+- `show_in_codesys` zooms a visualization so the whole page fits the editor.
+  At 100 % a 1280-pixel page is wider than the editor pane between the
+  Devices and Toolbox panes, so the window showed its top-left corner and the
+  Start and Stop buttons and the alarms were off-screen. It uses the editor's
+  own zoom and says how far it zoomed.
 - A call still running after 50 s replies that it is still running, and
   `{"action": "result"}` waits for it and returns its result. Claude Desktop
   gives up on a call after 60 s, progress or not, so an HMI export, or a batch

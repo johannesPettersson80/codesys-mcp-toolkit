@@ -1174,13 +1174,13 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     "show_in_codesys",
     {
       description:
-        "With --show-window: open an object in its editor in the CODESYS window (a POU, a visualization such as Visu_Overview, a device, a GVL), so the user sees it there. While the simulation runs, the editor shows live values and a visualization runs. Fails without the window.",
+        "With --show-window: open an object in its editor in the CODESYS window (a POU, a visualization such as Visu_Overview, a device, a GVL), so the user sees it there. A visualization is zoomed so the whole page fits the editor. While the simulation runs, the editor shows live values and a visualization runs. Fails without the window.",
       inputSchema: z.object({ path: pathArg.describe("The object, e.g. 'Visu_Overview' or 'PLC_PRG' or '/PLCWinNT/Ethernet'") }),
     },
     async ({ path }) =>
       run(ctx, async () => {
-        const r = await b.call<{ path: string }>("ui.open", { path });
-        return `Opened ${r.path} in the CODESYS window.`;
+        const r = await b.call<{ path: string; zoom?: number }>("ui.open", { path });
+        return `Opened ${r.path} in the CODESYS window${r.zoom ? `, zoomed to ${r.zoom} % so the whole page shows` : ""}.`;
       }),
   );
 
