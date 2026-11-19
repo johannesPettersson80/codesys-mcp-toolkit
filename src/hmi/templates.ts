@@ -30,7 +30,7 @@ export const TEMPLATES: Record<string, { use: string; screen: Template }> = {
           ],
         },
         { type: "gauge", title: "Level", at: [9, 1, 4, 3], value: "PRG.rLevel", min: 0, max: 100, unit: "%", bands: [{ from: 0, tone: "accent" }, { from: 85, tone: "warn" }, { from: 95, tone: "alarm" }] },
-        { type: "status", title: "Status", at: [9, 4, 2, 2], items: [{ label: "Pump running", on: "PRG.xPumpRunning" }, { label: "Auto", on: "PRG.xAuto", tone: "accent" }, { label: "Fault", on: "PRG.xFault", tone: "alarm" }] },
+        { type: "status", title: "Status", at: [9, 4, 2, 2], items: [{ label: "Pump running", off: "Pump stopped", on: "PRG.xPumpRunning" }, { label: "Auto", on: "PRG.xAuto", tone: "accent" }, { label: "Fault", on: "PRG.xFault", tone: "alarm" }] },
         { type: "value", title: "Flow", at: [11, 4, 2, 2], value: "PRG.rFlow", unit: "m³/h", decimals: 1, trend: true },
         { type: "trend", title: "Level and flow", at: [1, 6, 5, 3], series: [{ value: "PRG.rLevel", label: "Level %" }, { value: "PRG.rFlow", label: "Flow m³/h" }], seconds: 120 },
         { type: "buttons", title: "Pump", at: [6, 6, 3, 2], items: [{ label: "Start", variable: "PRG.xStart", tone: "ok" }, { label: "Stop", variable: "PRG.xStop" }] },

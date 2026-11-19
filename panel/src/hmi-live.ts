@@ -126,12 +126,11 @@ export function mountLive(root: HTMLElement, bindings: Binding[], send: Write, n
     if (lo === undefined) min -= pad;
     if (hi === undefined) max += pad;
     series.forEach((pts, i) => {
-      const d = pts
-        .filter((p) => p.t >= t0)
-        .map((p, k) => `${k ? "L" : "M"}${(((p.t - t0) / (t1 - t0)) * vb.width).toFixed(1)} ${(vb.height - ((p.v - min) / (max - min)) * vb.height).toFixed(1)}`)
-        .join(" ");
+      const xy = pts.filter((p) => p.t >= t0).map((p) => [((p.t - t0) / (t1 - t0)) * vb.width, vb.height - ((p.v - min) / (max - min)) * vb.height] as const);
+      const d = xy.map(([x, y], k) => `${k ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
       paths[i]?.setAttribute("d", d);
-      if (fill && i === 0 && d) fill.setAttribute("d", `${d} L${vb.width} ${vb.height} L0 ${vb.height} Z`.replace(/^M[\d.]+/, (m) => m));
+      // The fill closes under the line itself: a line of the last few seconds doesn't get a wedge across the card.
+      if (fill && i === 0) fill.setAttribute("d", xy.length > 1 ? `${d} L${xy[xy.length - 1]![0].toFixed(1)} ${vb.height} L${xy[0]![0].toFixed(1)} ${vb.height} Z` : "");
     });
     return { min, max };
   }

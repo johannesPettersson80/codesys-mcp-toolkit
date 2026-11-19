@@ -150,7 +150,21 @@ export const widgetSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("gauge"), ...base, value: v, min: num.default(0), max: num.default(100), unit: z.string().optional(), decimals: z.number().int().optional(), bands: z.array(band).optional() }),
   z.object({ type: z.literal("bar"), ...base, value: v, min: num.default(0), max: num.default(100), unit: z.string().optional(), vertical: z.boolean().optional(), bands: z.array(band).optional(), set: v.optional().describe("The set-point, as a marker on the bar") }),
-  z.object({ type: z.literal("status"), ...base, items: z.array(z.object({ label: z.string(), on: v, tone: tone.optional(), invert: z.boolean().optional() })).min(1) }),
+  z.object({
+    type: z.literal("status"),
+    ...base,
+    items: z
+      .array(
+        z.object({
+          label: z.string().describe("Shown while on, e.g. 'XV-101 open'"),
+          off: z.string().optional().describe("Shown while off, e.g. 'XV-101 closed'. Without it the label stays, greyed: give off when the label states the on condition"),
+          on: v,
+          tone: tone.optional(),
+          invert: z.boolean().optional(),
+        }),
+      )
+      .min(1),
+  }),
   z.object({
     type: z.literal("buttons"),
     ...base,

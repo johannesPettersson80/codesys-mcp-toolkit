@@ -571,7 +571,7 @@ describe("themes, brand colour and pipe flow", () => {
     expect(() => screenSchema.parse({ ...SCREEN, accent: "red" })).toThrow();
   });
 
-  it("a tank's level number reads on the liquid without a halo, clear of the scale marks", () => {
+  it("a tank's level number reads on the liquid without a halo, and no unlabelled scale marks", () => {
     // WCAG 2 contrast: the number is large text (3:1); the contrast theme keeps 4.5:1.
     const lum = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)).reduce((s, c, i) => s + c * [0.2126, 0.7152, 0.0722][i], 0);
     const ratio = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
@@ -581,8 +581,32 @@ describe("themes, brand colour and pipe flow", () => {
     }
     const html = renderScreen(screenSchema.parse({ ...SCREEN, widgets: [{ type: "process", at: [1, 1, 12, 8], items: [{ type: "tank", x: 10, y: 10, w: 10, h: 60, level: "PLC_PRG.rLevel", label: "T-1" }] }] })).html;
     expect(HMI_CSS.match(/\.tank-num\{[^}]*\}/)![0]).not.toContain("stroke");
-    const ticks = html.match(/<g class="tank-ticks">(.*?)<\/g>/)![1];
-    expect(ticks.match(/<line/g)).toHaveLength(2);
+    // Ticks at a quarter and three quarters had no labels and read as stray lines inside the vessel.
+    expect(html).not.toContain("tank-ticks");
+  });
+
+  it("a status item can say what it is while off ('XV-101 closed', not a greyed 'XV-101 open')", () => {
+    const items = [{ label: "XV-101 open", off: "XV-101 closed", on: "GVL_IO.xValveA" }, { label: "P-201 running", on: "GVL_IO.xPump" }];
+    const screen = screenSchema.parse({ ...SCREEN, widgets: [{ type: "status", title: "Equipment", at: [1, 1, 4, 3], items }] });
+    const html = renderScreen(screen).html;
+    expect(html).toContain('<span class="l-on">XV-101 open</span><span class="l-off">XV-101 closed</span>');
+    expect(html).toContain("<span>P-201 running</span>");
+    expect(HMI_CSS).toContain(".led .l-on,.led.on .l-off{display:none}.led.on .l-on{display:inline}");
+    // In CODESYS: one text each, hidden by the state.
+    const els = nativePlan(screen, [{ name: "Overview", title: "A" }]).elements as NativeElement[];
+    expect(els.find((e) => e.text === "XV-101 open")!.invisible).toBe("NOT (GVL_IO.xValveA)");
+    expect(els.find((e) => e.text === "XV-101 closed")!.invisible).toBe("GVL_IO.xValveA");
+  });
+
+  it("a native setpoint card's actual value leaves room for its unit", () => {
+    const screen = screenSchema.parse({ ...SCREEN, widgets: [{ type: "setpoint", title: "Ingredient A", at: [1, 5, 3, 2], variable: "GVL.rSet", actual: "GVL.rAct", min: 0, max: 900, step: 10, unit: "kg" }] });
+    const els = nativePlan(screen, [{ name: "Overview", title: "A" }]).elements as NativeElement[];
+    const num = els.find((e) => e.text === "%.1f" && String(e.props?.["Text variables.Text variable"] ?? "").length > 0)!;
+    const unit = els.find((e) => e.text === "kg" && e.y > num.y)!;
+    const minus = els.find((e) => e.text === "−")!;
+    // The unit's text starts and (at its size) ends before the − button.
+    const unitFs = Number(String(unit.font?.[1] ?? "").replace(/\D+$/, "")) || 12;
+    expect(unit.x + 2 * unitFs).toBeLessThanOrEqual(minus.x);
   });
 
   it("a tank shows its fault and warning as the condition badge, in the browser and natively", () => {

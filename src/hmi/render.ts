@@ -351,7 +351,7 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
       return `<div class="bar-wrap"><div class="v-main"><span class="bar-num" ${bind({ kind: "text", v: w.value, decimals: 1, bands: w.bands })}>–</span><span class="v-unit">${esc(w.unit ?? "")}</span></div><div class="bar" ${lvl}><div class="bar-fill"></div>${set}</div><div class="v-lims"><span>${w.min}</span><span>${w.max}</span></div></div>`;
     }
     case "status":
-      return `<ul class="status">${w.items.map((i) => `<li class="led tone-${toneOf(i.tone ?? "ok")}" ${bind({ kind: "on", v: i.on, invert: i.invert })}><span class="led-dot"></span><span>${esc(i.label)}</span></li>`).join("")}</ul>`;
+      return `<ul class="status">${w.items.map((i) => `<li class="led tone-${toneOf(i.tone ?? "ok")}" ${bind({ kind: "on", v: i.on, invert: i.invert })}><span class="led-dot"></span>${i.off !== undefined ? `<span class="l-on">${esc(i.label)}</span><span class="l-off">${esc(i.off)}</span>` : `<span>${esc(i.label)}</span>`}</li>`).join("")}</ul>`;
     case "buttons": {
       const items = w.items.map((i) => ({ ...i, ic: i.icon ?? buttonIcon(i.label) }));
       const layout = buttonLayout(items.map((i) => ({ label: i.label, icon: !!i.ic })), bodyW, k);
@@ -590,8 +590,7 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
     case "tank": {
       const x = r1(p.x), y = Y(p.y), w = r1(p.w), h = Y(p.h);
       const clip = id("tk");
-      // Scale marks at a quarter and three quarters: the level number marks the middle, so no tick runs into it.
-      const ticks = [0.25, 0.75].map((f) => `<line x1="${r1(x + w - 2.2)}" x2="${r1(x + w - 0.8)}" y1="${r1(y + h * (1 - f))}" y2="${r1(y + h * (1 - f))}"/>`).join("");
+      // No scale marks: unlabelled ticks read as stray lines; the fill and the number give the level.
       // ISO 10628-2 1.5: a vessel with dished ends; the level as a flat fill and its value in the text colour.
       const dish = r1(Math.min(w * 0.18, h * 0.12));
       const shell = `M${x} ${r1(y + dish)}Q${x} ${y} ${r1(x + w / 2)} ${y}Q${r1(x + w)} ${y} ${r1(x + w)} ${r1(y + dish)}V${r1(y + h - dish)}Q${r1(x + w)} ${r1(y + h)} ${r1(x + w / 2)} ${r1(y + h)}Q${x} ${r1(y + h)} ${x} ${r1(y + h - dish)}Z`;
@@ -600,7 +599,6 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
 <path class="tank-shell" d="${shell}"/>
 <g clip-path="url(#${clip})"><g class="tank-liq" style="transform-origin:${x}px ${r1(y + h)}px"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></g></g>
 <path class="tank-out" d="${shell}"/>
-<g class="tank-ticks">${ticks}</g>
 <text class="tank-num" x="${r1(x + w / 2)}" y="${r1(y + h / 2 + 1.5)}" ${bind({ kind: "text", v: p.level, decimals: 0, unit: p.unit })}>–</text>
 ${condBadge(p.x + p.w + 0.3, y - 0.3, p.fault, p.warning, bind)}
 ${label(x + w / 2, p.y + p.h + 2.8 / sy, p.label)}</g>`;
@@ -769,6 +767,7 @@ export const HMI_CSS = String.raw`
 .led{display:flex;align-items:center;gap:calc(10px*var(--k));font-size:var(--f-body);color:var(--muted);transition:color .3s}
 .led{color:var(--text2)}.led-dot{width:calc(12px*var(--k));height:calc(12px*var(--k));border-radius:50%;border:2px solid var(--neutral);background:transparent;transition:background .3s;flex:none}
 .led.on{color:var(--fg)}.led.on .led-dot{background:var(--c);border-color:var(--c)}
+.led .l-on,.led.on .l-off{display:none}.led.on .l-on{display:inline}
 .btns{display:flex;gap:calc(10px*var(--k));height:100%;align-items:center}.btns.col{flex-direction:column;align-items:stretch;justify-content:center}
 .btns.grid{display:grid;grid-template-columns:1fr 1fr;align-content:center}
 .btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:calc(8px*var(--k));min-height:calc(44px*var(--k));padding:0 calc(14px*var(--k));border-radius:var(--rs);border:1px solid var(--c);background:var(--c);color:var(--on-c);font-size:var(--f-body);font-weight:600;line-height:1;cursor:pointer;transition:filter .15s,background .15s}
@@ -852,7 +851,6 @@ export const HMI_CSS = String.raw`
 .pipe-flow{display:none}.pipe-outer{transition:stroke .3s}.pipe.on .pipe-outer{stroke:var(--equip-line)}
 .tank{--p:0}.tank-shell{fill:var(--surface)}.tank-out{fill:none;stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke}.tank-liq{transform:scaleY(var(--p));transition:transform .8s cubic-bezier(.2,.8,.2,1)}
 .tank-liq rect{fill:var(--liquid)}.tank[data-tone=warn] .tank-liq rect{fill:var(--warn)}.tank[data-tone=alarm] .tank-liq rect{fill:var(--alarm)}
-.tank-ticks line{stroke:var(--equip-line);stroke-width:1px;vector-effect:non-scaling-stroke}
 .tank-num{font-size:3.2px;font-weight:600;fill:var(--fg);text-anchor:middle;font-variant-numeric:tabular-nums}
 .sym{--state:var(--equip);--body:var(--surface);--body2:var(--equip);--line:var(--equip-line);transition:filter .3s}
 .sym.on{--state:var(--equip-on);--line:var(--equip-line-on)}.sym.nostat{--state:var(--surface);--line:var(--equip-line)}

@@ -244,9 +244,13 @@ export function previewValues(screen: Screen): Values {
   return out;
 }
 
-/** A self-contained page that shows one screen with fixed values (for screenshots). */
-export function staticPage(screen: Screen, values: Values, sim: { state?: string }, script: string, page: PageContext = {}): string {
-  const data = JSON.stringify({ screen, values, sim, page }).replace(/</g, "\\u003c");
+/**
+ * A self-contained page that shows one screen with fixed values (for screenshots). seed makes up
+ * a minute of history around the values so trends show a line; live values don't get one, as a
+ * screenshot must not show a past that didn't happen.
+ */
+export function staticPage(screen: Screen, values: Values, sim: { state?: string }, script: string, page: PageContext = {}, seed = true): string {
+  const data = JSON.stringify({ screen, values, sim, page, seed }).replace(/</g, "\\u003c");
   const cv = canvasOf(screen);
   return `<!doctype html><html><head><meta charset="utf-8"><title>${screen.title.replace(/[<&]/g, "")}</title>
 <style>html,body{margin:0;background:#05080f}body{width:${cv.w}px;height:${cv.h}px;overflow:hidden}</style></head>

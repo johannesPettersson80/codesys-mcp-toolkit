@@ -21,8 +21,17 @@ see where the toolkit falls short.
   IEC P1 and P0 qualifiers; `create_graphical` accepted them and the build
   failed with "'P1' is not a valid qualifier". An action with P1 or P0 now
   becomes the step's entry or exit action. `read_objects` reads them back.
+- Status items take `off`: the text while off. A list of "XV-101 open",
+  "P-201 running" read as if everything ran, with only a hollow dot for the
+  ones that didn't; now it can say "XV-101 closed". In the browser and in
+  CODESYS.
 
 ### Changed
+- Tanks have no scale marks: the two short ticks at a quarter and three
+  quarters had no labels and read as stray lines inside the vessel.
+- `hmi_screenshot` with live values from the simulation shows no made-up
+  trend history: a trend shows what was recorded, not a minute of invented
+  movement around the present value. Example values still get one.
 - `hmi_export_codesys` is about four times faster: the batch mixer's 4-page
   HMI (724 elements) took 689 s, now 176 s; building one 256-element page
   took 377 s, now 38 s (the alarms, alarm history and image pools take what
@@ -77,6 +86,10 @@ see where the toolkit falls short.
 - `help` runs as a step of a batch; it made the whole batch fail.
 
 ### Fixed
+- In CODESYS, a setpoint card's actual value leaves room for its unit: the
+  unit ran under the set group's − button ("0.0 k").
+- A trend's fill closes under its own line: with only the last few seconds
+  recorded (a page just opened) it drew a wedge across the whole card.
 - Deleting a program takes it out of the tasks that call it, and
   `configure_task` `remove_calls` works: CODESYS's scripting can't remove a
   call, so the task is made again with the same settings and its other calls.

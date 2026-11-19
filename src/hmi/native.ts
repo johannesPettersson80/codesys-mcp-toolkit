@@ -392,10 +392,16 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     els.push({ kind: "circle", x: r(ax - 4), y: r(ay - 4), w: 8, h: 8, fill: p.equipLine, frame: null });
   };
   /** A status lamp: a ring that fills in its tone while the expression is TRUE, and its label. */
-  const lamp = (out: NativeElement[], x: number, y: number, w: number, label: string, on: string, tone: Tone) => {
+  const lamp = (out: NativeElement[], x: number, y: number, w: number, label: string, on: string, tone: Tone, off?: string) => {
     const d = 12 * k;
     out.push({ kind: "circle", x: r(x), y: r(y + 9.5 * k - d / 2), w: r(d), h: r(d), fill: p.tile, frame: p.tones.neutral, lineWidth: Math.max(1, r(2 * k)), props: { "Color variables.Toggle color": on, "Colors.Alarm state.Fill color": c(p.tones[tone]), "Colors.Alarm state.Frame color": c(p.tones[tone]) } });
-    out.push(text(x + 22 * k, y, w - 22 * k, 19 * k, label, F.body, p.text2, "LEFT", { props: { "Color variables.Toggle color": on, "Text properties.Font alarm color": c(p.text) } }));
+    if (off === undefined) {
+      out.push(text(x + 22 * k, y, w - 22 * k, 19 * k, label, F.body, p.text2, "LEFT", { props: { "Color variables.Toggle color": on, "Text properties.Font alarm color": c(p.text) } }));
+      return;
+    }
+    // The on text while on, the off text (greyed) while off.
+    out.push(text(x + 22 * k, y, w - 22 * k, 19 * k, label, F.body, p.text, "LEFT", { invisible: `NOT (${on})` }));
+    out.push(text(x + 22 * k, y, w - 22 * k, 19 * k, off, F.body, p.text2, "LEFT", { invisible: on }));
   };
   /** A number right-aligned in room for its range, and its unit after it; returns the number's width. */
   const number = (x: number, y: number, fs: number, v: string, decimals: number | undefined, unit: string | undefined, bands?: { from: number; tone: Tone }[], min?: number, max?: number, color: Argb = p.text): number => {
@@ -631,7 +637,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         break;
       }
       case "status":
-        w.items.forEach((it, i) => lamp(els, box.x, box.y + i * 29 * k, box.w, it.label, it.invert ? `NOT ${it.on}` : it.on, it.tone ?? "ok"));
+        w.items.forEach((it, i) => lamp(els, box.x, box.y + i * 29 * k, box.w, it.label, it.invert ? `NOT ${it.on}` : it.on, it.tone ?? "ok", it.off));
         break;
       case "buttons": {
         const items = w.items.map((i) => ({ ...i, ic: i.icon ?? buttonIcon(i.label) }));
@@ -710,7 +716,11 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         const sx0 = box.x + (w.actual ? actW + 12 * k : 0);
         if (w.actual) {
           els.push(text(box.x, y0, actW, 16 * k, "Actual", F.small, p.text2));
-          const af = Math.min(TYPE.value * k, actW / 2.8);
+          // Number and unit both fit in the column: the unit ran under the set group's − button ("0.0 k").
+          const dA = w.decimals ?? Math.max(dec, 1);
+          const digitsA = Math.max(3, ...[w.min, w.max].map((n) => n.toFixed(dA).length));
+          const unitEm = w.unit ? w.unit.length * 0.72 * 0.6 : 0;
+          const af = Math.min(TYPE.value * k, actW / 2.8, (actW - 8 * k) / (digitsA * 0.56 + unitEm));
           number(box.x, y0 + total - 14 * k - af * 1.1, af, w.actual, w.decimals ?? Math.max(dec, 1), w.unit, undefined, w.min, w.max);
         }
         els.push(text(sx0, y0, colW, 16 * k, "Set", F.small, p.text2));

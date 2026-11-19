@@ -10,7 +10,7 @@ import { mountLive, seedHistory, type LiveScreen, type Values } from "./hmi-live
 
 declare global {
   interface Window {
-    HMI_STATIC?: { screen: Screen; values: Values; sim?: { state?: string }; page?: PageContext };
+    HMI_STATIC?: { screen: Screen; values: Values; sim?: { state?: string }; page?: PageContext; seed?: boolean };
   }
 }
 
@@ -138,7 +138,7 @@ const data = window.HMI_STATIC;
 if (data) {
   fit(stage, true);
   const s = mount(stage, data.screen, () => undefined, data.page ?? {});
-  seedHistory(s, data.values);
+  if (data.seed !== false) seedHistory(s, data.values);
   s.update(data.values, data.sim);
   document.body.dataset.ready = "1";
 } else {
