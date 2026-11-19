@@ -427,6 +427,10 @@ online mode:
 
 ![The same window during the simulation: PLC_PRG shows xEnable and xOn as TRUE](docs/images/codesys-window-sim.png)
 
+The window is yours to close. Closing it stops the toolkit's script in it, and
+CODESYS closes as usual, asking about unsaved changes. The next tool call starts
+CODESYS again.
+
 CODESYS's scripting API has no call for opening an editor, so the toolkit uses
 CODESYS's own (undocumented) frame for it, checked on SP21 and SP22. If a CODESYS
 version doesn't have it, nothing opens and everything else works as before.

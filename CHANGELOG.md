@@ -91,6 +91,12 @@ see where the toolkit falls short.
 - `help` runs as a step of a batch; it made the whole batch fail.
 
 ### Fixed
+- With `--show-window`, closing the CODESYS window works. CODESYS ignores a
+  close while a script runs, and the toolkit's watcher is a script that runs
+  until the server stops: the X button did nothing, and the window stayed
+  until the server was stopped. The watcher now notes the close, stops, and
+  closes the window once its script has returned. The next tool call starts
+  CODESYS again.
 - In CODESYS, the alarm card's active rows close up to the top: each alarm had
   a fixed row, so a pump dry run alone (the fourth alarm) sat at the bottom of
   an empty card. A row now moves up one row for every row above it that isn't

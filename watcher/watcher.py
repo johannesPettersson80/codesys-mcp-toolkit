@@ -177,6 +177,61 @@ def start_dialog_watch(ui=False):
     t.start()
 
 
+def watch_user_close():
+    """With the window shown, closing CODESYS ends the watcher, so CODESYS can close.
+
+    CODESYS ignores a close while a script runs, and the watcher is a script that runs until the
+    server stops it: the window's X did nothing. The main form's FormClosing still fires, so the
+    watcher notes it there and leaves its loop; close_after_script() then closes the window once
+    the script has returned. The server sees CODESYS exit and starts it again on the next call."""
+    try:
+        import clr
+        clr.AddReference("System.Windows.Forms")
+        from System.Windows.Forms import Application
+        forms = list(Application.OpenForms)
+        log("open forms: %s" % ", ".join(to_text(f.GetType().FullName) for f in forms))
+        if not forms:
+            return None
+        main = forms[0]
+
+        def on_closing(sender, e):
+            # The X button, the taskbar's Close window and Alt+F4 (UserClosing or, sent from
+            # another process, TaskManagerClosing), or Windows shutting down: all mean let go.
+            # CODESYS itself cancels the close while the script runs.
+            log("close requested (reason %s, cancel %s)" % (e.CloseReason, e.Cancel))
+            if not STATE.get("closing"):
+                STATE["user_close"] = True
+        main.FormClosing += on_closing
+        return main
+    except BaseException as e:
+        log("close watch unavailable: %s" % to_text(e))
+        return None
+
+
+def close_after_script(main):
+    """Close the window once, after the script has returned (CODESYS ignores it before that).
+    Once only: with unsaved changes each Close() asks to save them, and a repeating close
+    stacked one question on another. Should this one come too early, the next X closes."""
+    try:
+        import __builtin__
+        from System.Windows.Forms import Timer
+        STATE["closing"] = True
+        t = Timer()
+        t.Interval = 500
+
+        def tick(sender, args):
+            t.Stop()
+            try:
+                main.Close()
+            except BaseException as e:
+                log("close failed: %s" % to_text(e))
+        t.Tick += tick
+        t.Start()
+        __builtin__._mcp_close_timer = t  # keep it alive after the script returns
+    except BaseException as e:
+        log("close after script unavailable: %s" % to_text(e))
+
+
 def sleep_ms(se, ms):
     delay = getattr(getattr(se, "system", None), "delay", None)
     if delay is not None and not hasattr(se, "FAKE"):
@@ -265,10 +320,24 @@ def main(ui=False):
     log(prompts)
     if not hasattr(se, "FAKE"):
         start_dialog_watch(ui)
+    main_form = watch_user_close() if ui and not hasattr(se, "FAKE") else None
     beat("idle")
     write_json_atomic(READY, {"pid": PID, "ts": now(), "python": sys.version.split()[0], "prompts": prompts, "scripting": scripting_version(), "window": ui})
     last_parent_check = 0.0
     while True:
+        if STATE.get("user_close"):
+            log("CODESYS closed in its window; exiting")
+            # As codesys_sim_stop: log out and take the simulation flag off the device, which
+            # the toolkit never saves, so the save question on close can't write it.
+            stop_sim = mcp_ops.OPS.get("sim.stop")
+            if stop_sim is not None:
+                try:
+                    stop_sim({})
+                except BaseException as e:
+                    log("simulation stop on close failed: %s" % to_text(e))
+            beat("stopped", "closed by user")
+            close_after_script(main_form)
+            return
         t = now()
         if PARENT_PID and t - last_parent_check > 2.0:
             last_parent_check = t
