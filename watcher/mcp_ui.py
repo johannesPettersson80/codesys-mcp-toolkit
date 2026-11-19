@@ -54,6 +54,37 @@ def open_editor(se, obj):
     return "opened"
 
 
+def _give_room(se, control):
+    """Makes room for a visualization page before it is fitted: maximizes the CODESYS window
+    (a page is 1280 px or more wide; a window of normal size leaves the editor a narrow
+    column between the docked panes) and folds away the Interface Editor that the
+    visualization editor shows above the page (its VAR_IN_OUT, empty for a page). The
+    editor is a WinForms SplitContainer with the Interface Editor's tabs in Panel1 (checked
+    with UI Automation on SP21). Best-effort: anything not found is left as it is."""
+    try:
+        form = control.FindForm()
+        if form is not None and form.TopLevel:
+            from System.Windows.Forms import FormWindowState
+            if form.WindowState != FormWindowState.Maximized:
+                form.WindowState = FormWindowState.Maximized
+    except Exception:
+        pass
+    try:
+        from System import Object
+        from System.Windows.Forms import SplitContainer
+        node, inner = control, None
+        for _ in range(12):
+            if node is None:
+                break
+            if isinstance(node, SplitContainer) and inner is not None and Object.ReferenceEquals(node.Panel2, inner) and not node.Panel1Collapsed:
+                node.Panel1Collapsed = True
+                break
+            inner, node = node, node.Parent
+    except Exception:
+        pass
+    se.system.delay(300)  # let the window lay itself out again before the pane is measured
+
+
 # The editor zoom each visualization had when it was last set offline: an online view draws
 # the page at the zoom its editor had when the simulation went online.
 _DESIGN_ZOOM = {}
@@ -82,6 +113,7 @@ def fit_visualization(se, size, key):
     current = getattr(view, "CurrentControl", None)
     online = current is not None and "WebView2" in current.GetType().Name
     area = current if online else ve
+    _give_room(se, area)
     w, h = size
     pane = None
     for _ in range(10):
@@ -100,3 +132,21 @@ def fit_visualization(se, size, key):
         ve.ZoomFactor = zoom
         _DESIGN_ZOOM[key] = zoom
     return zoom
+
+
+def close_visualizations(se):
+    """Closes the visualization editors in the CODESYS window; returns how many. Called before
+    the simulation goes offline: after a visualization editor showed a page online, the next
+    build fails with "Sending service failed, status: 404" until the project is opened again."""
+    if hasattr(se, "FAKE"):
+        return 0
+    env = _env()
+    if env is None:
+        return 0
+    frame = env.GetProperty("Engine").GetValue(None, None).Frame
+    n = 0
+    for v in list(frame.GetEditorViews()):
+        if getattr(v, "VisualEditor", None) is not None:
+            frame.CloseView(v)
+            n += 1
+    return n

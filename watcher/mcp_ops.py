@@ -561,8 +561,11 @@ def op_object_delete(args):
     c = Ctx()
     obj = c.resolve(args["path"])
     path = c.path_of(obj)
+    tasks = []
+    if kind_of(obj, c.app_guid) == "pou" and subkind("pou", decl_of(obj)) == "program":
+        tasks = _drop_program_calls(c, name_of(obj))
     obj.remove()
-    return {"path": path, "saved": c.save_if(args)}
+    return {"path": path, "tasks": tasks, "saved": c.save_if(args)}
 
 
 def op_object_rename(args):
@@ -1076,12 +1079,15 @@ def op_task_configure(args):
             if wd.get(key) is not None:
                 setattr(w, key, to_text(wd[key]))
 
-    calls = [to_text(getattr(p, "pou_name", None) or getattr(p, "name", None) or p).lower() for p in list(task.pous)]
+    calls = [_call_name(p).lower() for p in list(task.pous)]
+    drop = []
     for prog in args.get("remove_calls") or []:
         if prog.lower() not in calls:
             raise OpError("not_found", "Task %s doesn't call %s." % (name_of(task), prog))
-        _remove_call(task, calls.index(prog.lower()), prog)
-        calls.remove(prog.lower())
+        drop.append(prog.lower())
+    if drop:
+        task = _without_calls(task, drop)
+        calls = [x for x in calls if x not in drop]
     if args.get("add_calls"):
         programs = dict((name_of(p).lower(), name_of(p)) for p in _walk_kind(c, c.app, "pou") if subkind("pou", decl_of(p)) == "program")
         for prog in args["add_calls"]:
@@ -1098,24 +1104,77 @@ def op_task_configure(args):
     return info
 
 
-def _remove_call(task, index, name):
-    """Remove a task's program call, and check that it is gone. CODESYS V3.5 SP21's
-    scripting can't do this: pous.remove(name) returns without removing anything,
-    and pous.remove(index) fails with "not found in the specified Collection"
-    (verified 9 November 2026). Say so instead of pretending."""
-    before = [to_text(x).lower() for x in task.pous]
-    for attempt in (lambda: task.pous.remove(name), lambda: task.pous.remove(index)):
-        try:
-            attempt()
-        except Exception:
-            pass
-        if len([x for x in task.pous]) < len(before):
-            return
-    raise OpError(
-        "not_supported",
-        "CODESYS's scripting can't remove a program call from a task (Scripting 4.1 and 4.2, on SP21 and SP22: "
-        "remove() leaves the call in place). Remove it in CODESYS: Task Configuration > %s > select %s > Remove Call. "
-        "Adding calls works." % (name_of(task), name))
+def _call_name(p):
+    return to_text(getattr(p, "pou_name", None) or getattr(p, "name", None) or p)
+
+
+def _without_calls(task, drop):
+    """The task without the program calls named in drop (lower case); returns the task to
+    use from then on. CODESYS V3.5 SP21's scripting can't remove a call: pous.remove(name)
+    returns without removing anything, and pous.remove(index) fails with "not found in the
+    specified Collection" (Scripting 4.1 and 4.2, SP21 and SP22; verified 9 November 2026).
+    Removing the task itself works, so when remove() leaves the call in place the task is
+    made again in the same task configuration with the same settings and the other calls."""
+    for name in drop:
+        _safe(lambda: task.pous.remove(name))
+    left = [_call_name(p) for p in list(task.pous)]
+    if not [x for x in left if x.lower() in drop]:
+        return task
+    keep = [x for x in left if x.lower() not in drop]
+    name = name_of(task)
+    cfg = _safe(lambda: task.parent)
+    if cfg is None or not hasattr(cfg, "create_task"):
+        raise OpError("not_supported", "Can't find the task configuration of %s to make it again without the call." % name)
+    settings = dict((k, _safe(lambda k=k: getattr(task, k))) for k in ("kind_of_task", "interval", "interval_unit", "priority", "event", "core_binding"))
+    wd = _safe(lambda: task.watchdog)
+    watchdog = dict((k, _safe(lambda k=k: getattr(wd, k))) for k in ("enabled", "time", "time_unit", "sensitivity")) if wd is not None else {}
+    # The new task is made beside the old one first, under another name, so a failure leaves
+    # the old task as it was.
+    stage = "create the new task"
+    new = None
+    try:
+        new = cfg.create_task(name + "_mcp")
+        stage = "copy the settings"
+        # The kind first: it decides which of the other settings CODESYS accepts.
+        for key in ("kind_of_task", "interval_unit", "interval", "priority", "event", "core_binding"):
+            value = settings.get(key)
+            if value is None or (key == "event" and not to_text(value)):
+                continue
+            try:
+                setattr(new, key, value)
+            except Exception:
+                _safe(lambda: setattr(new, key, to_text(value)))
+        w = _safe(lambda: new.watchdog)
+        if watchdog and w is not None:
+            for key in ("enabled", "time_unit", "time", "sensitivity"):
+                if watchdog.get(key) is not None:
+                    _safe(lambda key=key: setattr(w, key, watchdog[key]))
+        stage = "add the other calls"
+        for prog in keep:
+            new.pous.add(prog, "")
+    except Exception as e:
+        if new is not None:
+            _safe(lambda: new.remove())
+        raise OpError("codesys_error", "Removing the call: couldn't %s for task %s (%s); the task is unchanged." % (stage, name, to_text(e)))
+    try:
+        task.remove()
+    except Exception as e:
+        _safe(lambda: new.remove())
+        raise OpError("codesys_error", "Removing the call: couldn't replace task %s (%s); it is unchanged." % (name, to_text(e)))
+    new.rename(name)
+    return new
+
+
+def _drop_program_calls(c, program):
+    """Take a program out of every task that calls it (before it is deleted, so the build
+    doesn't fail on a call to a program that no longer exists). Returns the tasks changed."""
+    changed = []
+    low = program.lower()
+    for task in _find_kind(c, c.app, "task") if c.app is not None else []:
+        if low in [_call_name(p).lower() for p in list(task.pous)]:
+            changed.append(name_of(task))  # before: the task may be replaced
+            _without_calls(task, [low])
+    return changed
 
 
 _TEST_ATTR = re.compile(r"\{\s*attribute\s+'test'\s*\}", re.I)

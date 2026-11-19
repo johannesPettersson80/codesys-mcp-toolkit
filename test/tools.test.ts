@@ -280,6 +280,13 @@ describe("MCP tools over the real watcher", () => {
     expect(tasks).toContain("FastTask: Cyclic, interval t#2ms, priority 0, watchdog t#6ms ×2; calls SEQ_Fill");
   });
 
+  it("takes a deleted program out of the tasks that call it", async () => {
+    await call("create_object", { kind: "program", name: "PRG_Tmp" });
+    expect((await call("configure_task", { name: "MainTask", add_calls: ["PRG_Tmp"] })).text).toContain("calls PLC_PRG, PRG_Tmp");
+    expect((await call("delete_object", { path: "PRG_Tmp" })).text).toBe("Deleted PRG_Tmp. Removed its call from MainTask. Project saved.");
+    expect((await call("list_tasks")).text).toMatch(/^MainTask: Cyclic, interval t#20ms, priority 1; calls PLC_PRG$/m);
+  });
+
   it("renames and deletes objects", async () => {
     expect((await call("rename_object", { path: "F_Add", newName: "F_Sum" })).text).toBe("Renamed to F_Sum. Project saved.");
     expect((await call("delete_object", { path: "F_Sum" })).text).toBe("Deleted F_Sum. Project saved.");

@@ -100,7 +100,7 @@ describe("CODESYS's own simulation", () => {
     const r = await call("codesys_sim_write", { values: { "GVL_IO.rLevel": "REAL#2", "PLC_PRG.nope": "1" } });
     expect(r.isError).toBe(true);
     expect(r.text).toMatch(/unknown_variable.*PLC_PRG\.nope/);
-    await call("codesys_sim_write", { values: { [COUNT]: "INT#1" } });
+    expect((await call("codesys_sim_write", { values: { [COUNT]: "INT#1" } })).text).toMatch(/^Wrote PLC_PRG\.nCount := INT#1\. CODESYS simulation: application /);
     expect(await read("GVL_IO.rLevel")).toBe("GVL_IO.rLevel = REAL#0"); // the refused write left nothing queued
   }, 30_000);
 
@@ -110,7 +110,7 @@ describe("CODESYS's own simulation", () => {
     for (const [tool, args] of [
       ["write_object", { path: "PLC_PRG", implementation: "x := 1;" }],
       ["compile", {}],
-      ["save_project", {}],
+      ["save_project", { archive: "snapshot.projectarchive" }],
       ["close_project", {}],
       ["delete_object", { path: "FB_Pump" }],
     ] as const) {
@@ -118,6 +118,9 @@ describe("CODESYS's own simulation", () => {
       expect(r.isError, tool).toBe(true);
       expect(r.text, tool).toMatch(/simulation_running.*codesys_sim_stop/);
     }
+    const saved0 = await call("save_project");
+    expect(saved0.isError).toBe(false);
+    expect(saved0.text).toMatch(/is saved: it hasn't changed since the simulation started/);
     expect(readFileSync(file, "utf8")).toBe("FAKE"); // nothing saved while simulating
 
     await call("codesys_sim_stop");
@@ -125,6 +128,18 @@ describe("CODESYS's own simulation", () => {
     expect(saved.roots[0]!.simulation).toBe(false);
     expect((await ctx!.bridge.call<{ dirty: boolean }>("project.info")).dirty).toBe(false);
     expect((await call("write_object", { path: "PLC_PRG", implementation: "nCount := 2;" })).isError).toBe(false);
+  }, 30_000);
+
+  it("saves pending changes before it starts, without the simulation flag", async () => {
+    const file = await open();
+    await ctx!.bridge.call("object.write", { path: "PLC_PRG", implementation: "nCount := 3;", save: false });
+    const r = await call("codesys_sim_start");
+    expect(r.text).toContain("Saved the project first.");
+    const onDisk = JSON.parse(readFileSync(file, "utf8")) as { roots: { simulation: boolean }[] };
+    expect(onDisk.roots[0]!.simulation).toBe(false);
+    expect((await call("save_project")).text).toMatch(/hasn't changed since the simulation started/);
+    await call("codesys_sim_stop");
+    expect((await ctx!.bridge.call<{ dirty: boolean }>("project.info")).dirty).toBe(false);
   }, 30_000);
 
   it("won't start with compile errors", async () => {

@@ -236,15 +236,6 @@ def _set_prop(e, path, value):
         e.set_property(local, value)
 
 
-def _add_created(proj, visu, cr, name):
-    elem = cr.CreateVisualElement(name)
-    with _Modify(proj, visu) as vo:
-        elem.Id = vo.UniqueId
-        elem.OwningObjectGuid = vo.MetaObject.ObjectGuid
-        vo.VisualElemList.Add(elem)
-        return elem.Id
-
-
 def _script_element(visu, eid):
     for e in visu.visual_element_list:
         if e.id == eid:
@@ -335,15 +326,16 @@ def _with_creator(cr, el):
     return tuple(done)
 
 
-def _create_all(c, visu, elements, warnings):
+def _create_all(c, visu, elements, warnings, base=0):
     """Every element of the plan in one transaction, in the plan's order. Adding them one by one
     made a page take minutes: CODESYS commits the whole visualization each time, so the build grew
     with the square of its size (256 elements: 377 s). Shapes and pictures come from CODESYS's
     element creators, with their bindings (_AT_CREATION). Image switchers have no creator: they are
     copies of one the script driver made, each with its own identification and name (copies sharing
     them fail the build: 'non unique ids', 'already has the name'), placed through the plain members
-    iX..iHeight. What a creator can't take still goes through set_property afterwards.
-    Returns {index: (id, properties already set)}."""
+    iX..iHeight. What a creator can't take still goes through set_property afterwards. base:
+    the page's index of the first element (unnamed elements are called E<index>).
+    Returns {index in elements: (id, properties already set)}."""
     import System
     T = se.VisualElementType
     templates = {}
@@ -356,7 +348,7 @@ def _create_all(c, visu, elements, warnings):
         with _Modify(c.proj, visu) as vo:
             lst = vo.VisualElemList
             for i, el in enumerate(elements):
-                label = el.get("name") or "E%d" % i
+                label = el.get("name") or "E%d" % (base + i)
                 try:
                     done = ()
                     if el["kind"] in _SIMPLE:
@@ -423,24 +415,21 @@ def op_visu_build(args):
             _visual_property(c, visu, args.get("size"), bool(args.get("dialog")))
         except Exception as ex:
             warnings.append("size/dialog: %s" % to_text(ex))
-    T = se.VisualElementType
     corners = []
     wrapped = []
     access = []
     queue = list(args.get("elements") or [])
     editor = {}
-    # All at once unless the plan has editor elements (meters, alarm tables), which need the
-    # visual editor and their own transaction, and may fall back to other elements.
-    pre = by_id = None
-    if not any(el["kind"] == "complex" for el in queue):
-        pre = _create_all(c, visu, queue, warnings)
-        by_id = dict((e.id, e) for e in visu.visual_element_list)
+    # The plain elements in as few transactions as possible: each run of them between editor
+    # elements (meters, alarm tables) in one, so the page keeps its order. Editor elements need
+    # the visual editor and a transaction of their own, and may fall back to plain elements.
+    # (Before, one editor element put every element of the page in a transaction of its own.)
     i = -1
     while queue:
-        el = queue.pop(0)
-        i += 1
-        label = el.get("name") or "E%d" % i
-        if el["kind"] == "complex":
+        if queue[0]["kind"] == "complex":
+            el = queue.pop(0)
+            i += 1
+            label = el.get("name") or "E%d" % i
             # Meters, bar displays and alarm tables need the visual editor's context, which only
             # exists with CODESYS's window. Without it, the plan's fallback elements are drawn.
             try:
@@ -457,80 +446,84 @@ def op_visu_build(args):
             if el.get("access"):
                 access.append((e.id, el["access"]))
             continue
-        done = ()
+        run = []
+        while queue and queue[0]["kind"] != "complex":
+            run.append(queue.pop(0))
+        made = _create_all(c, visu, run, warnings, i + 1)
+        by_id = dict((x.id, x) for x in visu.visual_element_list)
+        for k, el in enumerate(run):
+            i += 1
+            if k not in made:
+                continue  # reported by _create_all
+            eid, done = made[k]
+            _finish(visu, el, by_id[eid], eid, done, el.get("name") or "E%d" % i, warnings, access, wrapped, corners)
+    _finish_page(c, visu, args, access, wrapped, corners, warnings)
+    return {"name": name_of(visu), "path": name_of(visu), "kind": "visualization", "elements": len(visu.visual_element_list), "warnings": warnings, "saved": c.save_if(args)}
+
+
+def _finish(visu, el, e, eid, done, label, warnings, access, wrapped, corners):
+    """An element's properties and input actions after it was created, and what the page's
+    last transaction sets for it (access rights, line break, corner radius)."""
+    if el.get("access"):
+        access.append((eid, el["access"]))
+    props = [(p, v) for p, v in (el.get("props") or {}).items() if p not in done]
+    if el.get("linebreak"):
+        wrapped.append(eid)
+    if el["kind"] not in _SIMPLE and el.get("invisible") and "State variables.Invisible" not in done:
+        # Shapes take it when created; pictures through their state variables.
+        props.append(("State variables.Invisible", el["invisible"]))
+    for path, v in props:
         try:
-            if pre is not None:
-                if i not in pre:
-                    continue  # reported by _create_all
-                eid, done = pre[i]
-                e = by_id[eid]
-            elif el["kind"] in _SIMPLE:
-                eid = _add_created(c.proj, visu, _simple_creator(el), label)
-                e = _script_element(visu, eid)
-            else:
-                e = visu.visual_element_list.add_element({"switcher": T.ImageSwitcher, "image": T.Image}[el["kind"]])
-                for p, v in (("Position.X", el["x"]), ("Position.Y", el["y"]), ("Position.Width", el["w"]), ("Position.Height", el["h"])):
-                    e.set_property(p, int(v))
-                eid = e.id
+            _set_prop(e, path, _value(v))
         except Exception as ex:
-            warnings.append("%s: not added: %s" % (label, to_text(ex)))
-            continue
-        if el.get("access"):
-            access.append((eid, el["access"]))
-        props = [(p, v) for p, v in (el.get("props") or {}).items() if p not in done]
-        if el.get("linebreak"):
-            wrapped.append(eid)
-        if el["kind"] not in _SIMPLE and el.get("invisible") and "State variables.Invisible" not in done:
-            # Shapes take it when created; pictures through their state variables.
-            props.append(("State variables.Invisible", el["invisible"]))
-        for path, v in props:
-            try:
-                _set_prop(e, path, _value(v))
-            except Exception as ex:
-                if len(warnings) < 40:
-                    warnings.append("%s %s: %s" % (label, path, to_text(ex)))
-        if el["kind"] not in _SIMPLE and (el.get("click") or el.get("goto") or el.get("dialog") or el.get("close_dialog") or el.get("login")):
-            # Image elements have no input handling: an input action there makes CODESYS's
-            # code generation raise an assertion dialog. Click areas are simple shapes.
-            warnings.append("%s: input actions only go on shapes, not on %s" % (label, el["kind"]))
-            el = dict(el)
-            for k in ("click", "goto", "dialog", "close_dialog", "login"):
-                el.pop(k, None)
-        if el.get("click"):
-            try:
-                e.add_input_action(visu.input_action_factory.create_execute_st_code(el["click"]), se.InputActionEventType.OnMouseClick)
-            except Exception as ex:
-                warnings.append("%s click: %s" % (label, to_text(ex)))
-        if el.get("goto"):
-            try:
-                act = visu.input_action_factory.create_change_shown_visualization(se.ChangeShownVisualizationType.Assignment, el["goto"])
-                e.add_input_action(act, se.InputActionEventType.OnMouseClick)
-            except Exception as ex:
-                warnings.append("%s goto: %s" % (label, to_text(ex)))
-        if el.get("dialog"):
-            try:
-                from System.Collections.Generic import Dictionary, List
-                d = el["dialog"]
-                act = visu.input_action_factory.create_open_dialog(d["name"], Dictionary[object, object](), List[object](), True, False, str(int(d.get("x", 200))), str(int(d.get("y", 120))))
-                e.add_input_action(act, se.InputActionEventType.OnMouseClick)
-            except Exception as ex:
-                warnings.append("%s dialog: %s" % (label, to_text(ex)))
-        if el.get("login"):
-            try:
-                lt = _find_type("_3S.CoDeSys.VisualElem.VisuUserMgmtInputActionFactory")
-                import System
-                act = System.Activator.CreateInstance(lt).CreateInputAction()
-                e.add_input_action(act, se.InputActionEventType.OnMouseClick)
-            except Exception as ex:
-                warnings.append("%s login: %s" % (label, to_text(ex)))
-        if el.get("close_dialog"):
-            try:
-                act = visu.input_action_factory.create_close_dialog(el["close_dialog"], "OK")
-                e.add_input_action(act, se.InputActionEventType.OnMouseClick)
-            except Exception as ex:
-                warnings.append("%s close: %s" % (label, to_text(ex)))
-        if el.get("radius"):
-            corners.append((eid, int(el["radius"])))
+            if len(warnings) < 40:
+                warnings.append("%s %s: %s" % (label, path, to_text(ex)))
+    if el["kind"] not in _SIMPLE and (el.get("click") or el.get("goto") or el.get("dialog") or el.get("close_dialog") or el.get("login")):
+        # Image elements have no input handling: an input action there makes CODESYS's
+        # code generation raise an assertion dialog. Click areas are simple shapes.
+        warnings.append("%s: input actions only go on shapes, not on %s" % (label, el["kind"]))
+        el = dict(el)
+        for k in ("click", "goto", "dialog", "close_dialog", "login"):
+            el.pop(k, None)
+    if el.get("click"):
+        try:
+            e.add_input_action(visu.input_action_factory.create_execute_st_code(el["click"]), se.InputActionEventType.OnMouseClick)
+        except Exception as ex:
+            warnings.append("%s click: %s" % (label, to_text(ex)))
+    if el.get("goto"):
+        try:
+            act = visu.input_action_factory.create_change_shown_visualization(se.ChangeShownVisualizationType.Assignment, el["goto"])
+            e.add_input_action(act, se.InputActionEventType.OnMouseClick)
+        except Exception as ex:
+            warnings.append("%s goto: %s" % (label, to_text(ex)))
+    if el.get("dialog"):
+        try:
+            from System.Collections.Generic import Dictionary, List
+            d = el["dialog"]
+            act = visu.input_action_factory.create_open_dialog(d["name"], Dictionary[object, object](), List[object](), True, False, str(int(d.get("x", 200))), str(int(d.get("y", 120))))
+            e.add_input_action(act, se.InputActionEventType.OnMouseClick)
+        except Exception as ex:
+            warnings.append("%s dialog: %s" % (label, to_text(ex)))
+    if el.get("login"):
+        try:
+            lt = _find_type("_3S.CoDeSys.VisualElem.VisuUserMgmtInputActionFactory")
+            import System
+            act = System.Activator.CreateInstance(lt).CreateInputAction()
+            e.add_input_action(act, se.InputActionEventType.OnMouseClick)
+        except Exception as ex:
+            warnings.append("%s login: %s" % (label, to_text(ex)))
+    if el.get("close_dialog"):
+        try:
+            act = visu.input_action_factory.create_close_dialog(el["close_dialog"], "OK")
+            e.add_input_action(act, se.InputActionEventType.OnMouseClick)
+        except Exception as ex:
+            warnings.append("%s close: %s" % (label, to_text(ex)))
+    if el.get("radius"):
+        corners.append((eid, int(el["radius"])))
+
+
+def _finish_page(c, visu, args, access, wrapped, corners, warnings):
+    """One last transaction: access rights, the background, corner radii and line breaks."""
     rights = _access_rights(c, access, warnings) if access else {}
     try:
         with _Modify(c.proj, visu) as vo:
@@ -557,7 +550,6 @@ def op_visu_build(args):
                     el.GetVisualElemMember("m_pStaticTextProperties..TextFlag", True, "LINEBREAK").Value = "LINEBREAK"
     except Exception as ex:
         warnings.append("background/corners: %s" % to_text(ex))
-    return {"name": name_of(visu), "path": name_of(visu), "kind": "visualization", "elements": len(visu.visual_element_list), "warnings": warnings, "saved": c.save_if(args)}
 
 
 def _visu_groups(c):

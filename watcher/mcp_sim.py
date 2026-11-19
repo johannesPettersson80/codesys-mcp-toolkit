@@ -8,6 +8,8 @@
 # locked, so the simulation flag on the device is never saved into it.
 from __future__ import print_function
 
+import os
+
 import scriptengine as se
 
 import mcp_ops
@@ -87,6 +89,9 @@ def _release():
 def _stop():
     online = SIM["online"]
     try:
+        if os.environ.get("CODESYS_MCP_UI") == "1":
+            import mcp_ui
+            _safe(lambda: mcp_ui.close_visualizations(se))
         _safe(lambda: online.unforce_all_values())
         online.logout()
     finally:
@@ -107,6 +112,12 @@ def op_sim_start(args):
             "The application is already logged in, possibly to a real controller. The toolkit only goes "
             "online to a simulation it starts itself: log out in the CODESYS window, then try again.",
         )
+    # Save what is pending first (with autosave), so the project on disk is the one that runs
+    # and nothing waits to be saved while the simulation locks the project.
+    saved = False
+    if args.get("save") and _safe(lambda: c.proj.dirty, False):
+        c.proj.save()
+        saved = True
     SIM["was_dirty"] = bool(_safe(lambda: c.proj.dirty, False))
     SIM["project"] = c.proj
     SIM["device"] = _device_of(c.app)
@@ -121,7 +132,9 @@ def op_sim_start(args):
     SIM["online"] = online
     if args.get("run"):
         online.start()
-    return _status()
+    out = _status()
+    out["saved"] = saved
+    return out
 
 
 def op_sim_stop(args):
@@ -259,8 +272,29 @@ def _locked(fn):
     return run
 
 
+def _save_while_simulating(fn):
+    """save_project during a simulation. Saving now would write the device's simulation
+    flag into the project, so nothing is written: the project is locked, so it can only
+    have changes if it had them when the simulation started (without autosave)."""
+    def run(args):
+        if SIM["online"] is None:
+            return fn(args)
+        if SIM["was_dirty"]:
+            raise OpError("simulation_running", "The project had unsaved changes when the simulation started, and saving now would store the simulation setting with them. Call codesys_sim_stop, then save_project.")
+        if args.get("archive"):
+            raise OpError("simulation_running", "An archive written now would carry the simulation setting. Call codesys_sim_stop first, then save_project with archive.")
+        c = Ctx()
+        info = mcp_ops._project_info(c.proj, c)
+        info["unchanged"] = True
+        return info
+    return run
+
+
 for _name in LOCKED:
-    mcp_ops.OPS[_name] = _locked(mcp_ops.OPS[_name])
+    if _name == "project.save":
+        mcp_ops.OPS[_name] = _save_while_simulating(mcp_ops.OPS[_name])
+    else:
+        mcp_ops.OPS[_name] = _locked(mcp_ops.OPS[_name])
 
 mcp_ops.OPS.update({
     "sim.start": op_sim_start,

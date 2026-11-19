@@ -15,6 +15,7 @@ interface Status {
   operation?: string;
   forced?: string[];
   cycles?: number;
+  saved?: boolean;
 }
 
 export interface CodesysSimState {
@@ -45,6 +46,12 @@ export function describeSim(s: Status): string {
   return `CODESYS simulation: application ${s.state}.${s.forced?.length ? ` Forced: ${s.forced.join(", ")}.` : ""}`;
 }
 
+/** 'GVL.xStart := TRUE, GVL.rSet := 5' */
+const listValues = (v: Record<string, string>) =>
+  Object.entries(v)
+    .map(([k, x]) => `${k} := ${x}`)
+    .join(", ");
+
 const names = z.array(z.string()).min(1).describe("Variables as CODESYS expressions relative to the application, e.g. 'PLC_PRG.nCount' or 'GVL_IO.xValve'");
 /** A value as Structured Text; JSON booleans and numbers are taken too (true becomes 'TRUE'). */
 export const stValue = z.union([z.string(), z.boolean(), z.number()]).transform((v) => (typeof v === "boolean" ? (v ? "TRUE" : "FALSE") : String(v)));
@@ -55,8 +62,9 @@ export function registerCodesysSim(ctx: AppContext, deps: SimToolDeps): void {
   const { reg, run } = deps;
   const NOTE = "CODESYS's own simulation: no controller is involved.";
 
-  const status = async (op: string, args: Record<string, unknown> = {}, timeoutMs = 60_000): Promise<string> => {
+  const status = async (op: string, args: Record<string, unknown> = {}, timeoutMs = 60_000, seen?: (s: Status) => void): Promise<string> => {
     const s = await b.call<Status>(op, args, { timeoutMs });
+    seen?.(s);
     ctx.codesysSim = s.running ? { state: s.state ?? "unknown", forced: s.forced ?? [], cycles: s.cycles ?? 0, restarts: b.health().restarts } : undefined;
     return describeSim(s);
   };
@@ -71,7 +79,9 @@ export function registerCodesysSim(ctx: AppContext, deps: SimToolDeps): void {
       run(async () => {
         const errors = await deps.compileErrors();
         if (errors) throw new Error(`Fix the compile errors before simulating.\n${errors}`);
-        return `${await status("sim.start", { run: !!start }, 300_000)} The project is locked until codesys_sim_stop.`;
+        let saved = false;
+        const text = await status("sim.start", { run: !!start, save: ctx.autosave }, 300_000, (s) => (saved = !!s.saved));
+        return `${text}${saved ? " Saved the project first." : ""} The project is locked until codesys_sim_stop.`;
       }),
   );
 
@@ -118,13 +128,13 @@ export function registerCodesysSim(ctx: AppContext, deps: SimToolDeps): void {
   reg(
     "codesys_sim_write",
     { description: "Write values once in CODESYS's own simulation. If the program assigns the variable, the next cycle overwrites it; use codesys_sim_force to hold a value.", inputSchema: z.object({ values }) },
-    async ({ values: v }: { values: Record<string, string> }) => run(() => status("sim.write", { values: v })),
+    async ({ values: v }: { values: Record<string, string> }) => run(async () => `Wrote ${listValues(v)}. ${await status("sim.write", { values: v })}`),
   );
 
   reg(
     "codesys_sim_force",
     { description: "Force values in CODESYS's own simulation, until codesys_sim_unforce or codesys_sim_stop. Right for inputs. CODESYS re-applies a force between scans, so if the program assigns the variable, code before that assignment sees the forced value and code after it, in the same scan, sees the program's own value.", inputSchema: z.object({ values }) },
-    async ({ values: v }: { values: Record<string, string> }) => run(() => status("sim.force", { values: v })),
+    async ({ values: v }: { values: Record<string, string> }) => run(async () => `Forced ${listValues(v)}. ${await status("sim.force", { values: v })}`),
   );
 
   reg(

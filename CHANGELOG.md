@@ -43,9 +43,45 @@ see where the toolkit falls short.
   and Set overlap.
 - `codesys_sim_write`, `codesys_sim_force` and `codesys_sim_test` take JSON
   booleans and numbers (`true`, `5`) as well as Structured Text (`'TRUE'`).
+- `codesys_sim_write` and `codesys_sim_force` say what they wrote
+  (`Wrote GVL.xStart := TRUE.`); they only answered with the application's
+  state, which read like the write had been ignored.
+- `codesys_sim_start` saves pending changes before it goes online (with
+  autosave), and `save_project` during the simulation answers that the project
+  is saved instead of refusing. After `hmi_export_codesys` the project still
+  had unsaved changes, so saving it meant stopping the simulation and
+  starting it again (about a minute). The simulation setting is still never
+  saved into the project.
+- `hmi_export_codesys` saves the project at the end (with autosave).
+- `show_in_codesys` gives a visualization room: it maximizes the CODESYS
+  window and folds away the Interface Editor above the page before it fits
+  the zoom. The MixingUnit page showed at 37 % in a window of normal size,
+  too small to read in a recording; now at 78 %.
+- `codesys_sim_stop` closes the visualization editors in the CODESYS window
+  before it goes offline (`show_in_codesys` opens one again). With a page
+  still open online, the next build failed with "Sending service failed,
+  status: 404" and the project had to be closed, opened and built again:
+  starting the simulation again took about a minute, now the reopen and the
+  second build (about 27 s) are gone.
+- Pipes in a process diagram go round equipment they aren't connected to: a
+  middle run at another level, a step aside past something on a straight
+  line. A pipe that can't (the valves of the MixingUnit's first diagram sat
+  against their tanks' bottoms) is named by `hmi_save_screen` ("runs through
+  valve XV-102"); before, it was drawn through the valve without a word.
+- A mixer is seated on the tank under it, motor on the top and agitator
+  inside, whatever its `y`: placed by guess it covered the tank's reading.
+- `hmi_save_screen` notes a setpoint too narrow for its - and + buttons (and
+  the actual value beside them), and the tool text gives the sizes cards need
+  at 1280x720, where a tank's side ports sit, and which end of a vertical
+  valve is in and out. The MixingUnit page took four saves to lay out.
 - `help` runs as a step of a batch; it made the whole batch fail.
 
 ### Fixed
+- Deleting a program takes it out of the tasks that call it, and
+  `configure_task` `remove_calls` works: CODESYS's scripting can't remove a
+  call, so the task is made again with the same settings and its other calls.
+  Deleting the new project's `PLC_PRG` left a call to it in MainTask, and the
+  build failed until the task was deleted and made again by hand.
 - `show_in_codesys` zooms a visualization so the whole page fits the editor,
   also while the simulation runs. At 100 % a 1280-pixel page is wider than
   the editor pane between the Devices and Toolbox panes, so the window showed

@@ -413,12 +413,13 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
   reg(
     "save_project",
     {
-      description: "Save the open project. Pass archive to also write a .projectarchive (e.g. a snapshot before a big change); an existing file is never overwritten.",
+      description: "Save the open project. Pass archive to also write a .projectarchive (e.g. a snapshot before a big change); an existing file is never overwritten. While the simulation runs there is nothing new to save (codesys_sim_start saves first and the project is locked), and it says so.",
       inputSchema: z.object({ archive: z.string().optional().describe("Path of a .projectarchive to write as well") }),
     },
     async ({ archive }) =>
       run(ctx, async () => {
-        const r = await b.call<{ path: string; archive?: string }>("project.save", archive ? { archive: absPath(ctx, archive) } : {}, { timeoutMs: 300_000 });
+        const r = await b.call<{ path: string; archive?: string; unchanged?: boolean }>("project.save", archive ? { archive: absPath(ctx, archive) } : {}, { timeoutMs: 300_000 });
+        if (r.unchanged) return `${r.path} is saved: it hasn't changed since the simulation started (the project is locked while it runs). CODESYS's title shows * meanwhile only for the simulation setting, which is never saved.`;
         return `Saved ${r.path}.${r.archive ? ` Archive written: ${r.archive}.` : ""}`;
       }),
   );
@@ -577,13 +578,14 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
 
   reg(
     "delete_object",
-    { description: "Delete an object (and its children).", inputSchema: z.object({ path: pathArg }) },
+    { description: "Delete an object (and its children). Deleting a program also removes its calls from the tasks.", inputSchema: z.object({ path: pathArg }) },
     async ({ path }) =>
       run(ctx, async () => {
-        const r = await b.call<{ path: string; saved?: boolean }>("object.delete", { path, ...save() });
+        const r = await b.call<{ path: string; tasks?: string[]; saved?: boolean }>("object.delete", { path, ...save() });
         cache?.remove(r.path);
         cache?.touch(r.path, "delete");
-        return `Deleted ${r.path}.${savedNote(r)}`;
+        const tasks = r.tasks?.length ? ` Removed its call from ${r.tasks.join(", ")}.` : "";
+        return `Deleted ${r.path}.${tasks}${savedNote(r)}`;
       }),
   );
 
@@ -780,7 +782,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
         remove_calls: z
           .array(z.string().min(1))
           .optional()
-          .describe("Programs the task should no longer call. CODESYS V3.5 SP21's scripting can't remove a call: the tool then says so, and the user removes it in CODESYS"),
+          .describe("Programs the task should no longer call (CODESYS's scripting can't remove a call, so the task is made again with the same settings and its other calls)"),
       }),
     },
     async (a) =>

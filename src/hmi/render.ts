@@ -95,6 +95,13 @@ export function cardWarnings(screen: Screen, rail = false): string[] {
   const k = scaleOf(canvasOf(screen, rail));
   const out: string[] = [];
   screen.widgets.forEach((w, i) => {
+    if (w.type === "setpoint") {
+      // The value with - and + (and the actual value beside them) in one row.
+      const b = tileBox(screen, w.at, rail);
+      const wide = (w.actual ? 290 : 180) * k;
+      if (b.w < wide) out.push(`widget ${i + 1} (setpoint${w.title ? ` "${w.title}"` : ""}) is ${Math.round(b.w)} px wide and needs about ${Math.round(wide)}: its + button is cut off${w.actual ? " beside the actual value" : ""}. Give it more columns.`);
+      return;
+    }
     if (w.type !== "value") return;
     const b = tileBox(screen, w.at, rail);
     const name = `widget ${i + 1} (value${w.title ? ` "${w.title}"` : ""})`;

@@ -208,6 +208,66 @@ export function routeProblems(items: ProcessItem[], lib: SymbolLib = BUILTIN_SYM
 const STEP: Record<Dir, Pt> = { l: [-1, 0], r: [1, 0], u: [0, -1], d: [0, 1] };
 const horiz = (d: Dir) => d === "l" || d === "r";
 
+type Box = { x0: number; y0: number; x1: number; y1: number };
+type Equipment = Box & { key?: string; name: string };
+
+/** The outlines pipes must not cross: tanks, pumps, fans, valves and symbols. */
+function equipmentBoxes(items: ProcessItem[], aspect: number, lib: SymbolLib): Equipment[] {
+  const out: Equipment[] = [];
+  items.forEach((p, i) => {
+    const key = keyOf(p);
+    const name = `${p.type === "symbol" ? p.symbol : p.type} ${key ?? i + 1}`;
+    if (p.type === "tank") out.push({ key, name, x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.h });
+    else if (p.type === "pump" || p.type === "fan" || p.type === "valve") {
+      const r = p.size / 2;
+      out.push({ key, name, x0: p.x - r, y0: p.y - r / aspect, x1: p.x + r, y1: p.y + r / aspect });
+    } else if (p.type === "symbol") {
+      const f = findSymbol(lib, p.symbol);
+      // An agitator sits inside its tank; the tank's own box covers it.
+      if (f && f[0] !== "mixer") out.push({ key, name, ...symbolBox(f[1], p, aspect) });
+    }
+  });
+  return out;
+}
+
+/** The equipment a run of points passes through (its edges and corners don't count). */
+function crossed(pts: Pt[], boxes: Equipment[], aspect: number): Equipment | undefined {
+  const mx = 0.4, my = 0.4 / aspect;
+  for (let k = 1; k < pts.length; k++) {
+    const [a, b] = [pts[k - 1]!, pts[k]!];
+    const [x0, x1, y0, y1] = [Math.min(a[0], b[0]), Math.max(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[1], b[1])];
+    const hit = boxes.find((q) => x0 < q.x1 - mx && x1 > q.x0 + mx && y0 < q.y1 - my && y1 > q.y0 + my);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** The equipment boxes a pipe may not cross: all but the items at its two ends. */
+function obstaclesFor(p: Extract<ProcessItem, { type: "pipe" }>, items: ProcessItem[], aspect: number, lib: SymbolLib): Equipment[] {
+  const ends = new Set([p.from, p.to].flatMap((e) => (typeof e === "string" ? [e.split(".")[0]!.toLowerCase()] : [])));
+  return equipmentBoxes(items, aspect, lib).filter((q) => !q.key || !ends.has(q.key.toLowerCase()));
+}
+
+/**
+ * An agitator stands on its vessel: whatever y it is given, it is seated with its motor on
+ * the tank's top and the shaft and impeller inside (ISO 10628-2 X8006), so it can't cover
+ * the tank's reading or float above it.
+ */
+export function seated(items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): ProcessItem[] {
+  return items.map((p) => {
+    if (p.type !== "symbol") return p;
+    const f = findSymbol(lib, p.symbol);
+    if (!f || f[0] !== "mixer") return p;
+    const h = ((p.size * f[1].viewBox[1]) / f[1].viewBox[0]) / aspect;
+    const t = items.find((q): q is Extract<ProcessItem, { type: "tank" }> => q.type === "tank" && p.x >= q.x && p.x <= q.x + q.w && p.y >= q.y - h && p.y <= q.y + q.h);
+    // The motor's circle ends 30 % down the symbol's box.
+    return t ? { ...p, y: t.y + (0.5 - MIXER_MOTOR_BOTTOM) * h } : p;
+  });
+}
+
+/** Where the mixer symbol's motor ends, as a share of its height (circle at 17 ± 13 of 100). */
+const MIXER_MOTOR_BOTTOM = 0.3;
+
 /** The points of a pipe: right angles from port to port (or along raw points). */
 export function routePipe(p: Extract<ProcessItem, { type: "pipe" }>, items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): Pt[] {
   if (!p.from || !p.to) return p.points ?? [];
@@ -254,30 +314,68 @@ export function routePipe(p: Extract<ProcessItem, { type: "pipe" }>, items: Proc
   const B = face(b, a.at);
   const pts: Pt[] = [A.at];
   const targets: Pt[] = [...(p.via ?? []), B.at];
+  const obstacles = obstaclesFor(p, items, aspect, lib);
   let cur = A.at;
   let dir: Dir = A.dir;
   targets.forEach((t, k) => {
     const last = k === targets.length - 1;
     const endDir: Dir | undefined = last ? B.dir : undefined;
-    let leg = orthogonal(cur, dir, t, endDir);
-    if (last && typeof p.to === "string") {
+    const finish = (leg: Pt[]): Pt[] => {
+      if (!(last && typeof p.to === "string")) return leg;
       // A port is entered from the side it faces: if the path would come in from behind
       // (into an actuator from below, say), it goes round to a stub in front of the port.
       const before = leg.length > 1 ? leg[leg.length - 2]! : cur;
       const behind = (B.dir === "u" && before[1] > t[1] + 1e-6) || (B.dir === "d" && before[1] < t[1] - 1e-6) || (B.dir === "l" && before[0] > t[0] + 1e-6) || (B.dir === "r" && before[0] < t[0] - 1e-6);
-      if (behind) {
-        const [sx, sy] = STEP[B.dir];
-        const stub: Pt = [t[0] + sx * 3, t[1] + (sy * 3) / aspect];
-        // Reach the stub across the port's axis, then turn into the port.
-        leg = [...orthogonal(cur, dir, stub, horiz(B.dir) ? "u" : "r").filter((q) => q !== stub), stub, t];
-      }
-    }
+      if (!behind) return leg;
+      const [sx, sy] = STEP[B.dir];
+      const stub: Pt = [t[0] + sx * 3, t[1] + (sy * 3) / aspect];
+      // Reach the stub across the port's axis, then turn into the port.
+      return [...orthogonal(cur, dir, stub, horiz(B.dir) ? "u" : "r").filter((q) => q !== stub), stub, t];
+    };
+    // The first way that passes no other equipment (a pipe through a valve or tank it
+    // isn't connected to reads as connected); if every way does, the plain one.
+    const options = legOptions(cur, dir, t, endDir).map(finish);
+    const inside = (o: Pt[]) => o.every((q) => q[0] >= 0 && q[0] <= 100 && q[1] >= 0 && q[1] <= 100);
+    const leg = options.find((o, n) => (n === 0 || inside(o)) && !crossed([cur, ...o], obstacles, aspect)) ?? options[0]!;
     for (const q of leg) pts.push(q);
     const prev = pts[pts.length - 2] ?? cur;
     dir = prev[0] === t[0] ? (t[1] >= prev[1] ? "d" : "u") : t[0] >= prev[0] ? "r" : "l";
     cur = t;
   });
   return dedupe(pts);
+}
+
+/**
+ * Right-angle paths from `a` to `b`, the plain one first: when both ends run the same way
+ * (across, or up and down), the middle run can lie anywhere between them, or the whole run
+ * can step aside just after its start and back just before its end (past something on a
+ * straight line); and an L can instead go out a little, along, and in, so it passes beside
+ * what lies in the corner.
+ */
+function legOptions(a: Pt, dir: Dir, b: Pt, endDir?: Dir): Pt[][] {
+  const plain = orthogonal(a, dir, b, endDir);
+  const eq = (x: number, y: number) => Math.abs(x - y) < 1e-6;
+  const offsets = [4, -4, 7, -7, 11, -11, 16, -16];
+  const inH = endDir ? horiz(endDir) : !horiz(dir);
+  const shares = [0.25, 0.75, 0.1, 0.9, 0.4, 0.6];
+  if (horiz(dir) && inH && Math.abs(b[0] - a[0]) > 4) {
+    const s = Math.sign(b[0] - a[0]);
+    const middles = eq(a[1], b[1]) ? [] : shares.map((f): Pt[] => [[a[0] + (b[0] - a[0]) * f, a[1]], [a[0] + (b[0] - a[0]) * f, b[1]], b]);
+    const aside = offsets.map((o): Pt[] => [[a[0] + 2 * s, a[1]], [a[0] + 2 * s, a[1] + o], [b[0] - 2 * s, a[1] + o], [b[0] - 2 * s, b[1]], b]);
+    return [plain, ...middles, ...aside];
+  }
+  if (!horiz(dir) && !inH && Math.abs(b[1] - a[1]) > 4) {
+    const s = Math.sign(b[1] - a[1]);
+    const middles = eq(a[0], b[0]) ? [] : shares.map((f): Pt[] => [[a[0], a[1] + (b[1] - a[1]) * f], [b[0], a[1] + (b[1] - a[1]) * f], b]);
+    const aside = offsets.map((o): Pt[] => [[a[0], a[1] + 2 * s], [a[0] + o, a[1] + 2 * s], [a[0] + o, b[1] - 2 * s], [b[0], b[1] - 2 * s], b]);
+    return [plain, ...middles, ...aside];
+  }
+  if (eq(a[0], b[0]) || eq(a[1], b[1])) return [plain];
+  if (horiz(dir) && inH) return [plain, ...shares.map((s): Pt[] => [[a[0] + (b[0] - a[0]) * s, a[1]], [a[0] + (b[0] - a[0]) * s, b[1]], b])];
+  if (!horiz(dir) && !inH) return [plain, ...shares.map((s): Pt[] => [[a[0], a[1] + (b[1] - a[1]) * s], [b[0], a[1] + (b[1] - a[1]) * s], b])];
+  // An L: out from a, across at a level between them, then on to b.
+  if (horiz(dir)) return [plain, ...shares.map((s): Pt[] => [[a[0] + (b[0] - a[0]) * s, a[1]], [a[0] + (b[0] - a[0]) * s, (a[1] + b[1]) / 2], [b[0], (a[1] + b[1]) / 2], b])];
+  return [plain, ...shares.map((s): Pt[] => [[a[0], a[1] + (b[1] - a[1]) * s], [(a[0] + b[0]) / 2, a[1] + (b[1] - a[1]) * s], [(a[0] + b[0]) / 2, b[1]], b])];
 }
 
 /** Right-angle path from `a` (leaving in `dir`) to `b` (entered against `endDir`), without `a` itself. */
@@ -311,7 +409,8 @@ function dedupe(pts: Pt[]): Pt[] {
 
 /** The diagram with every pipe's points resolved. */
 export function routed(items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): ProcessItem[] {
-  return items.map((p) => (p.type === "pipe" ? { ...p, points: routePipe(p, items, aspect, lib), from: undefined, to: undefined, via: undefined } : p));
+  const all = seated(items, aspect, lib);
+  return all.map((p) => (p.type === "pipe" ? { ...p, points: routePipe(p, all, aspect, lib), from: undefined, to: undefined, via: undefined } : p));
 }
 
 /**
@@ -464,6 +563,13 @@ export function overlapWarnings(items: ProcessItem[], aspect: number, lib: Symbo
     if (p.type !== "pipe" || p.signal) return [];
     const pts = routePipe(p, items, aspect, lib);
     return pts.slice(1).map((b, k) => [pts[k]!, b] as const);
+  });
+  // A pipe through equipment it isn't connected to (the router goes round when it can).
+  items.forEach((p, i) => {
+    if (p.type !== "pipe" || p.signal) return;
+    const hit = crossed(routePipe(p, items, aspect, lib), obstaclesFor(p, items, aspect, lib), aspect);
+    const end = (e: unknown) => (typeof e === "string" ? e : Array.isArray(e) ? `[${e.join(", ")}]` : "?");
+    if (hit) out.push(`pipe ${i + 1} (${end(p.from)} to ${end(p.to)}) runs through ${hit.name}, which it isn't connected to: move one of them, or lead the pipe round with via: [[x, y]].`);
   });
   const crosses = (x0: number, y0: number, x1: number, y1: number) => segs.some(([a, b]) => Math.min(a[0], b[0]) - 0.6 < x1 && Math.max(a[0], b[0]) + 0.6 > x0 && Math.min(a[1], b[1]) - 0.6 / aspect < y1 && Math.max(a[1], b[1]) + 0.6 / aspect > y0);
   items.forEach((p) => {

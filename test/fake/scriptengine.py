@@ -80,6 +80,7 @@ class _Text(object):
         if "__CRASH__" in new:
             os._exit(3)
         self.text = new
+        _mark_dirty()
 
 
 class OnlineChangeOption(object):
@@ -461,11 +462,10 @@ class _PouCalls(object):
         _mark_dirty()
 
     def remove(self, key):
+        # As in CODESYS V3.5 SP21 (Scripting 4.1 and 4.2): by name it returns without
+        # removing anything, by index it fails.
         if isinstance(key, int):
-            del self._calls[key]
-        else:
-            self._calls = [c for c in self._calls if c.pou_name.lower() != key.lower()]
-        _mark_dirty()
+            raise Exception("The item was not found in the specified Collection")
 
     def names(self):
         return [c.pou_name for c in self._calls]

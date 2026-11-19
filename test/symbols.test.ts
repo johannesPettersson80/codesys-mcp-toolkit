@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { nativePlan } from "../src/hmi/native.js";
 import { renderScreen } from "../src/hmi/render.js";
-import { routePipe, routeProblems, overlapWarnings } from "../src/hmi/route.js";
+import { routed, routePipe, routeProblems, overlapWarnings } from "../src/hmi/route.js";
 import { HmiService } from "../src/hmi/service.js";
 import { layoutProblems, screenSchema, screenVariables, type ProcessItem } from "../src/hmi/spec.js";
 import { BUILTIN_SYMBOLS, importSvg, svgProblems, symbolPicture, symbolPorts, symbolSchema } from "../src/hmi/symbols.js";
@@ -100,7 +100,65 @@ describe("symbols on a diagram", () => {
     expect(routeProblems(w.items, { ...BUILTIN_SYMBOLS, ...own })).toEqual([]);
     expect(overlapWarnings(w.items, 0.5, { ...BUILTIN_SYMBOLS, ...own }).join(" ")).toMatch(/centrifuge C-1 overlaps filter/);
     // A motor touches the machine it drives: no overlap warning for it.
-    expect(overlapWarnings(w.items, 0.5, { ...BUILTIN_SYMBOLS, ...own }).join(" ")).not.toMatch(/motor/);
+    expect(overlapWarnings(w.items, 0.5, { ...BUILTIN_SYMBOLS, ...own }).join(" ")).not.toMatch(/motor \S+ overlaps|overlaps motor/);
+  });
+
+  it("route pipes round equipment they aren't connected to, and name a pipe that can't", () => {
+    // The MixingUnit take's first diagram (aspect 0.45): two feed tanks with vertical valves
+    // under them, both into the mixing tank's top. XV-101's line ran through XV-102.
+    const lib = BUILTIN_SYMBOLS;
+    const take = items([
+      { type: "tank", label: "T-101", level: "GVL.r", x: 4, y: 6, w: 12, h: 26 },
+      { type: "tank", label: "T-102", level: "GVL.r", x: 24, y: 6, w: 12, h: 26 },
+      { type: "valve", label: "XV-101", open: "GVL.x", x: 10, y: 40, size: 7, vertical: true },
+      { type: "valve", label: "XV-102", open: "GVL.x", x: 30, y: 40, size: 7, vertical: true },
+      { type: "tank", label: "T-201", level: "GVL.r", x: 50, y: 46, w: 18, h: 42 },
+      { type: "pipe", from: "T-101.bottom", to: "XV-101.in" },
+      { type: "pipe", from: "T-102.bottom", to: "XV-102.in" },
+      { type: "pipe", from: "XV-101.out", to: "T-201.top" },
+      { type: "pipe", from: "XV-102.out", to: "T-201.top" },
+    ]);
+    // The valves sit against the tanks' bottoms, so every level between them crosses XV-102:
+    // there is no way round, and the save names it instead of drawing it silently.
+    expect(overlapWarnings(take.items, 0.45, lib).join(" ")).toMatch(/pipe 8 \(XV-101\.out to T-201\.top\) runs through valve XV-102/);
+    // With room, the vertical run moves off the valve in its way.
+    const room = items([
+      { type: "valve", label: "XV-1", open: "GVL.x", x: 10, y: 30, size: 6 },
+      { type: "valve", label: "XV-2", open: "GVL.x", x: 41.5, y: 50, size: 6, vertical: true },
+      { type: "tank", label: "T-1", level: "GVL.r", x: 70, y: 20, w: 16, h: 58.8 },
+      { type: "pipe", from: "XV-1.out", to: "T-1.left" },
+    ]);
+    const around = routePipe(room.items[3] as Extract<ProcessItem, { type: "pipe" }>, room.items, 0.45);
+    expect(around.some((p) => Math.abs(p[0] - 41.5) < 1e-6)).toBe(false);
+    expect(overlapWarnings(room.items, 0.45, lib).join(" ")).not.toMatch(/runs through/);
+    // A straight run blocked by a valve on it steps round it.
+    const straight = items([
+      { type: "valve", label: "XV-1", open: "GVL.x", x: 10, y: 50, size: 6 },
+      { type: "valve", label: "XV-2", open: "GVL.x", x: 40, y: 50, size: 6 },
+      { type: "tank", label: "T-1", level: "GVL.r", x: 70, y: 20, w: 16, h: 35.3 },
+      { type: "pipe", from: "XV-1.out", to: "T-1.left" },
+    ]);
+    const pts = routePipe(straight.items[3] as Extract<ProcessItem, { type: "pipe" }>, straight.items, 0.45);
+    expect(pts.length).toBeGreaterThan(2);
+    expect(overlapWarnings(straight.items, 0.45, lib).join(" ")).not.toMatch(/runs through/);
+    // Wall to wall: no way round, so it is named.
+    const blocked = items([
+      { type: "tank", label: "T-1", level: "GVL.r", x: 0, y: 0, w: 10, h: 100 },
+      { type: "tank", label: "T-2", level: "GVL.r", x: 40, y: 0, w: 10, h: 100 },
+      { type: "tank", label: "T-3", level: "GVL.r", x: 80, y: 0, w: 10, h: 100 },
+      { type: "pipe", from: "T-1.right", to: "T-3.left" },
+    ]);
+    expect(overlapWarnings(blocked.items, 0.45, lib).join(" ")).toMatch(/pipe 4 \(T-1\.right to T-3\.left\) runs through tank T-2/);
+  });
+
+  it("seat an agitator on its tank, motor on the top", () => {
+    const w = items([
+      { type: "tank", label: "T-201", level: "GVL.r", x: 50, y: 26, w: 16, h: 60 },
+      { type: "symbol", symbol: "mixer", label: "M-201", x: 58, y: 60, size: 12 },
+    ]);
+    const m = routed(w.items, 0.45).find((p) => p.type === "symbol")! as Extract<ProcessItem, { type: "symbol" }>;
+    const h = 12 / 0.45;
+    expect(m.y - h / 2 + 0.3 * h).toBeCloseTo(26); // the motor's circle ends on the tank's top
   });
 
   const screen = screenSchema.parse({
