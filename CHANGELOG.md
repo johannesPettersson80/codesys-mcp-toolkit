@@ -27,6 +27,11 @@ see where the toolkit falls short.
   CODESYS.
 
 ### Changed
+- `codesys_sim_read`, `codesys_sim_write`, `codesys_sim_force` and
+  `codesys_sim_unforce` also take their variables as `variables` (or `vars`).
+  In both runs of the batch mixer Claude's first simulation step said
+  `variables`, and the whole batch was refused. Any other unknown name is
+  still refused.
 - Tanks have no scale marks: the two short ticks at a quarter and three
   quarters had no labels and read as stray lines inside the vessel.
 - `hmi_screenshot` with live values from the simulation shows no made-up

@@ -104,6 +104,15 @@ describe("CODESYS's own simulation", () => {
     expect(await read("GVL_IO.rLevel")).toBe("GVL_IO.rLevel = REAL#0"); // the refused write left nothing queued
   }, 30_000);
 
+  it("takes 'variables' for names and values: the values reach the simulation", async () => {
+    await open();
+    await call("codesys_sim_start");
+    expect((await call("codesys_sim_write", { variables: { "GVL_IO.rLevel": "REAL#2.5" } })).text).toMatch(/^Wrote GVL_IO\.rLevel := REAL#2\.5\./);
+    expect((await call("codesys_sim_read", { variables: ["GVL_IO.rLevel"] })).text).toBe("GVL_IO.rLevel = REAL#2.5");
+    expect((await call("codesys_sim_force", { vars: { [COUNT]: "INT#42" } })).text).toMatch(/Forced: PLC_PRG\.nCount\./);
+    expect((await call("codesys_sim_unforce", { variables: [COUNT] })).text).not.toMatch(/Forced/);
+  }, 30_000);
+
   it("locks the project while it runs and never saves the simulation flag", async () => {
     const file = await open();
     await call("codesys_sim_start");

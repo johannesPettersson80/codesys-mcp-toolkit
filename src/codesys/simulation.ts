@@ -56,6 +56,9 @@ const names = z.array(z.string()).min(1).describe("Variables as CODESYS expressi
 /** A value as Structured Text; JSON booleans and numbers are taken too (true becomes 'TRUE'). */
 export const stValue = z.union([z.string(), z.boolean(), z.number()]).transform((v) => (typeof v === "boolean" ? (v ? "TRUE" : "FALSE") : String(v)));
 const values = z.record(z.string(), stValue).describe("Variable to value, as Structured Text or JSON: { 'PLC_PRG.xStart': 'TRUE' (or true), 'PLC_PRG.nSpeed': '5' (or 5) }");
+// Taken too: in both batch mixer runs Claude's first read or write said "variables".
+const NAME_ALIASES = { variables: "names", vars: "names" };
+const VALUE_ALIASES = { variables: "values", vars: "values" };
 
 export function registerCodesysSim(ctx: AppContext, deps: SimToolDeps): void {
   const b = ctx.bridge;
@@ -117,7 +120,7 @@ export function registerCodesysSim(ctx: AppContext, deps: SimToolDeps): void {
 
   reg(
     "codesys_sim_read",
-    { description: "Read current values from CODESYS's own simulation. A read takes about 0.4 s, so read everything you need in one call.", inputSchema: z.object({ names }) },
+    { description: "Read current values from CODESYS's own simulation. A read takes about 0.4 s, so read everything you need in one call.", inputSchema: z.object({ names }), aliases: NAME_ALIASES },
     async ({ names: list }: { names: string[] }) =>
       run(async () => {
         const r = await b.call<{ values: Record<string, string>; errors: Record<string, string> }>("sim.read", { names: list });
@@ -127,19 +130,19 @@ export function registerCodesysSim(ctx: AppContext, deps: SimToolDeps): void {
 
   reg(
     "codesys_sim_write",
-    { description: "Write values once in CODESYS's own simulation. If the program assigns the variable, the next cycle overwrites it; use codesys_sim_force to hold a value.", inputSchema: z.object({ values }) },
+    { description: "Write values once in CODESYS's own simulation. If the program assigns the variable, the next cycle overwrites it; use codesys_sim_force to hold a value.", inputSchema: z.object({ values }), aliases: VALUE_ALIASES },
     async ({ values: v }: { values: Record<string, string> }) => run(async () => `Wrote ${listValues(v)}. ${await status("sim.write", { values: v })}`),
   );
 
   reg(
     "codesys_sim_force",
-    { description: "Force values in CODESYS's own simulation, until codesys_sim_unforce or codesys_sim_stop. Right for inputs. CODESYS re-applies a force between scans, so if the program assigns the variable, code before that assignment sees the forced value and code after it, in the same scan, sees the program's own value.", inputSchema: z.object({ values }) },
+    { description: "Force values in CODESYS's own simulation, until codesys_sim_unforce or codesys_sim_stop. Right for inputs. CODESYS re-applies a force between scans, so if the program assigns the variable, code before that assignment sees the forced value and code after it, in the same scan, sees the program's own value.", inputSchema: z.object({ values }), aliases: VALUE_ALIASES },
     async ({ values: v }: { values: Record<string, string> }) => run(async () => `Forced ${listValues(v)}. ${await status("sim.force", { values: v })}`),
   );
 
   reg(
     "codesys_sim_unforce",
-    { description: "Release forced values in CODESYS's own simulation: the named ones, or all of them.", inputSchema: z.object({ names: names.optional() }) },
+    { description: "Release forced values in CODESYS's own simulation: the named ones, or all of them.", inputSchema: z.object({ names: names.optional() }), aliases: NAME_ALIASES },
     async ({ names: list }: { names?: string[] }) => run(() => status("sim.unforce", list ? { names: list } : {})),
   );
 }

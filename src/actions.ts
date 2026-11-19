@@ -17,6 +17,9 @@ export type ActionResult = { content: ActionContent[]; isError?: boolean };
 export interface ActionConfig<S extends z.ZodObject = z.ZodObject> {
   description: string;
   inputSchema: S;
+  /** Other names an argument is taken under (wrong name -> right name), for names models reach for
+   * first: in two runs of the batch mixer the first codesys_sim_write went out with "variables". */
+  aliases?: Record<string, string>;
 }
 
 export interface Action extends ActionConfig {
@@ -97,7 +100,20 @@ const MAX_BATCH = 50;
 const reply = (text: string, isError = false): ActionResult => ({ content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) });
 
 // Strict: nothing else checks the arguments, and a misspelt optional one must not be dropped silently.
-const checkArgs = (a: ActionConfig, args: unknown) => a.inputSchema.strict().safeParse(args ?? {});
+const checkArgs = (a: ActionConfig, args: unknown) => a.inputSchema.strict().safeParse(renamed(a, args ?? {}));
+
+/** The arguments with an alias renamed to its argument (when that isn't given as well). */
+function renamed(a: ActionConfig, args: unknown): unknown {
+  if (!a.aliases || typeof args !== "object" || args === null || Array.isArray(args)) return args;
+  const out: Record<string, unknown> = { ...(args as Record<string, unknown>) };
+  for (const [from, to] of Object.entries(a.aliases)) {
+    if (from in out && !(to in out)) {
+      out[to] = out[from];
+      delete out[from];
+    }
+  }
+  return out;
+}
 
 const batchInput = z.object({
   calls: z.array(z.object({ action: z.string(), args: z.record(z.string(), z.unknown()).optional() })).min(1).max(MAX_BATCH).describe(`The steps, in order, at most ${MAX_BATCH}`),

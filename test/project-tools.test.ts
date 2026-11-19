@@ -297,6 +297,23 @@ describe("project tools over MCP (fake CODESYS)", () => {
       expect(r.text).not.toMatch(/invalid arguments/);
     });
 
+    it("takes 'variables' for the simulation's names and values, but no other unknown name", async () => {
+      const r = await call("batch", { calls: [
+        { action: "codesys_sim_write", args: { variables: { "PLC_PRG.xStart": true } } },
+        { action: "codesys_sim_read", args: { variables: ["PLC_PRG.xStart"] } },
+        { action: "codesys_sim_force", args: { vars: { "PLC_PRG.xStart": true } } },
+        { action: "codesys_sim_unforce", args: { variables: ["PLC_PRG.xStart"] } },
+      ], continueOnError: true });
+      expect(r.text).not.toMatch(/invalid arguments/);
+      expect(r.text).toMatch(/\[1\/4\] codesys_sim_write/);
+      // Both the alias and the argument: the alias stays an unknown key.
+      const both = await call("codesys_sim_read", { names: ["a"], variables: ["b"] });
+      expect(both.isError).toBe(true);
+      expect(both.text).toMatch(/Unrecognized key: "variables"/);
+      const other = await call("codesys_sim_read", { vars2: ["a"] });
+      expect(other.isError).toBe(true);
+    });
+
     it("respects Pause Claude for each step", async () => {
       await client.callTool({ name: "ui_hold", arguments: { on: true } });
       const r = await call("batch", { calls: [read, write("g := 1;")] });
