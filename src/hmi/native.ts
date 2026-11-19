@@ -766,11 +766,26 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         const histN = w.history && alarmIndex ? Math.max(0, Math.min(w.history, room)) : 0;
         const open: string[] = [];
         const rows: (() => void)[] = [];
+        // Open rows close up to the top: each row moves up one row for every row above it that isn't
+        // showing (CODESYS's absolute movement), so one active alarm sits in the first row, not in its slot.
+        const moved = (shift: string | undefined, draw: () => void) => () => {
+          const from = els.length;
+          draw();
+          if (shift) for (const e of els.slice(from)) e.props = { ...e.props, "Absolute movement.Movement.Y": shift };
+        };
+        const shiftFor = (above: string[]) => {
+          if (!above.length) return undefined;
+          const name = `iRs${++n}`;
+          decl.push(`    ${name} : INT; // alarm row ${above.length + 1}: up one row per hidden row above it`);
+          impl.push(`${name} := -(${above.map((o) => `SEL(${o}, ${r(ROW + GAP)}, 0)`).join(" + ")});`);
+          return `${helperName}.${name}`;
+        };
         w.items.forEach((a, i) => {
           const tone: Tone = a.severity === "info" ? "accent" : a.severity === "warning" ? "warn" : "alarm";
           const ic: IconName = a.severity === "info" ? "info" : a.severity === "warning" ? "warning" : "fault";
           const y = box.y + i * (ROW + GAP);
           const idx = alarmIndex?.[a.active];
+          const above = [...open];
           const row = (hide: string, timeVar?: string, stateVar?: string, ack?: { show: string; code: string }) => {
             // A plain row: only the icon has the severity's colour, a hairline under it.
             els.push({ kind: "rect", x: r(box.x), y: r(y + ROW - 1), w: r(box.w), h: 1, fill: p.border, frame: null, invisible: hide });
@@ -797,7 +812,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
           if (idx === undefined) {
             // Not a CODESYS alarm (yet): the row shows while the variable is TRUE.
             open.push(a.active);
-            rows.push(() => row(`NOT ${a.active}`));
+            rows.push(moved(shiftFor(above), () => row(`NOT ${a.active}`)));
             return;
           }
           // A CODESYS alarm: the row stays until it is acknowledged, with its state, time and acknowledge.
@@ -812,8 +827,9 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
             // m_liTimestampActive is a FILETIME (100 ns since 1601, UTC); m_iOffsetActive the local offset in minutes.
             `IF xAo${m} THEN sAt${m} := RIGHT(DT_TO_STRING(LINT_TO_DT(${al}.m_liTimestampActive / 10000000 - 11644473600 + INT_TO_LINT(${al}.m_iOffsetActive) * 60)), 8); END_IF`,
           );
+          const shift = shiftFor(above);
           open.push(`${helperName}.xAo${m}`);
-          rows.push(() => row(`NOT ${helperName}.xAo${m}`, `${helperName}.sAt${m}`, `${helperName}.sAs${m}`, { show: `NOT ${helperName}.xAk${m}`, code: `${al}.m_xToAcknowledge := TRUE;` }));
+          rows.push(moved(shift, () => row(`NOT ${helperName}.xAo${m}`, `${helperName}.sAt${m}`, `${helperName}.sAs${m}`, { show: `NOT ${helperName}.xAk${m}`, code: `${al}.m_xToAcknowledge := TRUE;` })));
         });
         const none = open.join(" OR ");
         els.push(icon("check", box.x, box.y + 10 * k, 18 * k, p.tones.ok, none));

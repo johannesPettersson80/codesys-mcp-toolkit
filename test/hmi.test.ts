@@ -506,6 +506,23 @@ describe("native CODESYS visualization plan", () => {
     expect(withIdx.elements.find((e) => e.text === "No active alarms")!.invisible).toMatch(/PRG_HMI_Overview\.xAo\d+/);
   });
 
+  it("closes up alarm rows: a row moves up one row for each row above it that isn't showing", () => {
+    const s = screenSchema.parse({ name: "A", title: "A", widgets: [{ type: "alarms", title: "Alarms", at: [1, 1, 6, 4], items: [
+      { active: "G.xA", text: "Overfill" }, { active: "G.xB", text: "Timeout" }, { active: "G.xC", text: "Dry run" },
+    ] }] });
+    const p = nativePlan(s, [], {}, { "G.xA": 0, "G.xB": 1, "G.xC": 2 });
+    const rowOf = (msg: string) => p.elements.find((e) => e.text === msg)!;
+    expect(rowOf("Overfill").props?.["Absolute movement.Movement.Y"]).toBeUndefined();
+    const second = rowOf("Timeout").props!["Absolute movement.Movement.Y"] as string;
+    const third = rowOf("Dry run").props!["Absolute movement.Movement.Y"] as string;
+    expect(p.helper.implementation).toMatch(new RegExp(`${second.split(".")[1]} := -\\(SEL\\(PRG_HMI_A\\.xAo\\d+, \\d+, 0\\)\\);`));
+    expect(p.helper.implementation).toMatch(new RegExp(`${third.split(".")[1]} := -\\(SEL\\(PRG_HMI_A\\.xAo\\d+, \\d+, 0\\) \\+ SEL\\(PRG_HMI_A\\.xAo\\d+, \\d+, 0\\)\\);`));
+    // Every element of the row moves with it, the acknowledge button too.
+    const ack = p.elements.filter((e) => e.click?.includes("gen_ArrAllAlarms[2]"));
+    expect(ack.length).toBeGreaterThan(0);
+    for (const e of ack) expect(e.props?.["Absolute movement.Movement.Y"]).toBe(third);
+  });
+
   it("scales bars and tank levels in the helper program and binds them", () => {
     expect(plan.helper.implementation).toMatch(/ANY_TO_REAL\(PLC_PRG\.rLevel\)/);
     const moving = flat(plan.elements).filter((e) => e.props && Object.keys(e.props).some((k) => k.startsWith("Relative movement")));

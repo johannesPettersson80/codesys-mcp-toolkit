@@ -86,6 +86,10 @@ see where the toolkit falls short.
 - `help` runs as a step of a batch; it made the whole batch fail.
 
 ### Fixed
+- In CODESYS, the alarm card's active rows close up to the top: each alarm had
+  a fixed row, so a pump dry run alone (the fourth alarm) sat at the bottom of
+  an empty card. A row now moves up one row for every row above it that isn't
+  showing, the acknowledge button with it.
 - In CODESYS, a setpoint card's actual value leaves room for its unit: the
   unit ran under the set group's − button ("0.0 k").
 - A trend's fill closes under its own line: with only the last few seconds
