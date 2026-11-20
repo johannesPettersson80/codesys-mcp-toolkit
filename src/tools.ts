@@ -24,7 +24,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { BridgeError, type CodesysBridge } from "./bridge/bridge.js";
 import { buildOutline, ioList, type OutlineTask } from "./codesys/outline.js";
-import { describeDevices, mappedChannels, parseIoMappingCsv, shortVariable, type DeviceInfo } from "./codesys/devices.js";
+import { describeDevices, deviceSubtree, mappedChannels, parseIoMappingCsv, shortVariable, type DeviceInfo } from "./codesys/devices.js";
 import { diffObjects, formatDiff, lineDiff, snapshot, type ChangeStore, type SnapObject } from "./codesys/changes.js";
 import { parseDeclaration } from "./codesys/decl.js";
 import type { ProjectCache } from "./codesys/cache.js";
@@ -857,13 +857,16 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
     "get_devices",
     {
       description:
-        "The device tree: each device with its identification (type, id, version) and whether it is enabled, and its I/O channels with address, description and the variable mapped to each (from CODESYS's I/O mapping export). Read-only; never goes online.",
-      inputSchema: z.object({ io: z.boolean().optional().describe("Include I/O channels (default true)") }),
+        "The device tree: each device with its identification (type, id, version) and whether it is enabled, and its I/O channels with address, description and the variable mapped to each (from CODESYS's I/O mapping export). A device with more than 64 channels lists its mapped ones and counts the rest; device lists one device and those under it with every channel. Read-only; never goes online.",
+      inputSchema: z.object({
+        io: z.boolean().optional().describe("Include I/O channels (default true)"),
+        device: z.string().optional().describe("Only this device and the devices under it, with all their channels: its path (e.g. '/PLC/EIPS_Scanner/IO_1') or its name"),
+      }),
     },
-    async ({ io }) =>
+    async ({ io, device }) =>
       run(ctx, async () => {
         const r = await b.call<{ devices: DeviceInfo[] }>("devices.list", { io: io ?? true }, { timeoutMs: 180_000 });
-        return describeDevices(r.devices);
+        return device ? describeDevices(deviceSubtree(r.devices, device)) : describeDevices(r.devices, { maxChannels: 64 });
       }),
   );
 

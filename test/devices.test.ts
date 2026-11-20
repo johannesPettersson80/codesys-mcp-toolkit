@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
-import { describeDevices, mappedChannels, parseIoMappingCsv, shortVariable } from "../src/codesys/devices.js";
+import { describeDevices, deviceSubtree, mappedChannels, parseIoMappingCsv, shortVariable } from "../src/codesys/devices.js";
 import { describeParam } from "../src/codesys/device-tools.js";
 import { createServer } from "../src/server.js";
 import type { AppContext } from "../src/tools.js";
@@ -74,6 +74,42 @@ describe("device I/O mapping", () => {
     expect(describeParam({ key: "c0/1000/1000_0_0_0", name: "Holding Registers[0]", depth: 1, channel: "Input", mapping: { variable: "wSpeed", address: "%IW0", automatic_address: true } })).toBe("  c0/1000/1000_0_0_0  Holding Registers[0] [input channel] -> wSpeed at %IW0");
     expect(describeParam({ key: "c0/8000", name: "NewChannelConfig", depth: 0, type: "BOOL", value: "true", access: "Read" })).toBe("c0/8000  NewChannelConfig [BOOL] = true (read-only)");
     expect(describeParam({ key: "7", name: "Out", depth: 0, channel: "Output", mapping: { variable: "", address: "%QX4.0", automatic_address: false } })).toBe("7  Out [output channel] -> (not mapped) at %QX4.0 (fixed)");
+  });
+
+  it("counts the unmapped channels of a big device instead of listing them (#7: an adapter with 2363 channels)", () => {
+    const header = CSV.split("\r\n").slice(0, 3);
+    const rows = Array.from({ length: 2363 }, (_, i) => `${i % 139 === 5 ? `Application.GVL_IO.x${i}` : ""},Bit${i},,,%${i < 2000 ? "I" : "Q"}X${Math.floor((i % 2000) / 8)}.${i % 8},IO_Scan3D`);
+    const devices = [
+      { path: "LMC", name: "LMC", depth: 0, type: 4096, id: "1003 0082", version: "1.80.2.2" },
+      { path: "LMC/EIPS_Scanner", name: "EIPS_Scanner", depth: 1 },
+      { path: "LMC/EIPS_Scanner/IO_Scan3D", name: "IO_Scan3D", depth: 2, io_csv: [...header, ...rows].join("\r\n") },
+      { path: "LMC/EIPS_Scanner/Small", name: "Small", depth: 2, io_csv: CSV.replace(/EL1008|EL3062/g, "Small") },
+    ];
+    const text = describeDevices(devices, { maxChannels: 64 });
+    expect(text).toContain("    IO_Scan3D: 2363 channel(s), 17 mapped");
+    expect(text.match(/-> GVL_IO\.x\d/g)).toHaveLength(17);
+    expect(text).not.toMatch(/IO_Scan3D[\s\S]*not mapped[\s\S]*Small/);
+    expect(text).toContain("      + 2346 unmapped channel(s) (%IX0.0 … %IX249.7, %QX0.0 … %QX45.2): get_devices with device 'LMC/EIPS_Scanner/IO_Scan3D' lists them all");
+    // A small device keeps its full list.
+    expect(text).toContain("      %IX0.1     Input@1 Bit1 -> (not mapped)");
+    expect(text.split("\n").length).toBeLessThan(30);
+    // Without the limit (export_sources), every channel is there.
+    expect(describeDevices(devices).match(/not mapped/g)).toHaveLength(2346 + 1);
+  });
+
+  it("finds one device and those under it, by path or by name", () => {
+    const devices = [
+      { path: "PLC", name: "PLC", depth: 0 },
+      { path: "PLC/Bus", name: "Bus", depth: 1 },
+      { path: "PLC/Bus/IO_1", name: "IO_1", depth: 2 },
+      { path: "PLC/Bus/IO_1/Mod", name: "Mod", depth: 3 },
+      { path: "PLC/Bus/IO_2", name: "IO_2", depth: 2 },
+      { path: "PLC/Other/Mod", name: "Mod", depth: 1 },
+    ];
+    expect(deviceSubtree(devices, "/PLC/Bus/IO_1").map((d) => d.name)).toEqual(["IO_1", "Mod"]);
+    expect(deviceSubtree(devices, "bus").map((d) => d.name)).toEqual(["Bus", "IO_1", "Mod", "IO_2"]);
+    expect(() => deviceSubtree(devices, "Mod")).toThrow("2 devices are named 'Mod': give the path, one of 'PLC/Bus/IO_1/Mod', 'PLC/Other/Mod'.");
+    expect(() => deviceSubtree(devices, "Nope")).toThrow("No device 'Nope' in the project (get_devices lists them).");
   });
 
   it("names a module by its module id instead of its owner's type and id", () => {

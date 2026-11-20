@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `get_devices` keeps big devices short: a device with more than 64 I/O
+  channels lists its mapped channels and one line counting the rest, with
+  their address ranges. The new `device` argument lists one device and those
+  under it with every channel. On a Machine Expert PacDrive project with
+  EtherNet/IP adapters (#7), one adapter had 2,363 channels, 17 of them
+  mapped, and the whole output went from 3,438 lines (156 KB) to 439.
+  `export_sources` still writes every channel.
+
 ## [2.12.0] - 2026-11-19
 
 From a batch mixing unit Claude built from one prompt, start to finish, to

@@ -109,8 +109,36 @@ export function mappedChannels(devices: DeviceInfo[]): IoChannel[] {
   return out;
 }
 
-export function describeDevices(devices: DeviceInfo[]): string {
+/** A device and the devices under it, found by path ("/PLC/EK1100" or "PLC/EK1100") or by a unique name. */
+export function deviceSubtree(devices: DeviceInfo[], device: string): DeviceInfo[] {
+  const want = device.trim().replace(/^\/+|\/+$/g, "").toLowerCase();
+  let i = devices.findIndex((d) => d.path.toLowerCase() === want);
+  if (i < 0) {
+    const byName = devices.flatMap((d, j) => (d.name.toLowerCase() === want ? [j] : []));
+    if (byName.length > 1) throw new Error(`${byName.length} devices are named '${device}': give the path, one of ${byName.map((j) => `'${devices[j]!.path}'`).join(", ")}.`);
+    i = byName[0] ?? -1;
+  }
+  if (i < 0) throw new Error(`No device '${device}' in the project (get_devices lists them).`);
+  const root = devices[i]!;
+  const out = [root];
+  for (const d of devices.slice(i + 1)) {
+    if (d.depth <= root.depth) break;
+    out.push(d);
+  }
+  return out;
+}
+
+export interface DescribeOptions {
+  /**
+   * List every channel of a device only up to this many; a bigger device lists its mapped
+   * channels and counts the rest. A fieldbus adapter can have thousands of unmapped channels.
+   */
+  maxChannels?: number;
+}
+
+export function describeDevices(devices: DeviceInfo[], opts: DescribeOptions = {}): string {
   if (!devices.length) return "No devices in the project.";
+  const max = opts.maxChannels ?? Infinity;
   const lines: string[] = [];
   for (const d of devices) {
     const ident = d.module
@@ -126,8 +154,21 @@ export function describeDevices(devices: DeviceInfo[]): string {
     lines.push(
       `${"  ".repeat(d.depth)}${d.name}${ident}${d.enabled === false ? " [disabled]" : ""}${channels.length ? `: ${channels.length} channel(s), ${mapped} mapped` : ""}${d.io_error ? ` (I/O mapping not readable: ${d.io_error})` : ""}`,
     );
-    for (const c of channels) {
-      lines.push(`${"  ".repeat(d.depth + 1)}${(c.address || "-").padEnd(10)} ${c.parameter}${c.description ? ` ${c.description}` : ""}${c.unit ? ` [${c.unit}]` : ""} -> ${c.variable ? shortVariable(c.variable) : "(not mapped)"}`);
+    const pad = "  ".repeat(d.depth + 1);
+    const big = channels.length > max;
+    for (const c of big ? channels.filter((c) => c.variable) : channels) {
+      lines.push(`${pad}${(c.address || "-").padEnd(10)} ${c.parameter}${c.description ? ` ${c.description}` : ""}${c.unit ? ` [${c.unit}]` : ""} -> ${c.variable ? shortVariable(c.variable) : "(not mapped)"}`);
+    }
+    if (big) {
+      // First and last address per area (%I, %Q, %M), in the export's order.
+      const areas = new Map<string, string[]>();
+      for (const c of channels) {
+        const area = !c.variable && c.address.match(/^%([IQM])/i)?.[1]?.toUpperCase();
+        if (area) areas.set(area, [...(areas.get(area) ?? []), c.address]);
+      }
+      const span = (xs: string[]) => (xs.length > 1 ? `${xs[0]} … ${xs[xs.length - 1]}` : xs[0]!);
+      const range = areas.size ? ` (${[...areas.values()].map(span).join(", ")})` : "";
+      lines.push(`${pad}+ ${channels.length - mapped} unmapped channel(s)${range}: get_devices with device '${d.path}' lists them all`);
     }
   }
   return lines.join("\n");
