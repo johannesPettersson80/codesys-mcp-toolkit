@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.1] - 2026-11-20
+
 ### Changed
 - `get_devices` keeps big devices short: a device with more than 64 I/O
   channels lists its mapped channels and one line counting the rest, with
