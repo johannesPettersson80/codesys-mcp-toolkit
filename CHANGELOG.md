@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.2] - 2026-11-21
+
+Fixes from six takes of a batch mixer that DeepSeek V4.1 Flash built in
+OpenCode from one Chinese prompt: calls it made that were refused, and what
+the HMI it exported got wrong with Chinese text and an agitator on a tank.
+
+### Fixed
+- Chinese, Japanese and Korean text in the CODESYS HMI: widths counted a CJK
+  character as narrow as a Latin letter, so the title "批次配料搅拌装置" showed
+  as "批次配料搅". They now count about one em. CJK text is set in Microsoft
+  YaHei UI (Segoe UI has no CJK glyphs) and never below 13 px: Windows'
+  fallback at 11 px made card titles and top-bar labels hard to read. Card
+  titles in CJK are 13 px in the browser too.
+- A tank's level reading sat on the agitator when a mixer stood on the tank.
+  It now goes below the impeller when there is room; otherwise it stays in
+  the middle on a small box in the card's colour, drawn over the agitator so
+  the shaft passes behind the number.
+- A line from the diagram's side edge to a tank's top (or bottom) nozzle,
+  given level with the nozzle, ran along the tank's top edge into the nozzle
+  sideways, or had no length at all. It now comes in above (below) the nozzle
+  and turns into it.
+- A short tank's name could sit on its top outline: the place just above the
+  level reading reached past the tank's top. A name goes inside a vessel only
+  where it fits wholly inside.
+- A mixer listed before its tank was hidden by the tank's liquid: vessels
+  are now drawn before everything on them, in the browser and in CODESYS.
+- A trend in the CODESYS HMI no longer has the line "The trend chart is in
+  the browser HMI (open_hmi)" under it: it read in English on a Chinese page,
+  and a tool name means nothing to an operator.
+
+- `create_graphical` with `replace: true` removed the program's task calls
+  (deleting a program does), so a replaced SFC was no longer called. The calls
+  now stay: the new POU has the same name.
+
+### Changed
+- The HMI's own words follow the screen's language: Start, Stop, Reset,
+  Open, Close, Actual, Set, Set-point, Login, Manual, Auto, Running, Fault,
+  "No active alarms", History and the alarm rows' states (active, cleared,
+  acknowledged) are Chinese on a screen whose texts are
+  Chinese, Japanese with kana, Korean with Hangul, else English; in the
+  browser and in CODESYS. On the Chinese batch mixer the buttons stayed
+  English and DeepSeek built its own Chinese buttons instead.
+- A pipe connected to a mixer is refused with the tank to connect to
+  instead: a mixer stands on its tank and has no ports.
+- `codesys_sim_test` expectations take JSON booleans and numbers
+  (`xValveA: true`, `nBatch: 1`), like `write`, and a comparison's `value`
+  may be a number written as a string (`"1.0"`).
+- `create_graphical` takes `kind` (or `language`): `'ladder'` or `'ld'`,
+  `'fbd'`, `'cfc'`, `'sfc'`. It must match the body given.
+- A tank on a process diagram may leave out `level`: a vessel without a
+  level reading, such as a feed tank. It is drawn empty, with no number.
+- Pipe ends and instrument taps may name a symbol by the tag its label starts
+  with: a tank labelled "T-101 A 料" is also "T-101" (unless two labels start
+  with that tag).
+- `hmi_save_screen` says why a screen name must be Latin letters, digits and
+  `_` (it names `Visu_<name>` and `PRG_HMI_<name>` in CODESYS) and that text
+  in any language goes in `title`.
+
 ## [2.12.1] - 2026-11-20
 
 ### Changed

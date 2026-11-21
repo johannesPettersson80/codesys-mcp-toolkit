@@ -69,6 +69,19 @@ describe("simulation test expectations", () => {
     expect(check("TRUE", { op: "=", value: 1 })).toBe(true);
     expect(check(undefined, "TRUE")).toBe(false);
   });
+
+  it("take JSON booleans and numbers, and numbers written as strings", async () => {
+    const { testSchema, check } = await import("../src/codesys/simtest.js");
+    // The calls DeepSeek made in the batch mixer take: both were refused before.
+    const r = testSchema.parse({
+      cases: [{ name: "t", steps: [{ expect: { xValveA: true, xPump: false, nBatch: 1, rWeight: { op: "<", value: "1.0" } } }] }],
+    });
+    const e = r.cases[0]!.steps[0]!.expect!;
+    expect(e).toEqual({ xValveA: "TRUE", xPump: "FALSE", nBatch: "1", rWeight: { op: "<", value: 1 } });
+    expect(check("TRUE", e.xValveA!)).toBe(true);
+    expect(check("REAL#0.4", e.rWeight!)).toBe(true);
+    expect(() => testSchema.parse({ cases: [{ name: "t", steps: [{ expect: { r: { op: "<", value: "one" } } }] }] })).toThrow();
+  });
 });
 
 describe("dataSize", () => {

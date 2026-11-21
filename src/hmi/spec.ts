@@ -66,7 +66,7 @@ const shown = {
 
 /** Things placed on a process (mimic) diagram, in a 0..100 x 0..100 box scaled to the tile. */
 const processItem = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("tank"), id, x: num, y: num, w: num, h: num, level: v, max: num.default(100), unit: z.string().optional(), label: z.string().optional(), bands: z.array(band).optional(), fault, warning }),
+  z.object({ type: z.literal("tank"), id, x: num, y: num, w: num, h: num, level: v.optional().describe("The level as a number (left out: a vessel without a level reading, e.g. a feed tank)"), max: num.default(100), unit: z.string().optional(), label: z.string().optional(), bands: z.array(band).optional(), fault, warning }),
   z.object({ type: z.literal("pump"), id, x: num, y: num, size: num.default(12), running: v.describe("BOOL: running (▶ before its name; ■ when stopped)"), fault, warning, manual, ...shown, label: z.string().optional(), faceplate: faceplate.optional() }),
   z.object({ type: z.literal("fan"), id, x: num, y: num, size: num.default(12), running: v.describe("BOOL: running (▶ before its name; ■ when stopped)"), fault, warning, manual, ...shown, label: z.string().optional(), faceplate: faceplate.optional() }),
   z.object({ type: z.literal("valve"), id, x: num, y: num, size: num.default(8), open: v.describe("BOOL: open (drawn hollow; closed is drawn filled, as on a P&ID)"), fault, warning, manual, ...shown, vertical: z.boolean().optional(), label: z.string().optional(), faceplate: faceplate.optional() }),
@@ -264,7 +264,11 @@ export const machineSchema = z
   .describe("The machine's state, shown small in the top bar's left corner with a thin line in its colour under the bar, and Start / Stop / Reset and the mode in a bar along the bottom. Give it the same on every page.");
 
 export const screenSchema = z.object({
-  name: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/).describe("Screen name, e.g. 'Overview'"),
+  // It names Visu_<name> and the program PRG_HMI_<name> in CODESYS, so an identifier; DeepSeek's first try was Chinese.
+  name: z
+    .string()
+    .regex(/^[A-Za-z][A-Za-z0-9_]*$/, "must be an identifier in Latin letters, digits and _, e.g. 'Process': it names Visu_<name> and PRG_HMI_<name> in CODESYS. Text in any language goes in title")
+    .describe("Screen identifier in Latin letters, digits and _, e.g. 'Overview' (it names Visu_<name> in CODESYS); the shown text, in any language, is title"),
   title: z.string().describe("Shown in the header"),
   subtitle: z.string().optional(),
   theme: z.enum(["light", "dark", "contrast"]).default("light").describe("light (default), dark, or contrast: black and white with strong colours, for bright light or poor eyesight"),

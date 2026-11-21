@@ -445,6 +445,9 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
         fbd: fbdSchema.optional(),
         cfc: fbdSchema.optional(),
         sfc: sfcSchema.optional(),
+        // Taken too: DeepSeek's first SFC said kind: 'sfc' next to sfc: {...}, and the call was refused.
+        kind: z.string().optional().describe("Optional, the language of the body given: 'ladder' (or 'ld'), 'fbd', 'cfc' or 'sfc'"),
+        language: z.string().optional().describe("Same as kind"),
         parent: z.string().optional().describe("Folder or object to create it under (default: the application)"),
         replace: z.boolean().optional().describe("Replace an existing POU of this name (read it with read_objects, edit the description, send it back). The old one is deleted first; revert_object brings it back from a checkpoint"),
       }),
@@ -453,6 +456,8 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
       run(async () => {
         const kinds = [a.ladder && "ladder", a.fbd && "fbd", a.cfc && "cfc", a.sfc && "sfc"].filter(Boolean);
         if (kinds.length !== 1) throw new Error("Give exactly one of ladder, fbd, cfc or sfc.");
+        const said = (a.kind ?? a.language)?.trim().toLowerCase().replace(/^ld$/, "ladder");
+        if (said && said !== kinds[0]) throw new Error(`kind says '${a.kind ?? a.language}' but the body given is ${kinds[0]}.`);
         // Pragmas and comments may come first, as CODESYS allows.
         const head = /^\s*(?:(?:\{[^}]*\}|\(\*[\s\S]*?\*\)|\/\/[^\n]*)\s*)*(PROGRAM|FUNCTION_BLOCK)\s+([A-Za-z_][A-Za-z0-9_]*)/i.exec(a.declaration);
         if (!head) throw new Error("The declaration must start with PROGRAM or FUNCTION_BLOCK and the name.");
@@ -466,7 +471,8 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
         let replaced = false;
         if (a.replace) {
           try {
-            await ctx.bridge.call("object.delete", { path: a.parent ? `${a.parent}/${a.name}` : a.name, save: false });
+            // Its task calls stay: the new POU has the same name (DeepSeek's replaced SFC lost its call).
+            await ctx.bridge.call("object.delete", { path: a.parent ? `${a.parent}/${a.name}` : a.name, save: false, keep_calls: true });
             replaced = true;
           } catch (e) {
             if (!/not.?found|no object/i.test(e instanceof Error ? e.message : String(e))) throw e;

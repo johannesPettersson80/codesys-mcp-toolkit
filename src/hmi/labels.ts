@@ -8,8 +8,9 @@
  * y from the spec times the aspect, height/width). Text positions are the text's centre.
  */
 import { findSymbol, INSTRUMENT_SYMBOLS, symbolBox, type SymbolLib } from "./symbols.js";
-import { instrumentTap, itemKey, labelSpots, lineEnds, nearestOnLine, PUMP_CASING, routed as routedFor } from "./route.js";
+import { instrumentTap, itemKey, labelSpots, lineEnds, nearestOnLine, PUMP_CASING, routed as routedFor, TANK_READING, tankReadingY } from "./route.js";
 import type { ProcessItem } from "./spec.js";
+import { textLen } from "./theme.js";
 
 type Box = { x0: number; y0: number; x1: number; y1: number };
 
@@ -19,7 +20,7 @@ export const READING = { w: 10, h: 3.2, text: 1.8 } as const;
 /** Text sizes in x-units (the browser's CSS for .p-label, .st-word, .p-line). */
 export const TEXT = { label: 1.75, line: 1.9 } as const;
 /** About how wide a text is: semibold with letter-spacing (labels and line names). */
-const widthOf = (t: string, size: number) => t.length * size * 0.62;
+const widthOf = (t: string, size: number) => textLen(t) * size * 0.62;
 
 export interface PlacedLabel {
   /** The anchor point's x and the label's centre y (of the whole name line). */
@@ -161,7 +162,10 @@ export function placeTexts(
     const b = itemBox(p, a, lib);
     if (b) (hard.push(b), owns.set(p, b));
     // A tank's level reading in its middle.
-    if (p.type === "tank") hard.push({ x0: p.x + p.w / 2 - 4, x1: p.x + p.w / 2 + 4, y0: (p.y + p.h / 2) * a - 2.2, y1: (p.y + p.h / 2) * a + 1.6 });
+    if (p.type === "tank" && p.level) {
+      const ry = tankReadingY(p, items, a, lib) * a;
+      hard.push({ x0: p.x + p.w / 2 - 4, x1: p.x + p.w / 2 + 4, y0: ry - TANK_READING.up, y1: ry + TANK_READING.down });
+    }
     if ((p.type === "sensor" || p.type === "instrument") && p.value) {
       const r = readingSpot(p, items, a, lib, tapYOf(p));
       hard.push({ x0: r.x - READING.w / 2, x1: r.x + READING.w / 2, y0: r.y - READING.h / 2, y1: r.y + READING.h / 2 });
@@ -262,7 +266,10 @@ export function placeTexts(
       "above-right": at(cx + 1.4, above, "start"),
       "above-left": at(cx - 1.4, above, "end"),
     };
-    const order: (keyof typeof cands)[] = p.type === "tank" ? ["inside", "inside-mid", "inside-low", "below", "above"] : ["below", "below-right", "below-left", "right-low", "right", "right-high", "left-low", "left", "left-high", "above", "above-right", "above-left"];
+    // An inside place only where it lies wholly in the vessel: on a short tank "inside-mid" reached
+    // above its top, and the name sat on the outline (TA-01 in the batch mixer, take 4).
+    const within = (k: keyof typeof cands) => cands[k].box.y0 >= b.y0 && cands[k].box.y1 <= b.y1;
+    const order: (keyof typeof cands)[] = p.type === "tank" ? (["inside", "inside-mid", "inside-low", "below", "above"] as const).filter((k) => !k.startsWith("inside") || within(k)) : ["below", "below-right", "below-left", "right-low", "right", "right-high", "left-low", "left", "left-high", "above", "above-right", "above-left"];
     // The place the drawing's rules ask for first (a pipe or shaft below: beside it; an agitator: above), a vertical valve's beside it.
     const first: keyof typeof cands | undefined = p.type === "tank" ? undefined : spot ? (spot.side === "beside" ? (b.x1 > 85 ? "above" : "right") : spot.side) : p.type === "valve" && p.vertical ? "right" : undefined;
     const ranked = first ? [first, ...order.filter((o) => o !== first)] : order;

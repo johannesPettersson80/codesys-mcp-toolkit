@@ -143,6 +143,51 @@ export const TYPE = {
 /** CODESYS's font size per CSS pixel (checked on SP21: its sizes render as pixels). */
 export const PT = 1;
 
+// Chinese, Japanese and Korean characters (and full-width forms) are about one em wide, where a
+// Latin letter averages a little over half of one. Widths estimated from string length cut CJK
+// titles off: the batch mixer's "批次配料搅拌装置" showed as "批次配料搅".
+const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦\u{20000}-\u{3FFFD}]/gu;
+
+/** Whether a text has CJK characters. */
+export const hasCjk = (t: string): boolean => (WIDE.lastIndex = 0, WIDE.test(t));
+
+/** A text's length in average Latin letters: a CJK character counts as 1.8. */
+export const textLen = (t: string): number => {
+  const wide = t.match(WIDE)?.length ?? 0;
+  return [...t].length + wide * 0.8;
+};
+
+/** A text's width in pixels at `px`: Latin letters `latin` em each, CJK characters one em at no less than `minCjk`. */
+export const textWidth = (t: string, px: number, latin = 0.56, minCjk = CJK_MIN): number => {
+  const wide = t.match(WIDE)?.length ?? 0;
+  return ([...t].length - wide) * px * latin + wide * Math.max(px, minCjk);
+};
+
+/**
+ * The HMI's own words (buttons, captions), in the screen's language: on DeepSeek's Chinese batch
+ * mixer they stayed English (Start, Login, Actual), and it built its own Chinese buttons instead.
+ */
+export const UI_WORDS = {
+  en: { start: "Start", stop: "Stop", reset: "Reset", open: "Open", close: "Close", actual: "Actual", set: "Set", setpoint: "Set-point", login: "Login", manual: "Manual", auto: "Auto", noAlarms: "No active alarms", history: "History", running: "Running", fault: "Fault", normal: "normal", pending: "pending", active: "active", cleared: "cleared", acknowledged: "acknowledged" },
+  zh: { start: "启动", stop: "停止", reset: "复位", open: "打开", close: "关闭", actual: "实际", set: "设定", setpoint: "设定值", login: "登录", manual: "手动", auto: "自动", noAlarms: "无活动报警", history: "历史", running: "运行", fault: "故障", normal: "正常", pending: "待定", active: "激活", cleared: "已清除", acknowledged: "已确认" },
+  ja: { start: "起動", stop: "停止", reset: "リセット", open: "開く", close: "閉じる", actual: "実測", set: "設定", setpoint: "設定値", login: "ログイン", manual: "手動", auto: "自動", noAlarms: "アクティブなアラームなし", history: "履歴", running: "運転", fault: "故障", normal: "正常", pending: "保留", active: "発生中", cleared: "解除", acknowledged: "確認済" },
+  ko: { start: "시작", stop: "정지", reset: "리셋", open: "열기", close: "닫기", actual: "실제", set: "설정", setpoint: "설정값", login: "로그인", manual: "수동", auto: "자동", noAlarms: "활성 알람 없음", history: "이력", running: "운전", fault: "고장", normal: "정상", pending: "대기", active: "활성", cleared: "해제", acknowledged: "확인됨" },
+} as const;
+export type UiWords = { readonly [K in keyof (typeof UI_WORDS)["en"]]: string };
+
+/** The language of a screen's own texts (title, subtitle, card titles, machine states): kana Japanese, Hangul Korean, other CJK Chinese, else English. */
+export function uiWords(screen: { title: string; subtitle?: string; widgets?: { title?: string }[]; machine?: { states: { text: string }[]; idle: { text: string } } }): UiWords {
+  const t = [screen.title, screen.subtitle ?? "", ...(screen.widgets ?? []).map((w) => w.title ?? ""), ...(screen.machine ? [screen.machine.idle.text, ...screen.machine.states.map((s) => s.text)] : [])].join(" ");
+  if (/[ぁ-ヿ]/.test(t)) return UI_WORDS.ja;
+  if (/[ᄀ-ᇿ가-힣]/.test(t)) return UI_WORDS.ko;
+  return hasCjk(t) ? UI_WORDS.zh : UI_WORDS.en;
+}
+
+/** The font CJK text gets in CODESYS: Segoe UI has no CJK glyphs, and Windows' fallback at 11 px is hard to read. */
+export const CJK_FONT = "Microsoft YaHei UI";
+/** The smallest CJK text, in CSS pixels at 1280x720. */
+export const CJK_MIN = 13;
+
 export const SPACE = {
   /** The top bar's height. */
   bar: 56,

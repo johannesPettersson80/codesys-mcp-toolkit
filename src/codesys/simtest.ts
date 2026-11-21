@@ -8,9 +8,12 @@ import { plcValue } from "../hmi/value.js";
 import type { AppContext } from "../tools.js";
 import { currentCodesysSim, stValue } from "./simulation.js";
 
+// A number, or a number written as a string ('1.0'): DeepSeek wrote both in one test.
+const num = z.union([z.number(), z.string().trim().regex(/^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/).transform(Number)]);
 const expectation = z.union([
-  z.string().describe("Exact value: 'TRUE', '42', 'T#2S'"),
-  z.object({ op: z.enum(["=", "<>", "<", "<=", ">", ">="]), value: z.number(), tolerance: z.number().optional() }),
+  // true and 42 as JSON too, like write: the batch mixer's first test expected xValveA: true and was refused.
+  z.union([z.string(), z.boolean(), z.number()]).transform((v) => (typeof v === "boolean" ? (v ? "TRUE" : "FALSE") : String(v))).describe("Exact value: 'TRUE' or true, '42' or 42, 'T#2S'"),
+  z.object({ op: z.enum(["=", "<>", "<", "<=", ">", ">="]), value: num, tolerance: num.optional() }),
 ]);
 
 export const testSchema = z.object({

@@ -1,0 +1,366 @@
+{
+  "name": "批次搅拌",
+  "title": "批次配料搅拌装置",
+  "subtitle": "T-301 双组分批次配料",
+  "icon": "process",
+  "theme": "light",
+  "info": [
+    {
+      "label": "批次",
+      "value": "GVL_IO.nBatchCount"
+    },
+    {
+      "label": "实际重量",
+      "value": "GVL_IO.r_Weight",
+      "unit": "kg",
+      "decimals": 1
+    },
+    {
+      "label": "配方总量",
+      "value": "GVL_IO.r_SetTotal",
+      "unit": "kg",
+      "decimals": 1
+    }
+  ],
+  "machine": {
+    "states": [
+      {
+        "on": "GVL_IO.xAnyAlarm",
+        "text": "报警",
+        "tone": "alarm",
+        "icon": "alarm"
+      },
+      {
+        "on": "GVL_IO.xBatchActive",
+        "text": "批次运行",
+        "tone": "accent",
+        "icon": "play"
+      },
+      {
+        "on": "GVL_IO.xBatchDone",
+        "text": "批次完成",
+        "tone": "ok",
+        "icon": "check"
+      },
+      {
+        "on": "GVL_IO.xPump",
+        "text": "出料中",
+        "tone": "accent",
+        "icon": "pump"
+      }
+    ],
+    "idle": {
+      "text": "待机",
+      "tone": "neutral"
+    },
+    "detail": "批次顺序：加 A → 加 B → 搅拌 → 出料",
+    "start": "GVL_IO.xStart",
+    "stop": "GVL_IO.xStop",
+    "reset": "GVL_IO.xReset",
+    "mode": {
+      "variable": "GVL_IO.xAutoMode",
+      "options": [
+        "手动",
+        "自动"
+      ]
+    }
+  },
+  "widgets": [
+    {
+      "type": "process",
+      "title": "工艺流程",
+      "at": [
+        1,
+        1,
+        8,
+        5
+      ],
+      "items": [
+        {
+          "type": "tank",
+          "x": 4,
+          "y": 2,
+          "w": 16,
+          "h": 26,
+          "label": "T-101 A 料"
+        },
+        {
+          "type": "tank",
+          "x": 80,
+          "y": 2,
+          "w": 16,
+          "h": 26,
+          "label": "T-102 B 料"
+        },
+        {
+          "type": "valve",
+          "x": 8,
+          "y": 30,
+          "size": 8,
+          "vertical": true,
+          "open": "GVL_IO.xValveA",
+          "label": "XV-101"
+        },
+        {
+          "type": "valve",
+          "x": 84,
+          "y": 30,
+          "size": 8,
+          "vertical": true,
+          "open": "GVL_IO.xValveB",
+          "label": "XV-102"
+        },
+        {
+          "type": "tank",
+          "x": 37,
+          "y": 40,
+          "w": 26,
+          "h": 44,
+          "level": "GVL_IO.r_Level",
+          "max": 100,
+          "unit": "%",
+          "label": "T-301 搅拌罐"
+        },
+        {
+          "type": "symbol",
+          "symbol": "mixer",
+          "x": 50,
+          "y": 33,
+          "size": 13,
+          "label": "M-301",
+          "on": "GVL_IO.xAgitator"
+        },
+        {
+          "type": "pump",
+          "x": 65,
+          "y": 72,
+          "size": 12,
+          "running": "GVL_IO.xPump",
+          "label": "P-301"
+        },
+        {
+          "type": "pipe",
+          "from": "T-101.bottom",
+          "to": "XV-101.out",
+          "flow": "GVL_IO.xValveA"
+        },
+        {
+          "type": "pipe",
+          "from": "XV-101.in",
+          "to": "T-301.left-high",
+          "flow": "GVL_IO.xValveA"
+        },
+        {
+          "type": "pipe",
+          "from": "T-102.bottom",
+          "to": "XV-102.out",
+          "flow": "GVL_IO.xValveB"
+        },
+        {
+          "type": "pipe",
+          "from": "XV-102.in",
+          "to": "T-301.right-high",
+          "flow": "GVL_IO.xValveB"
+        },
+        {
+          "type": "pipe",
+          "from": "T-301.right",
+          "to": "P-301.in",
+          "flow": "GVL_IO.xPump"
+        },
+        {
+          "type": "pipe",
+          "from": "P-301.out",
+          "to": [
+            97,
+            78
+          ],
+          "flow": "GVL_IO.xPump"
+        },
+        {
+          "type": "sensor",
+          "x": 26,
+          "y": 66,
+          "value": "GVL_IO.r_Weight",
+          "unit": "kg",
+          "label": "WT-301"
+        },
+        {
+          "type": "label",
+          "x": 87,
+          "y": 71,
+          "text": "去灌装"
+        }
+      ]
+    },
+    {
+      "type": "value",
+      "title": "搅拌罐重量",
+      "at": [
+        9,
+        1,
+        4,
+        3
+      ],
+      "value": "GVL_IO.r_Weight",
+      "set": "GVL_IO.r_SetTotal",
+      "min": 0,
+      "max": 60,
+      "unit": "kg",
+      "decimals": 1,
+      "icon": "tank"
+    },
+    {
+      "type": "gauge",
+      "title": "料位",
+      "at": [
+        9,
+        4,
+        2,
+        2
+      ],
+      "value": "GVL_IO.r_Level",
+      "min": 0,
+      "max": 100,
+      "unit": "%",
+      "icon": "level",
+      "bands": [
+        {
+          "from": 0,
+          "tone": "accent"
+        },
+        {
+          "from": 85,
+          "tone": "warn"
+        },
+        {
+          "from": 95,
+          "tone": "alarm"
+        }
+      ]
+    },
+    {
+      "type": "value",
+      "title": "罐温",
+      "at": [
+        11,
+        4,
+        2,
+        2
+      ],
+      "value": "GVL_IO.r_Temp",
+      "min": 0,
+      "max": 60,
+      "unit": "°C",
+      "decimals": 1,
+      "icon": "temperature"
+    },
+    {
+      "type": "setpoint",
+      "title": "A 料设定",
+      "at": [
+        1,
+        6,
+        2,
+        3
+      ],
+      "variable": "GVL_IO.r_SetA",
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "unit": "kg",
+      "icon": "tank"
+    },
+    {
+      "type": "setpoint",
+      "title": "B 料设定",
+      "at": [
+        3,
+        6,
+        2,
+        3
+      ],
+      "variable": "GVL_IO.r_SetB",
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "unit": "kg",
+      "icon": "tank"
+    },
+    {
+      "type": "setpoint",
+      "title": "搅拌时间",
+      "at": [
+        5,
+        6,
+        2,
+        3
+      ],
+      "variable": "GVL_IO.r_MixTime",
+      "min": 1,
+      "max": 60,
+      "step": 1,
+      "unit": "s",
+      "icon": "time"
+    },
+    {
+      "type": "alarms",
+      "title": "报警",
+      "at": [
+        7,
+        6,
+        3,
+        3
+      ],
+      "items": [
+        {
+          "active": "GVL_IO.xAlarmOverflow",
+          "text": "搅拌罐溢出，加料联锁关闭",
+          "severity": "alarm"
+        },
+        {
+          "active": "GVL_IO.xAlarmFillTO",
+          "text": "加料超时，批次中止",
+          "severity": "warning"
+        },
+        {
+          "active": "GVL_IO.xAlarmDryRun",
+          "text": "出料泵干转，泵已停止",
+          "severity": "alarm"
+        }
+      ]
+    },
+    {
+      "type": "status",
+      "title": "执行机构",
+      "at": [
+        10,
+        6,
+        3,
+        3
+      ],
+      "items": [
+        {
+          "label": "A 阀开启",
+          "on": "GVL_IO.xValveA",
+          "tone": "accent"
+        },
+        {
+          "label": "B 阀开启",
+          "on": "GVL_IO.xValveB",
+          "tone": "accent"
+        },
+        {
+          "label": "搅拌运行",
+          "on": "GVL_IO.xAgitator",
+          "tone": "accent"
+        },
+        {
+          "label": "出料泵运行",
+          "on": "GVL_IO.xPump",
+          "tone": "accent"
+        }
+      ]
+    }
+  ]
+}

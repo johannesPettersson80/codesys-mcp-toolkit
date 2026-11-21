@@ -19,6 +19,34 @@ export interface Port {
 
 const keyOf = (p: ProcessItem): string | undefined => ("id" in p && p.id) || ("tag" in p && p.tag) || ("label" in p && p.label) || undefined;
 
+/**
+ * Pipe ends and instrument taps that name a symbol by the tag its label starts with: a tank
+ * labelled 'T-101 A 料' is 'T-101' too, as DeepSeek wrote in the batch mixer and was refused.
+ * Rewrites them to the full name, in place; a tag two labels share stays unresolved.
+ */
+export function resolveTagRefs(items: ProcessItem[]): void {
+  const keys = new Set(items.flatMap((p) => (keyOf(p) && connectable(p) ? [keyOf(p)!.toLowerCase()] : [])));
+  const byTag = new Map<string, string | null>();
+  for (const p of items) {
+    const key = keyOf(p);
+    if (!key || !connectable(p)) continue;
+    const tag = key.trim().split(/\s+/)[0]!.toLowerCase();
+    if (tag === key.toLowerCase() || keys.has(tag)) continue;
+    byTag.set(tag, byTag.has(tag) ? null : key);
+  }
+  const fix = (e: unknown) => {
+    if (typeof e !== "string") return e;
+    const dot = e.lastIndexOf(".");
+    const name = dot < 0 ? e : e.slice(0, dot);
+    const full = keys.has(name.toLowerCase()) ? undefined : byTag.get(name.toLowerCase());
+    return full ? full + (dot < 0 ? "" : e.slice(dot)) : e;
+  };
+  for (const p of items) {
+    if (p.type === "pipe") (p.from = fix(p.from) as typeof p.from), (p.to = fix(p.to) as typeof p.to);
+    else if (p.type === "instrument" && p.at) p.at = fix(p.at) as typeof p.at;
+  }
+}
+
 /** Where an item's label goes when the usual place (centred below it) is taken. */
 export type LabelSpot = { side: "below-left" | "below-right" | "beside" | "above"; x: number };
 
@@ -198,7 +226,10 @@ export function routeProblems(items: ProcessItem[], lib: SymbolLib = BUILTIN_SYM
       else if (!portNames(s, lib).includes(port)) {
         const kind = s.type === "symbol" ? s.symbol : s.type;
         const names = portNames(s, lib);
-        out.push(`pipe ${i + 1}: ${kind} '${name}' has no port '${port}' (${names.length ? `ports: ${names.join(", ")}` : "it has no ports"}).`);
+        // An agitator stands on its tank: twice DeepSeek's first diagram piped into the mixer itself.
+        const tank = kind === "mixer" ? items.find((q) => q.type === "tank" && s.type === "symbol" && s.x >= q.x && s.x <= q.x + q.w) : undefined;
+        const hint = kind === "mixer" ? ` A mixer stands on its tank: connect the pipe to the tank${tank && keyOf(tank) ? `, e.g. '${keyOf(tank)}.${port.startsWith("left") || port.startsWith("right") || port === "top" || port === "bottom" ? port : "left-high"}'` : ""}.` : "";
+        out.push(`pipe ${i + 1}: ${kind} '${name}' has no port '${port}' (${names.length ? `ports: ${names.join(", ")}` : "it has no ports"}).${hint}`);
       }
     }
   });
@@ -267,6 +298,37 @@ export function seated(items: ProcessItem[], aspect: number, lib: SymbolLib = BU
 
 /** Where the mixer symbol's motor ends, as a share of its height (circle at 17 ± 13 of 100). */
 const MIXER_MOTOR_BOTTOM = 0.3;
+/** Where its impeller ends (the blade at 75..92 of 100). */
+const MIXER_IMPELLER_BOTTOM = 0.92;
+/** The tank's level reading around its centre line, in x-units: 2.2 above, 1.6 below. */
+export const TANK_READING = { up: 2.2, down: 1.6 };
+
+/**
+ * Where a tank's level reading goes: its middle, or below the agitator when one reaches the
+ * middle and there is room (the batch mixer's "1%" sat on the shaft). Otherwise it stays in the
+ * middle, backed: on a box in the card's colour, drawn over the agitator so its shaft passes
+ * behind the number. Items are the diagram's, seated or not.
+ */
+export function tankReading(t: Extract<ProcessItem, { type: "tank" }>, items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): { y: number; backed: boolean } {
+  const mid = t.y + t.h / 2;
+  const bottom = t.y + t.h;
+  let lowest = -Infinity;
+  for (const p of seated(items, aspect, lib)) {
+    if (p.type !== "symbol" || p.x < t.x || p.x > t.x + t.w) continue;
+    const f = findSymbol(lib, p.symbol);
+    if (!f || f[0] !== "mixer") continue;
+    const h = ((p.size * f[1].viewBox[1]) / f[1].viewBox[0]) / aspect;
+    if (p.y - h / 2 <= t.y + 0.5) lowest = Math.max(lowest, p.y + (MIXER_IMPELLER_BOTTOM - 0.5) * h);
+  }
+  const up = TANK_READING.up / aspect, down = TANK_READING.down / aspect, gap = 0.4 / aspect;
+  if (lowest + gap <= mid - up) return { y: mid, backed: false };
+  // Halfway between the impeller and the bottom, when the reading fits there.
+  const y = (lowest + bottom) / 2 + (up - down) / 2;
+  return y - up >= lowest + gap && y + down <= bottom - gap ? { y, backed: false } : { y: mid, backed: true };
+}
+
+/** The y of a tank's level reading (tankReading). */
+export const tankReadingY = (t: Extract<ProcessItem, { type: "tank" }>, items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): number => tankReading(t, items, aspect, lib).y;
 
 /** The points of a pipe: right angles from port to port (or along raw points). */
 export function routePipe(p: Extract<ProcessItem, { type: "pipe" }>, items: ProcessItem[], aspect: number, lib: SymbolLib = BUILTIN_SYMBOLS): Pt[] {
@@ -297,6 +359,11 @@ export function routePipe(p: Extract<ProcessItem, { type: "pipe" }>, items: Proc
     if (typeof e === "string" || !port) return e;
     if (e[1] <= 1 || e[1] >= 99) return horiz(port.dir) ? e : [port.at[0], e[1]];
     if ((e[0] <= 5 || e[0] >= 95) && horiz(port.dir)) return [e[0], port.at[1]];
+    // From a side edge to a nozzle facing up or down: the line comes in above (below) it and turns
+    // down (up) into it. Level with it, it ran along the tank's top into the nozzle sideways, or
+    // had no length at all (DeepSeek's feed lines in the batch mixer, take 4).
+    if ((e[0] <= 5 || e[0] >= 95) && port.dir === "u") return [e[0], Math.max(2, Math.min(e[1], port.at[1] - 4 / aspect))];
+    if ((e[0] <= 5 || e[0] >= 95) && port.dir === "d") return [e[0], Math.min(98, Math.max(e[1], port.at[1] + 4 / aspect))];
     if ((e[1] <= 5 || e[1] >= 95) && !horiz(port.dir)) return [port.at[0], e[1]];
     return e;
   };
@@ -405,6 +472,15 @@ function dedupe(pts: Pt[]): Pt[] {
     out.push(p);
   }
   return out;
+}
+
+/**
+ * The order items are drawn in: pipes, then vessels, then the rest, each in the order given. A
+ * mixer listed before its tank was hidden by the tank's liquid (DeepSeek's batch mixer, take 3).
+ */
+export function drawOrder(items: ProcessItem[]): ProcessItem[] {
+  const rank = (p: ProcessItem) => (p.type === "pipe" ? 0 : p.type === "tank" ? 1 : 2);
+  return [...items].sort((a, b) => rank(a) - rank(b));
 }
 
 /** The diagram with every pipe's points resolved. */

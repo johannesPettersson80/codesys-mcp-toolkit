@@ -348,6 +348,24 @@ describe("project tools over MCP (fake CODESYS)", () => {
     expect((await call("get_changes", { since: "nope" })).text).toMatch(/No checkpoint 'nope'\. Checkpoints: session-start/);
   });
 
+  it("takes kind on create_graphical when it matches the body", async () => {
+    // DeepSeek's first SFC in the batch mixer said kind: 'sfc' and was refused.
+    const sfc = { steps: [{ name: "Idle", initial: true, next: "Run", when: "xGo" }, { name: "Run", next: "Idle", when: "NOT xGo" }] };
+    const decl = "PROGRAM SFC_Kind\nVAR\n    xGo : BOOL;\nEND_VAR";
+    const ok = await call("create_graphical", { kind: "sfc", name: "SFC_Kind", declaration: decl, sfc });
+    expect(ok.isError).toBe(false);
+    expect(ok.text).toMatch(/Created .*SFC_Kind in SFC/);
+    const wrong = await call("create_graphical", { kind: "ld", name: "SFC_Kind2", declaration: decl.replace("SFC_Kind", "SFC_Kind2"), sfc });
+    expect(wrong.isError).toBe(true);
+    expect(wrong.text).toMatch(/kind says 'ld' but the body given is sfc/);
+    // Replacing it keeps its task call (DeepSeek's replaced SFC was left uncalled).
+    expect((await call("configure_task", { name: "MainTask", add_calls: ["SFC_Kind"] })).text).toContain("SFC_Kind");
+    expect((await call("create_graphical", { name: "SFC_Kind", declaration: decl, sfc, replace: true })).text).toMatch(/Replaced/);
+    expect((await call("list_tasks")).text).toMatch(/MainTask[^\n]*SFC_Kind/);
+    await call("delete_object", { path: "SFC_Kind" });
+    expect((await call("list_tasks")).text).not.toMatch(/SFC_Kind/);
+  });
+
   it("restores a deleted graphical object from the checkpoint's PLCopenXML", async () => {
     expect((await call("delete_object", { path: "SEQ_Fill" })).isError).toBe(false);
     expect((await call("get_changes")).text).toMatch(/D SEQ_Fill/);

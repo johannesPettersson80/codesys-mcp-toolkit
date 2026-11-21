@@ -8,10 +8,13 @@
  * which the native CODESYS export shares.
  */
 import { ICONS, iconSvg, type IconName } from "./icons.js";
-import { routed, itemKey, labelSpots, nearestOnLine, type LabelSpot, lineEnds, instrumentTap, PUMP_CASING } from "./route.js";
+import { routed, itemKey, labelSpots, nearestOnLine, type LabelSpot, lineEnds, instrumentTap, PUMP_CASING, tankReading, drawOrder } from "./route.js";
 import { hasDock, type Faceplate, type Machine, type ProcessItem, type Screen, type Tone, type Widget } from "./spec.js";
 import { BUILTIN_SYMBOLS, findPictogram, findSymbol, INSTRUMENT_SYMBOLS, pictogramSize, scopeIds, symbolBox, symbolSize, upright, type SymbolDef, type SymbolLib } from "./symbols.js";
-import { scaleOf, SPACE, themeCss, themeFor, TYPE } from "./theme.js";
+import { hasCjk, scaleOf, SPACE, textLen, themeCss, themeFor, TYPE, UI_WORDS, uiWords, type UiWords } from "./theme.js";
+
+/** The HMI's own words for the screen being rendered (renderScreen sets them; rendering is synchronous). */
+let UI: UiWords = UI_WORDS.en;
 import { nameParts, textKey, placeTexts, READING, readingSpot, SIGN, tapY, type PlacedLabel } from "./labels.js";
 
 export interface Canvas {
@@ -165,14 +168,15 @@ export function machineStates(m: { states: { text: string; tone: Tone; icon?: Ic
 }
 
 /** Which state panel buttons lose their labels: none, Reset, or all three on a very narrow card. */
-export function stateButtonFit(bodyW: number, k: number, has: { start?: unknown; stop?: unknown; reset?: unknown }): { resetIcon: boolean; allIcons: boolean } {
+export function stateButtonFit(bodyW: number, k: number, has: { start?: unknown; stop?: unknown; reset?: unknown }, words: UiWords = UI): { resetIcon: boolean; allIcons: boolean } {
   const fits = (labels: string[], icons: number) => labels.reduce((s, l) => s + buttonWidth(l, true, k), 0) + icons * 44 * k + 10 * k * (labels.length + icons - 1) <= bodyW;
-  const named = [has.start && "Start", has.stop && "Stop"].filter(Boolean) as string[];
-  const resetIcon = !!has.reset && !fits([...named, "Reset"], 0);
+  const named = [has.start && words.start, has.stop && words.stop].filter(Boolean) as string[];
+  const resetIcon = !!has.reset && !fits([...named, words.reset], 0);
   return { resetIcon, allIcons: resetIcon && !fits(named, 1) };
 }
 
 export function renderScreen(screen: Screen, page: PageContext = {}): Rendered {
+  UI = uiWords(screen);
   const bindings: Binding[] = [];
   const bind = (b: Binding) => `data-b="${bindings.push(b) - 1}"`;
   let uid = 0;
@@ -195,7 +199,7 @@ export function renderScreen(screen: Screen, page: PageContext = {}): Rendered {
     const inner = widget(wg, box, k, bind, id, face, lib);
     // Access rights apply in CODESYS's visualization after Login; the browser marks them.
     const lock = wg.access ? `<span class="t-lock" title="${esc(`In CODESYS: operated by ${wg.access.min} and up${wg.access.below === "hide" ? ", hidden from lower groups" : ""}`)}">${iconSvg("login", r1(12 * k))}${esc(wg.access.min)}</span>` : "";
-    const head = wg.title || wg.icon ? `<div class="t-head">${wg.icon ? iconSvg(wg.icon, r1(16 * k), "ic t-ic") : ""}<span class="t-title">${esc(wg.title ?? "")}</span>${lock}</div>` : lock;
+    const head = wg.title || wg.icon ? `<div class="t-head">${wg.icon ? iconSvg(wg.icon, r1(16 * k), "ic t-ic") : ""}<span class="t-title${hasCjk(wg.title ?? "") ? " cjk" : ""}">${esc(wg.title ?? "")}</span>${lock}</div>` : lock;
     return `<section class="tile t-${wg.type}${wg.title || wg.icon ? "" : " untitled"}" style="left:${r1(box.x)}px;top:${r1(box.y)}px;width:${r1(box.w)}px;height:${r1(box.h)}px">${head}<div class="t-body">${inner}</div></section>`;
   });
 
@@ -218,7 +222,7 @@ export function renderScreen(screen: Screen, page: PageContext = {}): Rendered {
   const dockBtn = (label: string, v: string | undefined, kind: ButtonKind, ic: IconName) => (v ? button(label, v, "tap", kind, ic, bind) : "");
   const dock =
     m && hasDock(screen)
-      ? `<footer class="h-dock">${m.mode ? `<div class="d-mode">${segmented(m.mode.variable, m.mode.options, m.mode.values, k, bind)}</div>` : ""}<div class="d-btns">${dockBtn("Reset", m.reset, "secondary", "reset")}${dockBtn("Start", m.start, "primary", "play")}${dockBtn("Stop", m.stop, "secondary", "stop")}</div></footer>`
+      ? `<footer class="h-dock">${m.mode ? `<div class="d-mode">${segmented(m.mode.variable, m.mode.options, m.mode.values, k, bind)}</div>` : ""}<div class="d-btns">${dockBtn(UI.reset, m.reset, "secondary", "reset")}${dockBtn(UI.start, m.start, "primary", "play")}${dockBtn(UI.stop, m.stop, "secondary", "stop")}</div></footer>`
       : "";
   const langs = page.languages?.length ? `<div class="h-langs">${iconSvg("language", r1(16 * k))}<button class="h-lang${page.lang ? "" : " cur"}" data-lang="">EN</button>${page.languages.map((l) => `<button class="h-lang${page.lang === l ? " cur" : ""}" data-lang="${esc(l)}">${esc(l.toUpperCase())}</button>`).join("")}</div>` : "";
   const size = cv.h <= 480 ? " small" : cv.h >= 1080 ? " large" : "";
@@ -261,7 +265,7 @@ function segmented(variable: string, options: string[], values: string[] | undef
 
 /** About how wide a button is, in canvas pixels at scale k (Segoe UI semibold 14 px: ~7.6 px a character). */
 export function buttonWidth(label: string, icon: boolean, k: number): number {
-  return (label.length * 7.6 + (icon ? 26 : 0) + 28) * k;
+  return (textLen(label) * 7.6 + (icon ? 26 : 0) + 28) * k;
 }
 
 /** How a row of buttons fits a width: in one row, two columns, or one column. */
@@ -275,22 +279,23 @@ export function buttonLayout(items: { label: string; icon: boolean }[], width: n
 
 function faceplateHtml(k: string, title: string, f: Faceplate, extra: { running?: string; fault?: string; open?: string }, bind: Bind): string {
   const status = [
-    extra.running ? `<span class="led tone-ok" ${bind({ kind: "on", v: extra.running })}><span class="led-dot"></span>Running</span>` : "",
-    extra.open ? `<span class="led tone-ok" ${bind({ kind: "on", v: extra.open })}><span class="led-dot"></span>Open</span>` : "",
-    extra.fault ? `<span class="led tone-alarm" ${bind({ kind: "on", v: extra.fault })}><span class="led-dot"></span>Fault</span>` : "",
+    extra.running ? `<span class="led tone-ok" ${bind({ kind: "on", v: extra.running })}><span class="led-dot"></span>${UI.running}</span>` : "",
+    extra.open ? `<span class="led tone-ok" ${bind({ kind: "on", v: extra.open })}><span class="led-dot"></span>${UI.open}</span>` : "",
+    extra.fault ? `<span class="led tone-alarm" ${bind({ kind: "on", v: extra.fault })}><span class="led-dot"></span>${UI.fault}</span>` : "",
   ].join("");
-  const mode = f.auto ? segmented(f.auto, ["Manual", "Auto"], ["FALSE", "TRUE"], 1, bind) : "";
-  const btn = (label: string, v: string | undefined) => (v ? button(label, v, "tap", buttonKind(label), buttonIcon(label), bind) : "");
+  const mode = f.auto ? segmented(f.auto, [UI.manual, UI.auto], ["FALSE", "TRUE"], 1, bind) : "";
+  // Styled by the English name, shown in the screen's language.
+  const btn = (label: "Start" | "Stop" | "Open" | "Close" | "Reset", v: string | undefined) => (v ? button(UI[label.toLowerCase() as "start"], v, "tap", buttonKind(label), buttonIcon(label), bind) : "");
   const buttons = [btn("Start", f.start), btn("Stop", f.stop), btn("Open", f.open), btn("Close", f.close), btn("Reset", f.reset)].join("");
   const values = (f.values ?? []).map((x) => `<div class="fp-row"><span>${esc(x.label)}</span><b ${bind({ kind: "text", v: x.value, decimals: x.decimals, unit: x.unit })}>–</b></div>`).join("");
   const sp = f.setpoint;
-  const setpoint = sp ? `<div class="fp-sp">${setpointHtml(sp.variable, sp.min, sp.max, sp.step, sp.unit, undefined, 1, bind, sp.label ?? "Set-point")}</div>` : "";
+  const setpoint = sp ? `<div class="fp-sp">${setpointHtml(sp.variable, sp.min, sp.max, sp.step, sp.unit, undefined, 1, bind, sp.label ?? UI.setpoint)}</div>` : "";
   return `<div class="fp" id="${k}" hidden><div class="fp-card"><div class="fp-head"><div class="fp-title">${esc(f.title ?? title)}</div><button class="fp-x" data-close>×</button></div>${status ? `<div class="fp-status">${status}</div>` : ""}${mode}${buttons ? `<div class="btns fp-btns">${buttons}</div>` : ""}${values ? `<div class="fp-values">${values}</div>` : ""}${setpoint}</div></div>`;
 }
 
 /** A set value with − and + (Koch, Kiefel); with `actual`, the measured value large in the accent beside it. */
-function setpointHtml(variable: string, min: number, max: number, step: number | undefined, unit: string | undefined, actual: string | undefined, dec: number, bind: Bind, label = "Set", actualDec?: number): string {
-  const act = actual ? `<div class="sp-act"><span class="sp-l">Actual</span><div class="v-main"><span class="v-num sp-anum" ${bind({ kind: "text", v: actual, decimals: actualDec ?? dec })}>–</span>${unit ? `<span class="v-unit">${esc(unit)}</span>` : ""}</div></div>` : "";
+function setpointHtml(variable: string, min: number, max: number, step: number | undefined, unit: string | undefined, actual: string | undefined, dec: number, bind: Bind, label = UI.set, actualDec?: number): string {
+  const act = actual ? `<div class="sp-act"><span class="sp-l">${UI.actual}</span><div class="v-main"><span class="v-num sp-anum" ${bind({ kind: "text", v: actual, decimals: actualDec ?? dec })}>–</span>${unit ? `<span class="v-unit">${esc(unit)}</span>` : ""}</div></div>` : "";
   return `<div class="sp${actual ? " with-act" : ""}" data-var="${esc(variable)}" data-min="${min}" data-max="${max}" data-step="${step ?? 1}" ${bind({ kind: "setpoint", v: variable, decimals: dec })}>${act}
 <div class="sp-set"><span class="sp-l">${esc(label)}</span><div class="sp-row"><button class="sp-btn" data-step="-1">−</button><div class="sp-val"><span class="sp-num" ${bind({ kind: "text", v: variable, decimals: dec })}>–</span><span class="sp-unit">${esc(unit ?? "")}</span></div><button class="sp-btn" data-step="1">+</button></div><div class="sp-lim">${min} – ${max}${unit ? ` ${esc(unit)}` : ""}</div></div></div>`;
 }
@@ -328,7 +333,7 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
       const main = `<div class="v-main"><span class="v-num" style="font-size:${r1(size)}px" ${bind({ kind: "text", v: w.value, decimals: w.decimals, bands: w.bands })}>–</span>${w.unit ? `<span class="v-unit">${esc(w.unit)}</span>` : ""}</div>`;
       // With a set-point: Actual and Set side by side (Coperion), the set value in the text colour.
       if (w.set)
-        return `<div class="v-pair"><div class="v-col"><span class="v-lab">Actual</span>${main}</div><div class="v-col"><span class="v-lab">Set</span><div class="v-main"><span class="v-num v-setn" style="font-size:${r1(size * 0.72)}px" ${bind({ kind: "text", v: w.set, decimals: w.decimals })}>–</span>${w.unit ? `<span class="v-unit">${esc(w.unit)}</span>` : ""}</div></div></div>${bar}${spark}`;
+        return `<div class="v-pair"><div class="v-col"><span class="v-lab">${UI.actual}</span>${main}</div><div class="v-col"><span class="v-lab">${UI.set}</span><div class="v-main"><span class="v-num v-setn" style="font-size:${r1(size * 0.72)}px" ${bind({ kind: "text", v: w.set, decimals: w.decimals })}>–</span>${w.unit ? `<span class="v-unit">${esc(w.unit)}</span>` : ""}</div></div></div>${bar}${spark}`;
       return `${main}${bar}${spark}`;
     }
     case "gauge": {
@@ -366,12 +371,12 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
       const fs = stateTextSize([...w.states.map((s) => s.text), w.idle.text], bodyW, k);
       // Labels where they fit: else Reset becomes an icon, and on a very narrow card all three do.
       const { resetIcon, allIcons } = stateButtonFit(bodyW, k, w);
-      const btns = [w.start ? button("Start", w.start, "tap", "primary", "play", bind, allIcons) : "", w.stop ? button("Stop", w.stop, "tap", "secondary", "stop", bind, allIcons) : "", w.reset ? button("Reset", w.reset, "tap", "secondary", "reset", bind, resetIcon) : ""].join("");
+      const btns = [w.start ? button(UI.start, w.start, "tap", "primary", "play", bind, allIcons) : "", w.stop ? button(UI.stop, w.stop, "tap", "secondary", "stop", bind, allIcons) : "", w.reset ? button(UI.reset, w.reset, "tap", "secondary", "reset", bind, resetIcon) : ""].join("");
       return `<div class="st" ${bind({ kind: "state", states: w.states.map((s) => ({ v: s.on, text: s.text, tone: s.tone, invert: s.invert })), idle: w.idle })} data-tone="${w.idle.tone}" data-i="0"><div class="st-row"><span class="hs-ring">${stateIcons(w, r1(20 * k))}</span><span class="st-text" style="font-size:${r1(fs)}px">${esc(w.idle.text)}</span></div>${btns ? `<div class="btns st-btns">${btns}</div>` : ""}</div>`;
     }
     case "setpoint": {
       const dec = w.decimals ?? (w.step !== undefined && !Number.isInteger(w.step) ? String(w.step).split(".")[1]!.length : 0);
-      return setpointHtml(w.variable, w.min, w.max, w.step, w.unit, w.actual, dec, bind, "Set", w.decimals ?? Math.max(dec, 1));
+      return setpointHtml(w.variable, w.min, w.max, w.step, w.unit, w.actual, dec, bind, UI.set, w.decimals ?? Math.max(dec, 1));
     }
     case "trend": {
       const lines = w.series.map((_, i) => `<path class="tr-line" style="stroke:var(--s${i % 6})"/>`).join("");
@@ -382,7 +387,7 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
     case "alarms": {
       const ic = (s: string) => iconSvg(s === "info" ? "info" : s === "warning" ? "warning" : "fault", r1(18 * k), "ic al-ic");
       const rows = w.items.map((i) => `<li class="al sev-${i.severity}" ${bind({ kind: "alarm", v: i.active })}>${ic(i.severity)}<span class="al-text">${esc(i.text)}</span><span class="al-st"></span><button class="al-ack" data-ack="${esc(i.active)}" title="Acknowledge">${iconSvg("check", r1(16 * k))}</button></li>`).join("");
-      return `<ul class="alarms">${rows}<li class="al-none">${iconSvg("check", r1(18 * k))}No active alarms</li></ul>${w.history ? `<div class="al-hist-h">History</div><ul class="al-hist" data-hist="${w.history}"></ul>` : ""}`;
+      return `<ul class="alarms">${rows}<li class="al-none">${iconSvg("check", r1(18 * k))}${UI.noAlarms}</li></ul>${w.history ? `<div class="al-hist-h">${UI.history}</div><ul class="al-hist" data-hist="${w.history}"></ul>` : ""}`;
     }
     case "text":
       return `<div class="txt">${esc(w.text).replace(/\n/g, "<br>")}</div>`;
@@ -420,8 +425,18 @@ function widget(w: Widget, box: { w: number; h: number }, k: number, bind: Bind,
         const arrow = `<path class="line-arrow" d="M${r1(tip[0])} ${r1(tip[1])}L${r1(base[0] - dy * 0.95)} ${r1(base[1] + dx * 0.95)}L${r1(base[0] + dy * 0.95)} ${r1(base[1] - dx * 0.95)}Z"/>`;
         return [`${arrow}<text class="p-text p-line" x="${r1(pl.x)}" y="${r1(pl.y + 0.65)}" style="text-anchor:${pl.anchor}">${esc(e.label)}</text>`];
       });
-      const items = [...all].sort((a, b) => (a.type === "pipe" ? -1 : 0) - (b.type === "pipe" ? -1 : 0));
-      return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id, face, lib, placed.labels, all)).join("")}${names.join("")}</svg>`;
+      const items = drawOrder(all);
+      // Tank readings after everything else, so an agitator's shaft never crosses the number; where
+      // it runs behind it, the number sits on a box in the card's colour (route.ts tankReading).
+      const readings = all.map((p) => {
+        if (p.type !== "tank" || !p.level) return "";
+        const { y, backed } = tankReading(p, all, sy, lib);
+        const cx = p.x + p.w / 2, cy = y * sy;
+        const bw = Math.min(p.w - 2, (4 + (p.unit?.length ?? 0)) * 3.2 * 0.62 + 2.4);
+        const back = backed ? `<rect class="tank-box" x="${r1(cx - bw / 2)}" y="${r1(cy - 1.65)}" width="${r1(bw)}" height="4" rx="1.2"/>` : "";
+        return `${back}<text class="tank-num" x="${r1(cx)}" y="${r1(cy + 1.5)}" ${bind({ kind: "text", v: p.level, decimals: 0, unit: p.unit })}>–</text>`;
+      });
+      return `<svg class="proc" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet">${items.map((p) => processSvg(p, sy, bind, id, face, lib, placed.labels, all)).join("")}${readings.join("")}${names.join("")}</svg>`;
     }
   }
 }
@@ -594,12 +609,11 @@ function processSvg(p: ProcessItem, sy: number, bind: Bind, id: (p: string) => s
       // ISO 10628-2 1.5: a vessel with dished ends; the level as a flat fill and its value in the text colour.
       const dish = r1(Math.min(w * 0.18, h * 0.12));
       const shell = `M${x} ${r1(y + dish)}Q${x} ${y} ${r1(x + w / 2)} ${y}Q${r1(x + w)} ${y} ${r1(x + w)} ${r1(y + dish)}V${r1(y + h - dish)}Q${r1(x + w)} ${r1(y + h)} ${r1(x + w / 2)} ${r1(y + h)}Q${x} ${r1(y + h)} ${x} ${r1(y + h - dish)}Z`;
-      return `<g class="tank" ${bind({ kind: "level", v: p.level, min: 0, max: p.max, bands: p.bands })}>
+      return `<g class="tank" ${p.level ? bind({ kind: "level", v: p.level, min: 0, max: p.max, bands: p.bands }) : ""}>
 <clipPath id="${clip}"><path d="${shell}"/></clipPath>
 <path class="tank-shell" d="${shell}"/>
-<g clip-path="url(#${clip})"><g class="tank-liq" style="transform-origin:${x}px ${r1(y + h)}px"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></g></g>
+${p.level ? `<g clip-path="url(#${clip})"><g class="tank-liq" style="transform-origin:${x}px ${r1(y + h)}px"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></g></g>` : ""}
 <path class="tank-out" d="${shell}"/>
-<text class="tank-num" x="${r1(x + w / 2)}" y="${r1(y + h / 2 + 1.5)}" ${bind({ kind: "text", v: p.level, decimals: 0, unit: p.unit })}>–</text>
 ${condBadge(p.x + p.w + 0.3, y - 0.3, p.fault, p.warning, bind)}
 ${label(x + w / 2, p.y + p.h + 2.8 / sy, p.label)}</g>`;
     }
@@ -734,7 +748,7 @@ export const HMI_CSS = String.raw`
 .theme-light .tile{box-shadow:0 1px 2px rgba(16,24,32,.05)}
 .t-head{display:flex;align-items:center;gap:calc(8px*var(--k));height:calc(20px*var(--k));margin-bottom:calc(10px*var(--k));flex:none;color:var(--text2)}
 .t-ic{width:calc(16px*var(--k));height:calc(16px*var(--k));color:var(--muted)}
-.t-title{font-size:var(--f-tiny);font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-title{font-size:var(--f-tiny);font-weight:600;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.t-title.cjk{font-size:var(--f-card);letter-spacing:0}
 .t-lock{margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:var(--f-tiny);color:var(--muted)}
 .untitled>.t-lock{position:absolute;top:calc(10px*var(--k));right:calc(12px*var(--k))}
 .t-body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:calc(8px*var(--k));position:relative}
@@ -851,7 +865,7 @@ export const HMI_CSS = String.raw`
 .pipe-flow{display:none}.pipe-outer{transition:stroke .3s}.pipe.on .pipe-outer{stroke:var(--equip-line)}
 .tank{--p:0}.tank-shell{fill:var(--surface)}.tank-out{fill:none;stroke:var(--equip-line);stroke-width:2px;vector-effect:non-scaling-stroke}.tank-liq{transform:scaleY(var(--p));transition:transform .8s cubic-bezier(.2,.8,.2,1)}
 .tank-liq rect{fill:var(--liquid)}.tank[data-tone=warn] .tank-liq rect{fill:var(--warn)}.tank[data-tone=alarm] .tank-liq rect{fill:var(--alarm)}
-.tank-num{font-size:3.2px;font-weight:600;fill:var(--fg);text-anchor:middle;font-variant-numeric:tabular-nums}
+.tank-box{fill:var(--surface);stroke:var(--line);stroke-width:1px;vector-effect:non-scaling-stroke}.tank-num{font-size:3.2px;font-weight:600;fill:var(--fg);text-anchor:middle;font-variant-numeric:tabular-nums}
 .sym{--state:var(--equip);--body:var(--surface);--body2:var(--equip);--line:var(--equip-line);transition:filter .3s}
 .sym.on{--state:var(--equip-on);--line:var(--equip-line-on)}.sym.nostat{--state:var(--surface);--line:var(--equip-line)}
 .sym .spin{transform-box:fill-box;transform-origin:center}.sym.on .spin{animation:spin 1.2s linear infinite}

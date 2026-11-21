@@ -8,11 +8,11 @@
 import { darkTextOn } from "./color.js";
 import { iconPicture, type IconName } from "./icons.js";
 import { ALARM_COUNTERS, buttonIcon, buttonKind, buttonLayout, canvasOf, isTag, lineLayout, machineStates, modeIcon, modeValues, pageIcon, stateButtonFit, stateTextSize, tileBox, type ButtonKind } from "./render.js";
-import { routed, itemKey, instrumentTap, labelSpots, lineEnds, nearestOnLine, PUMP_CASING, type LabelSpot } from "./route.js";
+import { routed, itemKey, instrumentTap, labelSpots, lineEnds, nearestOnLine, PUMP_CASING, tankReading, drawOrder, type LabelSpot } from "./route.js";
 import type { Faceplate, ProcessItem, Screen, Tone, Widget } from "./spec.js";
 import { hasDock, screenVariables, USER_GROUPS } from "./spec.js";
 import { BUILTIN_SYMBOLS, findPictogram, findSymbol, INSTRUMENT_SYMBOLS, pictogramSize, symbolPicture, symbolSize, type SymbolColors, type SymbolLib } from "./symbols.js";
-import { PT, softOf, SPACE, textOn, themeFor, TYPE, type ThemeName } from "./theme.js";
+import { CJK_FONT, CJK_MIN, hasCjk, uiWords, PT, softOf, SPACE, textLen, textOn, textWidth, themeFor, TYPE, type ThemeName } from "./theme.js";
 import { nameParts, textKey, placeTexts, READING, readingSpot, SIGN, tapY, type PlacedLabel } from "./labels.js";
 
 type Argb = number;
@@ -255,13 +255,23 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
   };
   const fmt = (d?: number) => `%.${d ?? 1}f`;
   const text = (x: number, y: number, w: number, h: number, t: string, font: NativeElement["font"], color: Argb, align: NativeElement["align"] = "LEFT", extra: Partial<NativeElement> = {}): NativeElement => ({
-    kind: "rect", x: r(x), y: r(y), w: r(w), h: r(h), text: t, font, color, align, fill: null, frame: null, ...extra,
+    kind: "rect", x: r(x), y: r(y), w: r(w), h: r(h), text: t, font: cjkFont(t, font), color, align, fill: null, frame: null, ...extra,
   });
+  // CJK text in a font that has its glyphs, never below CJK_MIN; semibold sizes from card titles up in bold.
+  const cjkFont = (t: string, font: NativeElement["font"]): NativeElement["font"] => {
+    if (!font || !hasCjk(t)) return font;
+    const size = Math.max(font[1], ptPx(CJK_MIN * k));
+    return font[0] === SEMI && font[1] >= ptPx(TYPE.card * k) ? [CJK_FONT, size, "bold"] : [CJK_FONT, size];
+  };
 
   // The design system at this panel size (the same numbers as the browser screen).
   const rail = pages.length > 1;
   const cv = canvasOf(screen, rail);
   const k = cv.k;
+  /** The HMI's own words in the screen's language. */
+  const UI = uiWords(screen);
+  /** A text's width in canvas pixels at a design size (CJK one em, at least CJK_MIN). */
+  const twOf = (t: string, px: number, latin = 0.56) => textWidth(t, px * k, latin, CJK_MIN * k);
   /** CODESYS points for a size in canvas pixels. */
   const ptPx = (px: number) => Math.round(px * PT * 2) / 2;
   type Font = NativeElement["font"];
@@ -301,7 +311,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     out.push({ kind: "round", x: r(x), y: r(y), w: r(w), h: r(h), fill, frame: secondary ? p.ctl : fill, radius: RS, ...hide, ...(hold ? { props: { "Color variables.Toggle color": hold, "Colors.Alarm state.Fill color": c(pressed), "Colors.Alarm state.Frame color": c(secondary ? p.ctl : pressed) } } : {}) });
     const only = iconOnly && !!ic;
     const iw = ic ? 18 * k : 0;
-    const tw = only ? 0 : label.length * 7.6 * k;
+    const tw = only ? 0 : twOf(label, TYPE.body, 0.54);
     const gap = ic && !only ? 8 * k : 0;
     const gx = x + (w - iw - gap - tw) / 2;
     if (ic) out.push(icon(ic, gx, y + (h - iw) / 2, iw, fg, invisible));
@@ -332,7 +342,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
       const on = eqExpr(variable, vals[i]!);
       out.push({ kind: "round", x: r(sx), y: r(sy), w: r(sw), h: r(sh), fill: p.tile2, frame: p.tile2, lineWidth: Math.max(1, r(1.5 * k)), radius: r(sh / 2), props: { "Color variables.Toggle color": on, "Colors.Alarm state.Fill color": c(p.tile), "Colors.Alarm state.Frame color": c(p.tones.accent) } });
       const ic = icons ? modeIcon(o) : undefined;
-      const iw = ic ? 18 * k : 0, gap = ic ? 7 * k : 0, tw = o.length * 7.6 * k;
+      const iw = ic ? 18 * k : 0, gap = ic ? 7 * k : 0, tw = twOf(o, TYPE.body, 0.54);
       const gx = sx + (sw - iw - gap - tw) / 2;
       if (ic) {
         out.push(icon(ic, gx, sy + (sh - iw) / 2, iw, p.text2, on));
@@ -458,7 +468,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     if (m.detail) els.push(text(cx + d + 12 * k, cv.bar / 2 + 1 * k, cw - d - 26 * k - cx, 16 * k, "%s", F.tiny, p.muted, "LEFT", { props: { "Text variables.Text variable": m.detail } }));
     left = cw + 20 * k;
   }
-  const titleW = Math.min(cv.w * 0.4, Math.max(screen.title.length * TYPE.title * 0.56, (screen.subtitle?.length ?? 0) * TYPE.small * 0.52) * k + 8 * k);
+  const titleW = Math.min(cv.w * 0.4, Math.max(twOf(screen.title, TYPE.title), twOf(screen.subtitle ?? "", TYPE.small, 0.52)) + 8 * k);
   const ty = screen.subtitle ? cv.bar / 2 - 21 * k : cv.bar / 2 - 13 * k;
   els.push(text(left, ty, titleW, 26 * k, screen.title, F.title, p.text));
   if (screen.subtitle) els.push(text(left, ty + 24 * k, titleW, 18 * k, screen.subtitle, F.small, p.muted));
@@ -470,7 +480,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     // (the batch step's name) would read 0 through a REAL.
     const asText = !!f.value && f.decimals === undefined && !f.unit;
     const shown = f.value ? (asText ? "%s" : `%.${f.decimals ?? 0}f${f.unit ? ` ${f.unit}` : ""}`) : (f.text ?? "");
-    const fw = Math.max(f.label.length * TYPE.tiny * 0.56, (f.value ? (asText ? 16 : 6 + (f.unit?.length ?? 0)) : shown.length) * TYPE.body * 0.6) * k + 32 * k;
+    const fw = Math.max(twOf(f.label, TYPE.tiny), f.value ? (asText ? 16 : 6 + (f.unit?.length ?? 0)) * TYPE.body * 0.6 * k : twOf(shown, TYPE.body, 0.6)) + 32 * k;
     if (fx + fw > infoEnd) break;
     els.push({ kind: "rect", x: r(fx), y: r(cv.bar / 2 - 17 * k), w: 1, h: r(34 * k), fill: p.border, frame: null });
     els.push(text(fx + 16 * k, cv.bar / 2 - 18 * k, fw - 16 * k, 16 * k, f.label, F.tiny, p.muted));
@@ -482,7 +492,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
   void languages;
   const bh = 34 * k, by = cv.bar / 2 - bh / 2;
   let rx = cv.w - cv.pad - 96 * k;
-  button(els, rx, by, 96 * k, bh, "Login", "neutral", "login", { login: true });
+  button(els, rx, by, 96 * k, bh, UI.login, "neutral", "login", { login: true });
   const sevOf = new Map<string, string>(Object.entries(severities));
   for (const w of screen.widgets) if (w.type === "alarms") for (const a of w.items) sevOf.set(a.active, a.severity);
   const alarmVars = [...new Set([...Object.keys(alarmIndex ?? {}), ...sevOf.keys()])];
@@ -510,7 +520,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     els.push({ kind: "rect", name: "Dock", x: cv.rail, y: dy, w: cv.w - cv.rail, h: cv.dock, fill: p.tile, frame: null });
     els.push({ kind: "rect", x: cv.rail, y: dy, w: cv.w - cv.rail, h: 1, fill: p.border, frame: null });
     if (m.mode) segmented(els, cv.rail + cv.pad, dy + cv.dock / 2 - 23 * k, 260 * k, m.mode.variable, m.mode.options, modeValues(m.mode.options, m.mode.values), 46 * k);
-    const list = ([["Reset", m.reset, "secondary", "reset"], ["Start", m.start, "primary", "play"], ["Stop", m.stop, "secondary", "stop"]] as [string, string | undefined, ButtonKind, IconName][]).filter((b2) => b2[1]);
+    const list = ([[UI.reset, m.reset, "secondary", "reset"], [UI.start, m.start, "primary", "play"], [UI.stop, m.stop, "secondary", "stop"]] as [string, string | undefined, ButtonKind, IconName][]).filter((b2) => b2[1]);
     const bw = 132 * k, gap = 10 * k;
     let x = cv.w - cv.pad - list.length * bw - (list.length - 1) * gap;
     for (const [label, v, kind, ic] of list) {
@@ -572,8 +582,8 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         if (w.set) {
           // Actual and Set side by side, the set value in the text colour and a bit smaller.
           const colW = (box.w - 24 * k) / 2, sx = box.x + colW + 24 * k, sf = fs * 0.72;
-          els.push(text(box.x, y, colW, 16 * k, "Actual", F.small, p.text2));
-          els.push(text(sx, y, colW, 16 * k, "Set", F.small, p.text2));
+          els.push(text(box.x, y, colW, 16 * k, UI.actual, F.small, p.text2));
+          els.push(text(sx, y, colW, 16 * k, UI.set, F.small, p.text2));
           y += lab;
           number(box.x, y, fs, w.value, w.decimals, w.unit, w.bands, w.min, w.max);
           number(sx, y + fs - sf, sf, w.set, w.decimals, w.unit, undefined, w.min, w.max, p.text);
@@ -676,7 +686,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         impl.push(`${w.states.map((s, j) => `${j ? "ELSIF" : "IF"} ${s.invert ? `NOT (${s.on})` : s.on} THEN iSt${m} := ${j + 1};`).join(" ")} ELSE iSt${m} := 0; END_IF`);
         // A calm card: a thin line in the state's colour along the card's top, the icon in a ring, the text in the text colour.
         const fs = stateTextSize([...w.states.map((s) => s.text), w.idle.text], box.w, k);
-        const fit = stateButtonFit(box.w, k, w);
+        const fit = stateButtonFit(box.w, k, w, UI);
         const hasBtns = !!(w.start || w.stop || w.reset);
         const d = 36 * k, rowH = Math.max(d, fs * 2.4), gapB = 14 * k;
         const y0 = box.y + Math.max(0, (box.h - rowH - (hasBtns ? gapB + 44 * k : 0)) / 2);
@@ -691,7 +701,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         });
         if (hasBtns) {
           const y = y0 + rowH + gapB, h = 44 * k, gap = 10 * k;
-          const list = [w.start && { label: "Start", v: w.start, kind: "primary" as ButtonKind, ic: "play" as IconName, only: fit.allIcons }, w.stop && { label: "Stop", v: w.stop, kind: "secondary" as ButtonKind, ic: "stop" as IconName, only: fit.allIcons }, w.reset && { label: "Reset", v: w.reset, kind: "secondary" as ButtonKind, ic: "reset" as IconName, only: fit.resetIcon }].filter(Boolean) as { label: string; v: string; kind: ButtonKind; ic: IconName; only: boolean }[];
+          const list = [w.start && { label: UI.start, v: w.start, kind: "primary" as ButtonKind, ic: "play" as IconName, only: fit.allIcons }, w.stop && { label: UI.stop, v: w.stop, kind: "secondary" as ButtonKind, ic: "stop" as IconName, only: fit.allIcons }, w.reset && { label: UI.reset, v: w.reset, kind: "secondary" as ButtonKind, ic: "reset" as IconName, only: fit.resetIcon }].filter(Boolean) as { label: string; v: string; kind: ButtonKind; ic: IconName; only: boolean }[];
           // Icon-only Reset keeps a touch-sized square; the others share the rest.
           const fixed = list.filter((b2) => b2.only && b2.kind === "secondary").length;
           const flexW = (box.w - fixed * 44 * k - gap * (list.length - 1)) / (list.length - fixed);
@@ -715,7 +725,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         const actW = box.w - colW - 12 * k;
         const sx0 = box.x + (w.actual ? actW + 12 * k : 0);
         if (w.actual) {
-          els.push(text(box.x, y0, actW, 16 * k, "Actual", F.small, p.text2));
+          els.push(text(box.x, y0, actW, 16 * k, UI.actual, F.small, p.text2));
           // Number and unit both fit in the column: the unit ran under the set group's − button ("0.0 k").
           const dA = w.decimals ?? Math.max(dec, 1);
           const digitsA = Math.max(3, ...[w.min, w.max].map((n) => n.toFixed(dA).length));
@@ -723,7 +733,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
           const af = Math.min(TYPE.value * k, actW / 2.8, (actW - 8 * k) / (digitsA * 0.56 + unitEm));
           number(box.x, y0 + total - 14 * k - af * 1.1, af, w.actual, w.decimals ?? Math.max(dec, 1), w.unit, undefined, w.min, w.max);
         }
-        els.push(text(sx0, y0, colW, 16 * k, "Set", F.small, p.text2));
+        els.push(text(sx0, y0, colW, 16 * k, UI.set, F.small, p.text2));
         const y = y0 + 22 * k, bw = 44 * k;
         const write = (op: string) => `${w.variable} := LIMIT(${w.min}, ${w.variable} ${op} ${step}, ${w.max});`;
         button(els, sx0, y, bw, 44 * k, "−", "secondary", undefined, { click: write("-") }, false, undefined, [FONT, ptPx(20 * k)]);
@@ -752,7 +762,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
           els.push(text(box.x + box.w * 0.55, y, box.w * 0.45, rowH, "%.1f", F.bodyB, p.text, "RIGHT", { props: { "Text variables.Text variable": real(s.value) } }));
           els.push({ kind: "rect", x: r(box.x), y: r(y + rowH - 1), w: r(box.w), h: 1, fill: p.border, frame: null });
         });
-        els.push(text(box.x, box.y + box.h - 16 * k, box.w, 16 * k, "The trend chart is in the browser HMI (open_hmi)", F.tiny, p.muted));
+        // No note about the browser's chart: a tool name means nothing to the operator (it read in English on a Chinese page).
         break;
       }
       case "alarms": {
@@ -823,7 +833,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
             `iAs${m} := TO_INT(${al}.m_eState);`,
             `xAo${m} := iAs${m} <> 0;`,
             `xAk${m} := iAs${m} = 2 OR iAs${m} = 3 OR iAs${m} = 5;`,
-            `CASE iAs${m} OF 1: sAs${m} := 'pending'; 2: sAs${m} := 'active'; 3: sAs${m} := 'cleared'; 4: sAs${m} := 'acknowledged'; 5: sAs${m} := 'cleared'; ELSE sAs${m} := ''; END_CASE`,
+            `CASE iAs${m} OF 1: sAs${m} := '${UI.pending}'; 2: sAs${m} := '${UI.active}'; 3: sAs${m} := '${UI.cleared}'; 4: sAs${m} := '${UI.acknowledged}'; 5: sAs${m} := '${UI.cleared}'; ELSE sAs${m} := ''; END_CASE`,
             // m_liTimestampActive is a FILETIME (100 ns since 1601, UTC); m_iOffsetActive the local offset in minutes.
             `IF xAo${m} THEN sAt${m} := RIGHT(DT_TO_STRING(LINT_TO_DT(${al}.m_liTimestampActive / 10000000 - 11644473600 + INT_TO_LINT(${al}.m_iOffsetActive) * 60)), 8); END_IF`,
           );
@@ -833,11 +843,11 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         });
         const none = open.join(" OR ");
         els.push(icon("check", box.x, box.y + 10 * k, 18 * k, p.tones.ok, none));
-        els.push(text(box.x + 26 * k, box.y, box.w - 26 * k, ROW, "No active alarms", F.body, p.text2, "LEFT", { invisible: none }));
+        els.push(text(box.x + 26 * k, box.y, box.w - 26 * k, ROW, UI.noAlarms, F.body, p.text2, "LEFT", { invisible: none }));
         rows.forEach((f) => f());
         if (histN) {
           els.push({ kind: "rect", x: r(box.x), y: r(histTop + 8 * k), w: r(box.w), h: 1, fill: p.border, frame: null });
-          els.push(text(box.x, histTop + 12 * k, box.w, 18 * k, "History", F.smallB, p.text2));
+          els.push(text(box.x, histTop + 12 * k, box.w, 18 * k, UI.history, F.smallB, p.text2));
           // The message of an event: the HMI's alarms are AG_HMI's alarms 1..n, in this order.
           const msgs = alarmTexts.map((t, j) => `IF GVL_AlarmHistory.aEvents[iHi].sGroup = 'AG_HMI' AND GVL_AlarmHistory.aEvents[iHi].sAlarm = '${j + 1}' THEN sHx := '${t.replace(/'/g, "$$'").slice(0, 78)}'; END_IF`);
           for (let rr = 0; rr < histN; rr++) {
@@ -853,7 +863,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
               "    sHx := CONCAT(CONCAT(GVL_AlarmHistory.aEvents[iHi].sGroup, '/'), GVL_AlarmHistory.aEvents[iHi].sAlarm);",
               ...msgs.map((x) => `    ${x}`),
               `    sHx${m} := sHx;`,
-              `    CASE GVL_AlarmHistory.aEvents[iHi].iState OF 0: sHs${m} := 'normal'; 1: sHs${m} := 'pending'; 2: sHs${m} := 'active'; 3, 5: sHs${m} := 'cleared'; 4: sHs${m} := 'acknowledged'; ELSE sHs${m} := ''; END_CASE`,
+              `    CASE GVL_AlarmHistory.aEvents[iHi].iState OF 0: sHs${m} := '${UI.normal}'; 1: sHs${m} := '${UI.pending}'; 2: sHs${m} := '${UI.active}'; 3, 5: sHs${m} := '${UI.cleared}'; 4: sHs${m} := '${UI.acknowledged}'; ELSE sHs${m} := ''; END_CASE`,
               "END_IF",
             );
             const y = histTop + 34 * k + rr * HROW;
@@ -910,7 +920,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
           // The name line: the run sign (driven equipment), the name, the mode hand, centred together.
           const valveS = /valve/i.test(s.symbol ?? "");
           const runV = s.on && !valveS ? s.on : undefined;
-          const nameW = s.name.length * TYPE.small * k * 0.68;
+          const nameW = twOf(s.name, TYPE.small, 0.68);
           const lead = runV ? 14 * k : 0, tail = s.manual ? 19 * k : 0;
           const nx0 = cx - (lead + nameW + tail) / 2, ncy = ty + 8 * k;
           if (runV) runSign(nx0 + 5 * k, ncy, 10 * k, runV);
@@ -965,8 +975,23 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         const all = routed(w.items, aspect, lib);
         // Every text's place, clear of the rest (labels.ts, as in the browser); in x-units, a hundredth of the width.
         const placed = placeTexts(all, aspect, lib, ends);
-        const items = [...all].sort((a, b2) => (a.type === "pipe" ? -1 : 0) - (b2.type === "pipe" ? -1 : 0));
+        const items = drawOrder(all);
         for (const it of items) processItem(it, X, Y, sx, placed.labels, all, aspect);
+        // Tank readings last, so an agitator's shaft never crosses the number; where it runs behind
+        // the number, the number sits on a box in the card's colour (route.ts tankReading).
+        for (const it of all) {
+          if (it.type !== "tank" || !it.level) continue;
+          const { y: ry, backed } = tankReading(it, all, aspect, lib);
+          const tx = X(it.x), tw = it.w * sx, cy = Y(ry);
+          const shown = `%.0f${it.unit ? ` ${it.unit}` : ""}`, font: Font = [SEMI, ptPx(3.2 * sx)];
+          const props = { "Text variables.Text variable": real(it.level) };
+          if (!backed) {
+            els.push(text(tx, cy - 2.2 * sx, tw, 4.4 * sx, shown, font, p.text, "HCENTER", { props }));
+            continue;
+          }
+          const bw = Math.min(tw - 2 * sx, ((4 + (it.unit?.length ?? 0)) * 3.2 * 0.62 + 2.4) * sx);
+          els.push({ kind: "round", x: r(tx + tw / 2 - bw / 2), y: r(cy - 2.2 * sx), w: r(bw), h: r(4.4 * sx), text: shown, font, color: p.text, align: "HCENTER", fill: p.tile, frame: p.border, radius: r(1.2 * sx), props });
+        }
         // Line names at the diagram's edge (1.9 units, as the browser), each with a flow arrow on the line near its free end.
         const lf: Font = [SEMI, ptPx(1.9 * sx)], lh = 2.6 * sx, lw2 = 24 * sx;
         all.forEach((it, k) => {
@@ -1097,10 +1122,10 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
         // level, with a flat surface. The vessel's line is drawn over both. (The tile around the
         // vessel has the same colour, so the strip's square corners don't show.)
         const vx = r(x), vy = r(y), vw = r(w), vh = r(h);
-        els.push({ kind: "round", x: vx + 1, y: vy + 1, w: vw - 2, h: vh - 2, fill: p.liquid[0], frame: null, radius: Math.max(1, rad - 1) });
-        els.push({ kind: "rect", x: vx + 1, y: vy, w: vw - 2, h: 1, fill: p.tile, frame: null, props: { "Relative movement.Movement bottom-right.Y": pixels(it.level, it.max, 0, vh - 1) } });
+        if (it.level) els.push({ kind: "round", x: vx + 1, y: vy + 1, w: vw - 2, h: vh - 2, fill: p.liquid[0], frame: null, radius: Math.max(1, rad - 1) });
+        if (it.level) els.push({ kind: "rect", x: vx + 1, y: vy, w: vw - 2, h: 1, fill: p.tile, frame: null, props: { "Relative movement.Movement bottom-right.Y": pixels(it.level, it.max, 0, vh - 1) } });
         els.push({ kind: "round", x: r(x), y: r(y), w: r(w), h: r(h), fill: null, frame: p.equipLine, lineWidth: 2, radius: rad });
-        els.push(text(x, y + h / 2 - 2.2 * sx, w, 4.4 * sx, `%.0f${it.unit ? ` ${it.unit}` : ""}`, [SEMI, ptPx(3.2 * sx)], p.text, "HCENTER", { props: { "Text variables.Text variable": real(it.level) } }));
+        // The level reading is drawn after everything else (below), over an agitator.
         condBadge(x + w + 0.3 * sx, y - 0.3 * sx, 2.4 * sx, it.fault, it.warning);
         label(x + w / 2, y + h + 1 * sx, it.label);
         break;
@@ -1219,18 +1244,19 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     const open = sym.type === "valve" ? sym.open : undefined;
     const fault = sym.type === "pump" || sym.type === "symbol" ? sym.fault : undefined;
     let lx = P;
-    for (const [label, v, tone] of [["Running", running, "ok"], ["Open", open, "ok"], ["Fault", fault, "alarm"]] as [string, string | undefined, Tone][]) {
+    for (const [label, v, tone] of [[UI.running, running, "ok"], [UI.open, open, "ok"], [UI.fault, fault, "alarm"]] as [string, string | undefined, Tone][]) {
       if (!v) continue;
       lamp(d, lx, y, 130 * k, label, v, tone);
       lx += 130 * k;
     }
     if (running || open || fault) y += 33 * k;
-    if (f.auto) y += segmented(d, P, y, IW, f.auto, ["Manual", "Auto"], ["FALSE", "TRUE"]) + 14 * k;
+    if (f.auto) y += segmented(d, P, y, IW, f.auto, [UI.manual, UI.auto], ["FALSE", "TRUE"]) + 14 * k;
     const btns = [["Start", f.start], ["Stop", f.stop], ["Open", f.open], ["Close", f.close], ["Reset", f.reset]].filter((b) => b[1]) as [string, string][];
     if (btns.length) {
       const gap = 10 * k;
       const bw = (IW - (btns.length - 1) * gap) / btns.length;
-      btns.forEach(([label, v], j) => button(d, P + j * (bw + gap), y, bw, 44 * k, label, buttonKind(label), buttonIcon(label), { tap: v }));
+      // Styled by the English name, shown in the screen's language.
+      btns.forEach(([label, v], j) => button(d, P + j * (bw + gap), y, bw, 44 * k, UI[label.toLowerCase() as keyof typeof UI], buttonKind(label), buttonIcon(label), { tap: v }));
       y += 58 * k;
     }
     (f.values ?? []).forEach((x, j, all) => {
@@ -1243,7 +1269,7 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
     if (f.setpoint) {
       const sp = f.setpoint;
       const step = sp.step ?? 1;
-      d.push(text(P, y, IW, 16 * k, sp.label ?? "Set-point", F.small, p.text2));
+      d.push(text(P, y, IW, 16 * k, sp.label ?? UI.setpoint, F.small, p.text2));
       y += 24 * k;
       const write = (op: string) => `${sp.variable} := LIMIT(${sp.min}, ${sp.variable} ${op} ${step}, ${sp.max});`;
       button(d, P, y, 44 * k, 44 * k, "−", "neutral", undefined, { click: write("-") }, false, undefined, [FONT, ptPx(20 * k)]);
@@ -1275,17 +1301,17 @@ export function nativePlan(screen: Screen, pages: { name: string; title: string 
 
 /** A rail title on up to two lines of about `width` pixels: [line number, text, font size]; the font shrinks to fit. */
 export function railLines(title: string, width: number, size: number): [number, string, number][] {
-  const fits = (t: string, fs: number) => t.length * fs * 0.56 <= width;
+  const fits = (t: string, fs: number) => textLen(t) * fs * 0.56 <= width;
   const words = title.split(/\s+/).filter(Boolean);
   // The split into one or two lines whose longer line is shortest.
   let lines = [title];
   for (let i = 1; i < words.length; i++) {
     const two = [words.slice(0, i).join(" "), words.slice(i).join(" ")];
-    if (Math.max(...two.map((l) => l.length)) < Math.max(...lines.map((l) => l.length))) lines = two;
+    if (Math.max(...two.map(textLen)) < Math.max(...lines.map(textLen))) lines = two;
   }
   if (lines.length === 2 && fits(title, size)) lines = [title];
-  const longest = Math.max(...lines.map((l) => l.length));
-  const fs = fits("x".repeat(longest), size) ? size : Math.max(size * 0.7, width / (longest * 0.56));
+  const longest = Math.max(...lines.map(textLen));
+  const fs = longest * size * 0.56 <= width ? size : Math.max(size * 0.7, width / (longest * 0.56));
   return lines.map((l, i) => [i, l, fs]);
 }
 

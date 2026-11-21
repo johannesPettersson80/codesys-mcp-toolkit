@@ -562,7 +562,9 @@ def op_object_delete(args):
     obj = c.resolve(args["path"])
     path = c.path_of(obj)
     tasks = []
-    if kind_of(obj, c.app_guid) == "pou" and subkind("pou", decl_of(obj)) == "program":
+    # keep_calls: the POU is re-created under the same name at once (create_graphical replace),
+    # so its task calls stay; dropping them left the replaced SFC uncalled.
+    if not args.get("keep_calls") and kind_of(obj, c.app_guid) == "pou" and subkind("pou", decl_of(obj)) == "program":
         tasks = _drop_program_calls(c, name_of(obj))
     obj.remove()
     return {"path": path, "tasks": tasks, "saved": c.save_if(args)}

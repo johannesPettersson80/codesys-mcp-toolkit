@@ -17,7 +17,7 @@ import { BUILTIN_SYMBOLS, importSvg, svgProblems, symbolSchema, type SymbolDef }
 import { nativePlan } from "./native.js";
 import { canvasOf, cardWarnings, tileBox } from "./render.js";
 import { textWarnings } from "./labels.js";
-import { connectionWarnings, overlapWarnings } from "./route.js";
+import { connectionWarnings, overlapWarnings, resolveTagRefs } from "./route.js";
 import { TEMPLATES } from "./templates.js";
 import { allAlarms, layoutProblems, screenSchema, screenTexts, screenVariables, translateScreen } from "./spec.js";
 
@@ -48,6 +48,7 @@ export function registerHmiActions(reg: RegisterAction, ctx: AppContext, hmi: Hm
     async ({ screen }) => {
       if (!ctx.project) return text("No project is open: open or create one first; screens are stored next to it.", true);
       const lib = hmi.library();
+      for (const w of screen.widgets) if (w.type === "process") resolveTagRefs(w.items);
       const problems = layoutProblems(screen, lib);
       if (problems.length) return text(`Not saved: fix the layout first.\n- ${problems.join("\n- ")}`, true);
       const vars = screenVariables(screen);
