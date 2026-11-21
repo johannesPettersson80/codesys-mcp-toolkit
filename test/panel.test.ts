@@ -16,7 +16,7 @@ import { tempDir, viaCodesys } from "./helpers.js";
 
 const UI = { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } };
 
-async function connect(withUi: boolean, project?: string, driver: Driver | null = new Driver()) {
+async function connect(withUi: boolean, project?: string, driver: Driver | null = new Driver(), clientName = "t") {
   const root = tempDir("cmcp-panel-");
   const proj = project ?? join(root, "Tank.project");
   const cache = new ProjectCache();
@@ -25,7 +25,7 @@ async function connect(withUi: boolean, project?: string, driver: Driver | null 
   const server = createServer(ctx);
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
-  const client = new Client({ name: "t", version: "1" }, withUi ? { capabilities: UI as never } : undefined);
+  const client = new Client({ name: clientName, version: "1" }, withUi ? { capabilities: UI as never } : undefined);
   await client.connect(b);
   const call = async <T>(name: string, args: Record<string, unknown> = {}) => {
     const r = (await client.callTool({ name, arguments: args })) as { structuredContent?: T; content: { text: string }[]; isError?: boolean };
@@ -57,6 +57,21 @@ describe("panel registration", () => {
     const { client } = await connect(false);
     await new Promise((r) => setTimeout(r, 20));
     expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["codesys", "open_sim_panel"]);
+  });
+
+  it("answers the card in Claude Code, which draws it without declaring MCP Apps (issue #14)", async () => {
+    const { client, call } = await connect(false, undefined, new Driver(), "claude-code");
+    await new Promise((r) => setTimeout(r, 20));
+    const tools = (await client.listTools()).tools;
+    for (const n of ["get_sim_state", "get_workspace", "get_object"]) {
+      // listed with visibility "app": Claude Code keeps such tools from the model itself
+      expect((tools.find((t) => t.name === n)?._meta as { ui: { visibility: string[] } } | undefined)?.ui.visibility, n).toEqual(["app"]);
+    }
+    const open = await call<{ panelId: string }>("open_sim_panel");
+    expect(open.content[0]!.text).toMatch(/open_workspace/);
+    const s = await call<PanelState>("get_sim_state", { panelId: open.structuredContent!.panelId });
+    expect(s.isError).toBeFalsy();
+    expect(s.structuredContent!.current).toBe(true);
   });
 
   it("serves the panel as a single HTML resource", async () => {

@@ -96,6 +96,8 @@ export function registerPanel(server: McpServer, ws: PanelDeps = { project: () =
       const sim = ws.codesysSim?.();
       const lines = [`Panel opened. ${project ? `Project: ${project}.` : "No project is open yet."}`];
       if (sim) lines.push(`CODESYS simulation: application ${sim.state}.`);
+      if (!getUiCapability(server.server.getClientCapabilities()))
+        lines.push("This client doesn't declare MCP Apps, so the panel may not draw or may say it gets no answer. If the user says so, offer the codesys action open_workspace: the same view in the browser (open it only if they agree).");
       // Some hosts show the model only structuredContent when it is present,
       // so the snapshot goes there too, not just in content.
       const text = lines.join("\n");
@@ -283,9 +285,20 @@ export function registerPanel(server: McpServer, ws: PanelDeps = { project: () =
   });
 
   // Clients without MCP Apps support would show app-only tools to the model; hide them there.
+  // Except Claude Code: it declares MCP Apps only when its host asks it to, yet the Claude desktop
+  // app's Code tab draws the card for a server from a project's .mcp.json and passes the card's
+  // calls on. Claude Code keeps tools whose visibility omits "model" from the model by itself.
   const prev = server.server.oninitialized;
   server.server.oninitialized = () => {
     prev?.();
-    if (!getUiCapability(server.server.getClientCapabilities())) for (const t of tools) t.disable();
+    if (!panelToolsWanted(server)) for (const t of tools) t.disable();
   };
+}
+
+/** Clients that run the panel page even without declaring MCP Apps. */
+const CARD_HOSTS_WITHOUT_CAPABILITY = new Set(["claude-code"]);
+
+/** Whether this client gets the panel's app-only tools. */
+export function panelToolsWanted(server: McpServer): boolean {
+  return !!getUiCapability(server.server.getClientCapabilities()) || CARD_HOSTS_WITHOUT_CAPABILITY.has(server.server.getClientVersion()?.name ?? "");
 }

@@ -236,8 +236,13 @@ async function poll() {
   pollTimer = setTimeout(poll, 1000);
 }
 
+/** How long the panel waits for its first answer before it says the server doesn't answer. */
+const NO_ANSWER_MS = 8000;
+const startedAt = Date.now();
+
 async function pollOnce() {
   const s = await call<PanelState>("get_sim_state", panelId ? { panelId } : {});
+  model.unreachable = !s && !model.state && Date.now() - startedAt > NO_ANSWER_MS;
   if (s) {
     if (!s.current) {
       stopped = true;

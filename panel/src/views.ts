@@ -50,7 +50,7 @@ export function statusPill(): { cls: string; text: string } {
   const s = model.state;
   const sim = s?.codesysSim;
   if (sim) return { cls: `pill ${sim.state === "run" ? "running" : "paused"}`, text: codesysSimLabel(sim) };
-  return { cls: "pill", text: !s ? "Connecting" : model.ws?.project ? "Project open" : "No project" };
+  return { cls: "pill", text: !s ? (model.unreachable ? "No answer" : "Connecting") : model.ws?.project ? "Project open" : "No project" };
 }
 
 /** The view tab row; the view Claude's work points at is marked while following. */

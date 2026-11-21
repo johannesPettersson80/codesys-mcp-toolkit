@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `open_sim_panel` in the Claude desktop app's Code tab, for a server from a project's `.mcp.json`
+  ([#14](https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues/14)). Claude Code
+  declares MCP Apps only when its host asks it to, so the server switched off the panel's own
+  tools. They now stay on for Claude Code, which keeps them from the model by itself. Tested in
+  that app: the card is drawn and its page is fetched, but the app doesn't pass the card's calls
+  on to this server, so the card still gets no answer; that part is in the app, not here.
+- If the server doesn't answer the panel within 8 seconds, the panel says "No answer" and points
+  to `open_workspace` instead of showing "Connecting" forever. For clients that don't declare MCP
+  Apps, `open_sim_panel`'s result tells Claude it can offer `open_workspace`.
+
 ## [2.12.2] - 2026-11-21
 
 Fixes from six takes of a batch mixer that DeepSeek V4.1 Flash built in

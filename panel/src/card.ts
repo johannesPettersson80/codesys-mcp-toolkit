@@ -16,7 +16,11 @@ export function renderCard(view: ViewName, follow: boolean): void {
   $("c-statusText").textContent = pill.text;
   $("c-meta").textContent = ws?.project?.split(/[\\/]/).pop() ?? "";
   $("c-meta").title = ws?.versions ?? "";
-  $("c-activity").textContent = s?.held ? "You're driving: Claude is paused." : "";
+  $("c-activity").textContent = s?.held
+    ? "You're driving: Claude is paused."
+    : model.unreachable
+      ? "The CODESYS server doesn't answer this panel: this app draws it but doesn't pass its calls on. Ask Claude for open_workspace to see the same view in your browser."
+      : "";
   $("c-hold").setAttribute("aria-pressed", String(!!s?.held));
   $("c-hold").textContent = s?.held ? "Resume Claude" : "Pause Claude";
   $("c-follow").setAttribute("aria-pressed", String(follow));

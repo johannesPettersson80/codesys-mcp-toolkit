@@ -39,6 +39,8 @@ export interface ObjData {
 
 export interface Model {
   state?: PanelState;
+  /** The server hasn't answered the panel for a while: the host doesn't pass its calls on. */
+  unreachable?: boolean;
   ws?: WsData;
   objects: Map<string, ObjData>;
 }
