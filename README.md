@@ -12,6 +12,7 @@ English | [简体中文](README.zh-CN.md)
 ![Node.js 20 or later](https://img.shields.io/badge/node-%E2%89%A520-339933)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-server-6e56cf)](https://modelcontextprotocol.io)
+[![johannesPettersson80/codesys-mcp-toolkit MCP server](https://glama.ai/mcp/servers/johannesPettersson80/codesys-mcp-toolkit/badges/score.svg)](https://glama.ai/mcp/servers/johannesPettersson80/codesys-mcp-toolkit)
 
 </div>
 
