@@ -146,9 +146,14 @@ interface too.
 Claude writes Structured Text, and creates ladder (LD), FBD, CFC and SFC
 programs and function blocks with `create_graphical` from a simple description
 of rungs, networks or steps; CODESYS draws them. SFC charts can have alternative
-and parallel branches and jumps. Reading an LD, FBD, CFC or SFC POU gives the
-same description, so Claude can change existing graphical code too: it edits the
-description and sends it back with `replace: true`.
+and parallel branches and jumps. A CFC is described as boxes, inputs, outputs,
+connection marks and comments joined by wires, with positions, and can be
+page-oriented: pages with a left margin for inputs, a right margin for outputs,
+and connection marks that carry a signal to another page. What has no position is
+placed automatically, with inputs lined up at the right in front of their box.
+Reading an LD, FBD, CFC or SFC POU gives the same description (a CFC with its
+pages and positions), so Claude can change existing graphical code too: it edits
+the description and sends it back with `replace: true`.
 
 ## Live panel
 

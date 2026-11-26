@@ -37,6 +37,32 @@ def _env():
     return _CACHE["env"]
 
 
+def quiet_cfc_routing_advice():
+    """Turns off the CFC editor's "routing mode will be switched into Advanced Routing Mode"
+    message. CODESYS shows it, modal, the first time a CFC editor changes a chart in a project
+    (routing the lines of an imported chart is enough), and a modal dialog stops scripts until
+    someone clicks OK. It is the editor's user project option AdviseAdvancedRouting (internal
+    _3S.CoDeSys.CFCEditor.OptionsHelper, checked on SP21). Best-effort; returns whether it was set."""
+    ok = False
+    try:
+        from System import AppDomain
+        from System.Reflection import BindingFlags
+        flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
+        for asm in AppDomain.CurrentDomain.GetAssemblies():
+            t = asm.GetType("_3S.CoDeSys.CFCEditor.OptionsHelper")
+            if t is None:
+                continue
+            prop = t.GetProperty("AdviseAdvancedRouting", flags)
+            if prop is not None:
+                prop.SetValue(None, False, None)
+                ok = True
+            break
+    except Exception:
+        ok = False
+    # The option belongs to the project: set it again for the next project.
+    return ok
+
+
 def open_editor(se, obj):
     """Opens obj in its editor in the CODESYS window (or brings its tab forward).
 
@@ -46,6 +72,7 @@ def open_editor(se, obj):
     env = _env()
     if env is None:
         return "unavailable"
+    quiet_cfc_routing_advice()
     from System import Guid
     engine = env.GetProperty("Engine").GetValue(None, None)
     objects = env.GetProperty("ObjectMgr").GetValue(None, None)

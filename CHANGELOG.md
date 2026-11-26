@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Page-oriented CFC and CFC with positions in `create_graphical`: `cfc: {pages?, elements, wires}`.
+  Elements are boxes (function blocks with an instance, functions, operators), inputs, outputs,
+  connection marks and comments, each with an optional page, area (left margin, right margin,
+  content) and x/y; wires go from `tonDelay.Q`, `and1` or `xStart` to `tonDelay.IN` or an
+  output. A connection mark carries a signal to another page: one wire into the source mark,
+  wires out of sink marks of the same name. Fan-out and feedback work. Checked in CODESYS V3.5
+  SP21 with a complete project (`test/live/cfc.live.test.ts`): a three-page conveyor control built,
+  tested in the simulation, read back, edited, replaced and tested again; the editor draws it.
+- What has no position is placed automatically: boxes in columns, each signal level with its pin.
+  On a page, inputs go in the left margin and outputs in the right margin. Elsewhere a signal sits
+  three grid units from its box, and the inputs in front of a box end at one right edge (widths
+  from the CFC editor's own font, measured in CODESYS).
+- `read_objects` gives a CFC back as that description, with its pages, areas and positions, so a
+  chart keeps its layout when Claude edits it and sends it back with `replace: true`. The older
+  FBD-style description is still accepted for `cfc`.
+
+### Fixed
+
+- `--show-window` no longer stops on CODESYS's modal "routing mode will be switched into Advanced
+  Routing Mode" message the first time it opens a CFC in a project: the toolkit turns that
+  editor option off before it opens an editor.
+- `create_graphical` passes on CODESYS's import errors and warnings (an element CODESYS couldn't
+  import was dropped without a word).
+
 ## [2.12.3] - 2026-11-21
 
 ### Fixed

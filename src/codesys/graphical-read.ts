@@ -12,6 +12,8 @@
  * description (function boxes in LD) is reported.
  */
 import { SFC_ELEMENT, SFC_ENTRY, SFC_EXIT, type Fbd, type Logic, type SfcAction, type SfcElement } from "./graphical.js";
+import { CFC_PAGE, type CfcArea, type CfcChart, type CfcElement } from "./cfc.js";
+import { CFC_DATA } from "./plcopen.js";
 
 interface El {
   name: string;
@@ -68,7 +70,8 @@ function onceActions(step: El, bodies: Map<string, string>): { entry?: string; e
 
 export type GraphicalDescription =
   | { kind: "ladder"; spec: { rungs: { when: Logic; then: { coil: string; kind: "coil" | "set" | "reset" | "negated" }[] }[] }; notes: string[] }
-  | { kind: "fbd" | "cfc"; spec: { networks: { expr: Fbd; to?: string; assign?: Record<string, string> }[] }; notes: string[] }
+  | { kind: "fbd"; spec: { networks: { expr: Fbd; to?: string; assign?: Record<string, string> }[] }; notes: string[] }
+  | { kind: "cfc"; spec: CfcChart; notes: string[] }
   | { kind: "sfc"; spec: { steps: { name: string; initial?: boolean; actions?: { name: string; qualifier: string; st: string }[]; entry?: string; exit?: string; next: string; when: string }[] } | { chart: SfcElement[] }; notes: string[] };
 
 /** A graphical POU's PLCopenXML as create_graphical's description; undefined when the body isn't LD, FBD or SFC. */
@@ -84,38 +87,143 @@ export function describeGraphical(xml: string): GraphicalDescription | undefined
   const sfc = kid(body, "SFC");
   if (sfc) return readSfc(sfc, pou);
   const cfc = find(body, "CFC");
-  if (cfc) return { ...readFbd(cfcAsFbd(cfc)), kind: "cfc" } as GraphicalDescription;
+  if (cfc) return readCfc(cfc);
   return undefined;
 }
 
+const AREA_OF: Record<string, CfcArea> = { leftmargin: "left", rightmargin: "right", content: "content", contentleft: "content-left", contentright: "content-right" };
+
 /**
- * CODESYS's CFC as the FBD the reader knows: every line runs through an unnamed
- * connector, so a connection to a connector becomes the connector's own
- * connection (an input variable's or a function's output has no parameter in
- * FBD terms), and the elements are taken in execution order.
+ * A CFC (page-oriented or not) as create_graphical's cfc chart: pages, elements with their
+ * page, area and position, and wires. Every line in CODESYS's CFC runs through an unnamed
+ * connector that names the source's output; a consumer connects to the connector.
+ * Executed elements are listed in execution order.
  */
-function cfcAsFbd(cfc: El): El {
+function readCfc(cfc: El): GraphicalDescription {
+  const notes = new Set<string>();
+  const dataOf = (e: El, name: string) => kids(kid(e, "addData"), "data").find((d) => d.attrs.name === name);
+  const pageEls = cfc.children.filter((c) => c.name === "vendorElement" && dataOf(c, CFC_DATA.page));
+  const pageInfo = pageEls.map((p) => ({ el: p, page: find(dataOf(p, CFC_DATA.page)!, "page")! })).sort((a, b) => Number(a.page.attrs.index ?? 0) - Number(b.page.attrs.index ?? 0));
+  const pageNo = new Map(pageInfo.map((p, k) => [p.el.attrs.localId!, k + 1] as const));
+  const paged = cfc.attrs["page-oriented"] === "true" || pageInfo.length > 0;
   const byId = new Map(cfc.children.filter((c) => c.attrs.localId !== undefined).map((c) => [c.attrs.localId!, c] as const));
-  const through = (conn: El): El => {
+  const typeOf = (e: El) => allText(find(dataOf(e, CFC_DATA.elementType) ?? { name: "", attrs: {}, children: [], text: "" }, "ElementType")).trim();
+
+  // Readable, unique ids.
+  const taken = new Set<string>();
+  const makeId = (base: string) => {
+    let s = base.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "e";
+    if (/^[0-9]/.test(s)) s = `_${s}`;
+    let id = s;
+    for (let k = 2; taken.has(id.toLowerCase()); k++) id = `${s}_${k}`;
+    taken.add(id.toLowerCase());
+    return id;
+  };
+  const counters = new Map<string, number>();
+  const numbered = (base: string) => {
+    const k = (counters.get(base) ?? 0) + 1;
+    counters.set(base, k);
+    return makeId(`${base}${k}`);
+  };
+
+  type Item = { el: El; element: CfcElement; order: number };
+  const items: Item[] = [];
+  const idOf = new Map<string, string>();
+  const where = (e: El): Partial<CfcElement> => {
+    const pos = kid(e, "position");
+    const pi = find(dataOf(e, CFC_DATA.pageInfo) ?? { name: "", attrs: {}, children: [], text: "" }, "pageInfo");
+    const page = pi ? pageNo.get(pi.attrs.pageId ?? "") : undefined;
+    const area = pi ? AREA_OF[(pi.attrs.pageArea ?? "").toLowerCase()] : undefined;
+    return {
+      ...(paged && page ? { page } : {}),
+      ...(paged && area ? { area } : {}),
+      ...(pos ? { x: Math.max(0, Math.round(Number(pos.attrs.x ?? 0))), y: Math.max(0, Math.round(Number(pos.attrs.y ?? 0))) } : {}),
+    };
+  };
+  for (const e of cfc.children) {
+    if (pageNo.has(e.attrs.localId ?? "") || e.name === "connector") continue;
+    const order = e.attrs.executionOrderId === undefined ? -1 : Number(e.attrs.executionOrderId);
+    let element: CfcElement | undefined;
+    if (e.name === "inVariable") {
+      const text = allText(kid(e, "expression")).trim();
+      element = { id: makeId(`in_${text}`), input: text, ...where(e) };
+    } else if (e.name === "outVariable") {
+      const text = allText(kid(e, "expression")).trim();
+      element = { id: makeId(`out_${text}`), output: text, ...where(e) };
+    } else if (e.name === "block") {
+      const inst = e.attrs.instanceName;
+      element = { id: inst && !taken.has(inst.toLowerCase()) ? makeId(inst) : numbered((e.attrs.typeName ?? "box").toLowerCase()), box: e.attrs.typeName!, ...(inst ? { instance: inst } : {}), ...where(e) };
+    } else if (e.name === "comment") {
+      const text = allText(kid(e, "content")).trim();
+      // CODESYS exports a comment's size as 0 (it sizes comments itself).
+      element = { id: numbered("note"), comment: text, ...(Number(e.attrs.width) > 0 ? { width: Number(e.attrs.width) } : {}), ...(Number(e.attrs.height) > 0 ? { height: Number(e.attrs.height) } : {}), ...where(e) };
+    } else if (e.name === "vendorElement" && /ConnectionMark$/.test(typeOf(e))) {
+      const sink = typeOf(e) === "sinkConnectionMark";
+      const pin = kid(kid(e, sink ? "outputVariables" : "inputVariables"), "variable");
+      const name = pin?.attrs.formalParameter || allText(kid(e, "alternativeText")).trim();
+      element = { id: makeId(`${sink ? "sink" : "src"}_${name}`), mark: name, ...where(e) };
+    } else {
+      notes.add(`${e.name === "vendorElement" ? typeOf(e) || "vendor" : e.name} elements aren't part of the description`);
+      continue;
+    }
+    idOf.set(e.attrs.localId!, element.id);
+    items.push({ el: e, element, order });
+  }
+
+  /** Where a consumer's connection really comes from, through connectors. */
+  const sourceOf = (conn: El): { el: El; param?: string } | undefined => {
     const seen = new Set<string>();
     let c = conn;
     for (;;) {
-      const target = byId.get(c.attrs.refLocalId!);
-      if (target?.name !== "connector" || seen.has(target.attrs.localId!)) break;
+      const target = byId.get(c.attrs.refLocalId ?? "");
+      if (!target) return undefined;
+      if (target.name !== "connector") return { el: target, ...(c.attrs.formalParameter !== undefined ? { param: c.attrs.formalParameter } : {}) };
+      if (seen.has(target.attrs.localId!)) return undefined;
       seen.add(target.attrs.localId!);
       const next = kids(kid(target, "connectionPointIn"), "connection")[0];
-      if (!next) return { ...c, attrs: { refLocalId: "missing" } };
+      if (!next) return undefined;
       c = next;
     }
-    const src = byId.get(c.attrs.refLocalId!);
-    const plain = src?.name === "inVariable" || (src?.name === "block" && !src.attrs.instanceName);
-    const { formalParameter, ...rest } = c.attrs;
-    return { ...c, attrs: plain || !formalParameter ? rest : { ...rest, formalParameter } };
   };
-  const rewire = (e: El): El => (e.name === "connection" ? through(e) : { ...e, children: e.children.map(rewire) });
-  const order = (e: El) => (e.attrs.executionOrderId === undefined ? -1 : Number(e.attrs.executionOrderId));
-  const children = cfc.children.filter((c) => c.name !== "connector").map(rewire);
-  return { ...cfc, name: "FBD", children: children.sort((a, b) => order(a) - order(b)) };
+  const fromText = (src: { el: El; param?: string }): string | undefined => {
+    const id = idOf.get(src.el.attrs.localId!);
+    if (!id) return undefined;
+    if (src.el.name === "block" && src.el.attrs.instanceName) return `${id}.${src.param || "Q"}`;
+    return id;
+  };
+  const wires: { from: string; to: string }[] = [];
+  const link = (conn: El | undefined, to: string) => {
+    if (!conn) return;
+    const src = sourceOf(conn);
+    const from = src && fromText(src);
+    if (from) wires.push({ from, to });
+    else notes.add("a wire from an element outside the description");
+  };
+  // Elements that run (boxes, outputs, source marks) in execution order, after the others. The
+  // others' order means nothing and CODESYS's export changes it, so they go page by page, top to bottom.
+  const where2 = (i: Item) => [i.element.page ?? 0, i.element.y ?? 0, i.element.x ?? 0];
+  const byPlace = (a: Item, b: Item) => {
+    const p = where2(a), q = where2(b);
+    return p[0]! - q[0]! || p[1]! - q[1]! || p[2]! - q[2]!;
+  };
+  const sorted = [...items.filter((i) => i.order < 0).sort(byPlace), ...items.filter((i) => i.order >= 0).sort((a, b) => a.order - b.order)];
+  for (const { el, element } of sorted) {
+    if (el.name === "block") for (const v of kids(kid(el, "inputVariables"), "variable")) link(kids(kid(v, "connectionPointIn"), "connection")[0], `${element.id}.${v.attrs.formalParameter}`);
+    else if (el.name === "outVariable") link(kids(kid(el, "connectionPointIn"), "connection")[0], element.id);
+    else if (el.name === "vendorElement" && element.mark !== undefined) {
+      const v = kid(kid(el, "inputVariables"), "variable");
+      if (v) link(kids(kid(v, "connectionPointIn"), "connection")[0], element.id);
+    }
+  }
+
+  const pages = pageInfo.map(({ page: p }) => ({
+    ...(p.attrs.name ? { name: p.attrs.name } : {}),
+    ...(p.attrs.description ? { description: p.attrs.description } : {}),
+    ...(p.attrs.width && Number(p.attrs.width) !== CFC_PAGE.width ? { width: Number(p.attrs.width) } : {}),
+    ...(p.attrs.height && Number(p.attrs.height) !== CFC_PAGE.height ? { height: Number(p.attrs.height) } : {}),
+    ...(p.attrs.marginwidth && Number(p.attrs.marginwidth) !== CFC_PAGE.margin ? { margin: Number(p.attrs.marginwidth) } : {}),
+  }));
+  return { kind: "cfc", spec: { ...(paged ? { pages: pages.length ? pages : [{}] } : {}), elements: sorted.map((i) => i.element), wires }, notes: [...notes] };
 }
 
 function readLadder(ld: El): GraphicalDescription {
