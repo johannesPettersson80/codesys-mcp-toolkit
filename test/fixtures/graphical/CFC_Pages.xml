@@ -1,0 +1,469 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0200">
+  <fileHeader companyName="" productName="CODESYS" productVersion="CODESYS V3.5 SP21" creationDateTime="2026-11-26T23:07:12.8073291" />
+  <contentHeader name="case-Cfc_Paged.project" modificationDateTime="1601-01-01T01:00:00">
+    <coordinateInfo>
+      <fbd>
+        <scaling x="1" y="1" />
+      </fbd>
+      <ld>
+        <scaling x="1" y="1" />
+      </ld>
+      <sfc>
+        <scaling x="1" y="1" />
+      </sfc>
+    </coordinateInfo>
+    <addData>
+      <data name="http://www.3s-software.com/plcopenxml/projectinformation" handleUnknown="implementation">
+        <ProjectInformation />
+      </data>
+    </addData>
+  </contentHeader>
+  <types>
+    <dataTypes />
+    <pous>
+      <pou name="Cfc_Paged" pouType="program">
+        <interface>
+          <localVars>
+            <variable name="xStart">
+              <type>
+                <BOOL />
+              </type>
+            </variable>
+            <variable name="xStop">
+              <type>
+                <BOOL />
+              </type>
+            </variable>
+            <variable name="xFault">
+              <type>
+                <BOOL />
+              </type>
+            </variable>
+            <variable name="xMotor">
+              <type>
+                <BOOL />
+              </type>
+            </variable>
+            <variable name="xHold">
+              <type>
+                <BOOL />
+              </type>
+            </variable>
+            <variable name="tonDelay">
+              <type>
+                <derived name="TON" />
+              </type>
+            </variable>
+            <variable name="rsLatch">
+              <type>
+                <derived name="RS" />
+              </type>
+            </variable>
+          </localVars>
+        </interface>
+        <body>
+          <ST>
+            <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+          </ST>
+          <addData>
+            <data name="http://www.3s-software.com/plcopenxml/cfc" handleUnknown="implementation">
+              <CFC page-oriented="true">
+                <vendorElement localId="0">
+                  <position x="0" y="0" />
+                  <alternativeText>
+                    <xhtml xmlns="http://www.w3.org/1999/xhtml">page</xhtml>
+                  </alternativeText>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpage" handleUnknown="implementation">
+                      <page name="Start" description="" marginwidth="12" width="72" height="96" index="0" xmlns="" />
+                    </data>
+                  </addData>
+                </vendorElement>
+                <vendorElement localId="1">
+                  <position x="0" y="0" />
+                  <alternativeText>
+                    <xhtml xmlns="http://www.w3.org/1999/xhtml">page</xhtml>
+                  </alternativeText>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpage" handleUnknown="implementation">
+                      <page name="Motor" description="Latch and hold" marginwidth="12" width="72" height="96" index="1" xmlns="" />
+                    </data>
+                  </addData>
+                </vendorElement>
+                <vendorElement localId="5">
+                  <position x="2" y="6" />
+                  <alternativeText>
+                    <xhtml xmlns="http://www.w3.org/1999/xhtml">Run</xhtml>
+                  </alternativeText>
+                  <outputVariables>
+                    <variable formalParameter="Run">
+                      <connectionPointOut>
+                        <expression />
+                      </connectionPointOut>
+                    </variable>
+                  </outputVariables>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="1" pageArea="leftMargin" xmlns="" />
+                    </data>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcelementtype" handleUnknown="implementation">
+                      <ElementType xmlns="">sinkConnectionMark</ElementType>
+                    </data>
+                  </addData>
+                </vendorElement>
+                <connector localId="4" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="5" formalParameter="Run" />
+                  </connectionPointIn>
+                </connector>
+                <connector localId="6" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="3" formalParameter="" />
+                  </connectionPointIn>
+                </connector>
+                <block localId="3" executionOrderId="6" typeName="OR">
+                  <position x="16" y="10" />
+                  <inputVariables>
+                    <variable formalParameter="In1">
+                      <connectionPointIn>
+                        <relPosition x="0" y="0" />
+                        <connection refLocalId="4" />
+                      </connectionPointIn>
+                    </variable>
+                    <variable formalParameter="In2">
+                      <connectionPointIn>
+                        <relPosition x="0" y="1" />
+                        <connection refLocalId="6" />
+                      </connectionPointIn>
+                    </variable>
+                  </inputVariables>
+                  <inOutVariables />
+                  <outputVariables>
+                    <variable formalParameter="Out1">
+                      <connectionPointOut>
+                        <relPosition x="0" y="0" />
+                        <expression />
+                      </connectionPointOut>
+                    </variable>
+                  </outputVariables>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="1" pageArea="content" xmlns="" />
+                    </data>
+                    <data name="http://www.3s-software.com/plcopenxml/cfccalltype" handleUnknown="implementation">
+                      <CallType xmlns="">operator</CallType>
+                    </data>
+                  </addData>
+                </block>
+                <connector localId="2" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="3" formalParameter="" />
+                  </connectionPointIn>
+                </connector>
+                <connector localId="9" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="5" formalParameter="Run" />
+                  </connectionPointIn>
+                </connector>
+                <inVariable localId="11">
+                  <position x="2" y="7" />
+                  <connectionPointOut>
+                    <expression />
+                  </connectionPointOut>
+                  <expression>xFault</expression>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="1" pageArea="leftMargin" xmlns="" />
+                    </data>
+                  </addData>
+                </inVariable>
+                <connector localId="10" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="11" formalParameter="xFault" />
+                  </connectionPointIn>
+                </connector>
+                <block localId="8" executionOrderId="4" typeName="RS" instanceName="rsLatch">
+                  <position x="16" y="4" />
+                  <inputVariables>
+                    <variable formalParameter="SET">
+                      <connectionPointIn>
+                        <relPosition x="0" y="0" />
+                        <connection refLocalId="9" />
+                      </connectionPointIn>
+                    </variable>
+                    <variable formalParameter="RESET1">
+                      <connectionPointIn>
+                        <relPosition x="0" y="1" />
+                        <connection refLocalId="10" />
+                      </connectionPointIn>
+                    </variable>
+                  </inputVariables>
+                  <inOutVariables />
+                  <outputVariables>
+                    <variable formalParameter="Q1">
+                      <connectionPointOut>
+                        <relPosition x="0" y="0" />
+                        <expression />
+                      </connectionPointOut>
+                    </variable>
+                  </outputVariables>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="1" pageArea="content" xmlns="" />
+                    </data>
+                    <data name="http://www.3s-software.com/plcopenxml/cfccalltype" handleUnknown="implementation">
+                      <CallType xmlns="">functionblock</CallType>
+                    </data>
+                  </addData>
+                </block>
+                <connector localId="7" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="8" formalParameter="Q1" />
+                  </connectionPointIn>
+                </connector>
+                <comment localId="12" height="0" width="0">
+                  <position x="14" y="11" />
+                  <content>
+                    <xhtml xmlns="http://www.w3.org/1999/xhtml">Start after 2 s unless stopped</xhtml>
+                  </content>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="0" pageArea="content" xmlns="" />
+                    </data>
+                  </addData>
+                </comment>
+                <inVariable localId="18">
+                  <position x="2" y="6" />
+                  <connectionPointOut>
+                    <expression />
+                  </connectionPointOut>
+                  <expression>xStart</expression>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="0" pageArea="leftMargin" xmlns="" />
+                    </data>
+                  </addData>
+                </inVariable>
+                <connector localId="17" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="18" formalParameter="xStart" />
+                  </connectionPointIn>
+                </connector>
+                <inVariable localId="22">
+                  <position x="2" y="5" />
+                  <connectionPointOut>
+                    <expression />
+                  </connectionPointOut>
+                  <expression>xStop</expression>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="0" pageArea="leftMargin" xmlns="" />
+                    </data>
+                  </addData>
+                </inVariable>
+                <connector localId="21" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="22" formalParameter="xStop" />
+                  </connectionPointIn>
+                </connector>
+                <block localId="20" executionOrderId="1" typeName="NOT">
+                  <position x="16" y="4" />
+                  <inputVariables>
+                    <variable formalParameter="In1">
+                      <connectionPointIn>
+                        <relPosition x="0" y="0" />
+                        <connection refLocalId="21" />
+                      </connectionPointIn>
+                    </variable>
+                  </inputVariables>
+                  <inOutVariables />
+                  <outputVariables>
+                    <variable formalParameter="Out1">
+                      <connectionPointOut>
+                        <relPosition x="0" y="0" />
+                        <expression />
+                      </connectionPointOut>
+                    </variable>
+                  </outputVariables>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="0" pageArea="content" xmlns="" />
+                    </data>
+                    <data name="http://www.3s-software.com/plcopenxml/cfccalltype" handleUnknown="implementation">
+                      <CallType xmlns="">operator</CallType>
+                    </data>
+                  </addData>
+                </block>
+                <connector localId="19" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="20" formalParameter="" />
+                  </connectionPointIn>
+                </connector>
+                <block localId="16" executionOrderId="2" typeName="AND">
+                  <position x="34" y="5" />
+                  <inputVariables>
+                    <variable formalParameter="In1">
+                      <connectionPointIn>
+                        <relPosition x="0" y="0" />
+                        <connection refLocalId="17" />
+                      </connectionPointIn>
+                    </variable>
+                    <variable formalParameter="In2">
+                      <connectionPointIn>
+                        <relPosition x="0" y="1" />
+                        <connection refLocalId="19" />
+                      </connectionPointIn>
+                    </variable>
+                  </inputVariables>
+                  <inOutVariables />
+                  <outputVariables>
+                    <variable formalParameter="Out1">
+                      <connectionPointOut>
+                        <relPosition x="0" y="0" />
+                        <expression />
+                      </connectionPointOut>
+                    </variable>
+                  </outputVariables>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="0" pageArea="content" xmlns="" />
+                    </data>
+                    <data name="http://www.3s-software.com/plcopenxml/cfccalltype" handleUnknown="implementation">
+                      <CallType xmlns="">operator</CallType>
+                    </data>
+                  </addData>
+                </block>
+                <connector localId="15" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="16" formalParameter="" />
+                  </connectionPointIn>
+                </connector>
+                <inVariable localId="24">
+                  <position x="2" y="8" />
+                  <connectionPointOut>
+                    <expression />
+                  </connectionPointOut>
+                  <expression>T#2S</expression>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="0" pageArea="leftMargin" xmlns="" />
+                    </data>
+                  </addData>
+                </inVariable>
+                <connector localId="23" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="24" formalParameter="T#2S" />
+                  </connectionPointIn>
+                </connector>
+                <block localId="14" executionOrderId="3" typeName="TON" instanceName="tonDelay">
+                  <position x="52" y="5" />
+                  <inputVariables>
+                    <variable formalParameter="IN">
+                      <connectionPointIn>
+                        <relPosition x="0" y="0" />
+                        <connection refLocalId="15" />
+                      </connectionPointIn>
+                    </variable>
+                    <variable formalParameter="PT">
+                      <connectionPointIn>
+                        <relPosition x="0" y="1" />
+                        <connection refLocalId="23" />
+                      </connectionPointIn>
+                    </variable>
+                  </inputVariables>
+                  <inOutVariables />
+                  <outputVariables>
+                    <variable formalParameter="Q">
+                      <connectionPointOut>
+                        <relPosition x="0" y="0" />
+                        <expression />
+                      </connectionPointOut>
+                    </variable>
+                  </outputVariables>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="0" pageArea="content" xmlns="" />
+                    </data>
+                    <data name="http://www.3s-software.com/plcopenxml/cfccalltype" handleUnknown="implementation">
+                      <CallType xmlns="">functionblock</CallType>
+                    </data>
+                  </addData>
+                </block>
+                <connector localId="13" name="">
+                  <position x="0" y="0" />
+                  <connectionPointIn>
+                    <connection refLocalId="14" formalParameter="Q" />
+                  </connectionPointIn>
+                </connector>
+                <vendorElement localId="25">
+                  <position x="62" y="7" />
+                  <alternativeText>
+                    <xhtml xmlns="http://www.w3.org/1999/xhtml">Run</xhtml>
+                  </alternativeText>
+                  <inputVariables>
+                    <variable formalParameter="Run">
+                      <connectionPointIn>
+                        <relPosition x="0" y="0" />
+                        <connection refLocalId="13" />
+                      </connectionPointIn>
+                    </variable>
+                  </inputVariables>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="0" pageArea="rightMargin" xmlns="" />
+                    </data>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcelementtype" handleUnknown="implementation">
+                      <ElementType xmlns="">sourceConnectionMark</ElementType>
+                    </data>
+                  </addData>
+                </vendorElement>
+                <outVariable localId="26" executionOrderId="5">
+                  <position x="62" y="6" />
+                  <connectionPointIn>
+                    <relPosition x="0" y="0" />
+                    <connection refLocalId="7" />
+                  </connectionPointIn>
+                  <expression>xMotor</expression>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="1" pageArea="rightMargin" xmlns="" />
+                    </data>
+                  </addData>
+                </outVariable>
+                <outVariable localId="27" executionOrderId="7">
+                  <position x="62" y="11" />
+                  <connectionPointIn>
+                    <relPosition x="0" y="0" />
+                    <connection refLocalId="2" />
+                  </connectionPointIn>
+                  <expression>xHold</expression>
+                  <addData>
+                    <data name="http://www.3s-software.com/plcopenxml/cfcpageinfo" handleUnknown="implementation">
+                      <pageInfo pageId="1" pageArea="rightMargin" xmlns="" />
+                    </data>
+                  </addData>
+                </outVariable>
+              </CFC>
+            </data>
+          </addData>
+        </body>
+        <addData />
+      </pou>
+    </pous>
+  </types>
+  <instances>
+    <configurations />
+  </instances>
+</project>

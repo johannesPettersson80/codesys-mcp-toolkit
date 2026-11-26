@@ -296,24 +296,60 @@ def _export_xml(obj):
         _safe(lambda: os.remove(f))
 
 
+def _import_reporter(messages):
+    """An ImportReporter that keeps CODESYS's import errors and warnings (an element it
+    couldn't import is otherwise dropped without a word). A name clash makes a copy, as
+    import_xml does without a reporter (checked on SP21). None where scripting has no
+    ImportReporter (the test engine)."""
+    base = getattr(se, "ImportReporter", None)
+    if base is None:
+        return None
+
+    class _Reporter(base):
+        def error(self, message):
+            messages.append({"severity": "error", "text": to_text(message)})
+
+        def warning(self, message):
+            messages.append({"severity": "warning", "text": to_text(message)})
+
+        def resolve_conflict(self, obj):
+            return se.ConflictResolve.Copy
+
+        def added(self, obj):
+            pass
+
+        def replaced(self, obj):
+            pass
+
+        def skipped(self, name):
+            pass
+
+        @property
+        def aborting(self):
+            return False
+
+    return _Reporter()
+
+
 def op_object_import_xml(args):
     """Recreate an object from PLCopenXML (export_xml) under parent, e.g. a graphical POU
-    when a checkpoint is restored."""
+    when a checkpoint is restored. Returns CODESYS's import errors and warnings too."""
     import io
     c = Ctx()
     parent = c.resolve(args.get("parent") or ".")
     before = set(name_of(x).lower() for x in children(parent))
     f = os.path.join(os.environ.get("CODESYS_MCP_DIR") or os.environ.get("TEMP") or ".", "import.xml")
+    messages = []
     try:
         with io.open(f, "w", encoding="utf-8") as fh:
             fh.write(args["xml"] if not PY2 or isinstance(args["xml"], unicode) else args["xml"].decode("utf-8"))  # noqa: F821
-        parent.import_xml(None, f)
+        parent.import_xml(_safe(lambda: _import_reporter(messages)), f)
     finally:
         _safe(lambda: os.remove(f))
     added = [c.path_of(x) for x in children(parent) if name_of(x).lower() not in before]
     if not added:
-        raise OpError("codesys_error", "CODESYS imported nothing under %s." % (args.get("parent") or "the application"))
-    return {"added": added, "saved": c.save_if(args)}
+        raise OpError("codesys_error", "CODESYS imported nothing under %s.%s" % (args.get("parent") or "the application", "".join("\n" + m["text"] for m in messages)))
+    return {"added": added, "messages": messages, "saved": c.save_if(args)}
 
 
 def _walk(ctx, root, root_names, max_depth, with_text, out):

@@ -115,22 +115,24 @@ describe("round trips through create_graphical's generator", () => {
     expect(describeGraphical(x)!.spec).toEqual({ chart });
   });
 
-  it("CFC: CODESYS's export read back through its connectors, round trip included", () => {
+  it("CFC from the FBD-style description: CODESYS's export and ours read back as the same chart", () => {
     const networks = [
       { expr: { fn: "AND", args: ["xA", { fn: "NOT", args: ["xB"] }] }, to: "xOut" },
       { expr: { fn: "LIMIT", args: ["0", { fn: "ADD", args: ["nIn", "5"] }, "100"] }, to: "nOut" },
       { expr: { fb: "TON", instance: "tonDelay", inputs: { IN: "xOut", PT: "T#300MS" }, output: "Q" }, to: "xLate", assign: { ET: "tEt" } },
     ];
-    // CODESYS SP22's own export of the CFC create_graphical made (checked in the simulation).
-    const d = describeGraphical(fixture("CFC_Logic"))!;
-    expect(d.kind).toBe("cfc");
-    expect(d.notes).toEqual([]);
-    expect(d.spec).toEqual({ networks });
-    const spec = fbdSchema.parse({ networks });
-    const x = cfcXml("CFC_X", "program", spec);
+    const x = cfcXml("CFC_X", "program", fbdSchema.parse({ networks }));
     expect(x).toContain('<CallType xmlns="">operator</CallType>');
     expect(x).toContain('<CallType xmlns="">functionblock</CallType>');
     expect(x).toMatch(/<connector localId="\d+" name=""><position x="0" y="0" \/><connectionPointIn><connection refLocalId="\d+" formalParameter="" \/>/);
-    expect(describeGraphical(x)!.spec).toEqual({ networks });
+    // CODESYS SP22's own export of the same CFC (made by create_graphical, checked in the simulation).
+    const theirs = describeGraphical(fixture("CFC_Logic"))!;
+    const ours = describeGraphical(x)!;
+    expect(theirs.kind).toBe("cfc");
+    const wiring = (d: typeof ours) => {
+      const s = d.spec as { elements: { id: string }[]; wires: { from: string; to: string }[] };
+      return s.wires.map((w) => `${w.from}->${w.to}`).sort();
+    };
+    expect(wiring(theirs)).toEqual(wiring(ours));
   });
 });

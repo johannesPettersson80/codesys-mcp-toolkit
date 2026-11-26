@@ -8,6 +8,8 @@
 import * as z from "zod/v4";
 import type { ActionResult, RegisterAction } from "../actions.js";
 import type { AppContext } from "../tools.js";
+import { cfcChartSchema, cfcChartXml, planCfc } from "./cfc.js";
+import { esc, OPERATORS, wrap } from "./plcopen.js";
 
 /** A boolean expression for ladder: a variable ("xStart", "NOT xStop") or and/or of others. */
 export type Logic = string | { and: Logic[] } | { or: Logic[] };
@@ -100,22 +102,6 @@ export const sfcSchema = z.object({
     .describe("With branches: [{step}, {when}, {alternative: [[{when}, {step}, {when}], [{when}, {jump}]]}, {parallel: [[{step}], [{step}]]}, ...]"),
 });
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-function wrap(name: string, pouType: "program" | "functionBlock", body: string, actions = "", addData = ""): string {
-  return `<?xml version="1.0" encoding="utf-8"?>
-<project xmlns="http://www.plcopen.org/xml/tc6_0200">
-  <fileHeader companyName="codesys-mcp-toolkit" productName="codesys-mcp-toolkit" productVersion="2" creationDateTime="2026-01-01T00:00:00" />
-  <contentHeader name="${esc(name)}"><coordinateInfo><fbd><scaling x="1" y="1" /></fbd><ld><scaling x="1" y="1" /></ld><sfc><scaling x="1" y="1" /></sfc></coordinateInfo></contentHeader>
-  <types><dataTypes /><pous>
-    <pou name="${esc(name)}" pouType="${pouType}">
-      <interface />
-      ${actions}<body>${body}</body>${addData}
-    </pou>
-  </pous></types>
-  <instances><configurations /></instances>
-</project>`;
-}
 
 export function ladderXml(name: string, pouType: "program" | "functionBlock", spec: z.infer<typeof ladderSchema>): string {
   let id = 0;
@@ -186,9 +172,6 @@ export function fbdXml(name: string, pouType: "program" | "functionBlock", spec:
   });
   return wrap(name, pouType, `<FBD>${parts.join("\n")}</FBD>`);
 }
-
-/** IEC operators: CODESYS's CFC calls them with CallType 'operator'; other functions are 'function'. */
-const OPERATORS = new Set(["AND", "OR", "XOR", "NOT", "ADD", "SUB", "MUL", "DIV", "MOD", "EXPT", "MOVE", "GT", "GE", "LT", "LE", "EQ", "NE", "SEL", "MAX", "MIN", "LIMIT", "MUX", "SHL", "SHR", "ROL", "ROR", "ABS", "SQRT", "LN", "LOG", "EXP", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN", "TRUNC"]);
 
 /**
  * CFC from the same description as FBD. CODESYS stores CFC as an empty ST body
@@ -434,7 +417,8 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
         "Create a ladder (LD), function block diagram (FBD), continuous function chart (CFC) or sequential function chart (SFC) program or function block from a structured description; CODESYS draws it. " +
         "ladder: {rungs: [{when: 'xStart' | 'NOT xStop' | {and: [...]} (series) | {or: [...]} (parallel), then: [{coil: 'xMotor', kind: 'coil'|'set'|'reset'|'negated'}]}]}. " +
         "fbd: {networks: [{expr: 'xA' | {fn: 'AND', args: [...]} | {fb: 'TON', instance: 'tonDelay', inputs: {IN: ..., PT: 'T#2S'}, output: 'Q'}, to: 'xOut', assign: {ET: 'tEt'}}]}. " +
-        "cfc: the same description as fbd, drawn as CFC (boxes run in the order listed, inputs first). " +
+        "cfc: elements and wires, with positions and optional pages (CODESYS's page-oriented CFC): {pages?: [{name, description?}], elements: [{id: 'xStart', input: 'xStart', page?: 1}, {id: 'tonDelay', box: 'TON', instance: 'tonDelay', x?: 30, y?: 10}, {id: 'and1', box: 'AND'}, {id: 'lamp', output: 'xLamp'}, {id: 'toPage2', mark: 'Delayed'}, {id: 'note', comment: 'text'}], wires: [{from: 'xStart', to: 'tonDelay.IN'}, {from: 'tonDelay.Q', to: 'lamp'}, {from: 'and1', to: 'x.In1'}]}. " +
+        "A page has a left margin (inputs), content (boxes) and a right margin (outputs); a connection mark joins pages: one wire into the source mark, wires out of sink marks of the same name. Positions left out are placed automatically; read_objects gives them back. cfc also takes fbd's description. " +
         "sfc: {steps: [{name, initial?, actions?: [{name, qualifier: 'N'|'S'|'R'|'P', st: 'ST code'}], entry?: 'ST run once when the step becomes active', exit?: 'ST run once when it is left', next: 'NextStep', when: 'ST condition'}]}, one sequence: each step goes to the next listed, the last jumps back. CODESYS has no P1/P0 qualifiers: an action with P1 becomes the step's entry action, P0 its exit action. " +
         "sfc with branches: {chart: [...]}, top to bottom: {step: 'Idle', actions?, entry?, exit?},{when: 'xStart'}, {alternative: [[{when: 'xA'}, {step: 'A'}, {when: 'xDoneA'}], [{when: 'NOT xA'}, {jump: 'Idle'}]]} (one path is taken), {parallel: [[{step: 'Fill'}], [{step: 'Heat'}]]} (all paths run, after a {when}; they join before the next {when}), {jump: 'Idle'}. Steps and transitions alternate; a chart ending with a {when} goes back to its first step. " +
         "declaration is the POU's ST declaration (PROGRAM or FUNCTION_BLOCK with its variables, FB instances included). Compile afterwards.",
@@ -443,7 +427,7 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
         declaration: z.string().describe("e.g. 'PROGRAM LD_Motor\nVAR\n    xStart, xStop, xMotor : BOOL;\nEND_VAR'"),
         ladder: ladderSchema.optional(),
         fbd: fbdSchema.optional(),
-        cfc: fbdSchema.optional(),
+        cfc: z.union([cfcChartSchema, fbdSchema]).optional(),
         sfc: sfcSchema.optional(),
         // Taken too: DeepSeek's first SFC said kind: 'sfc' next to sfc: {...}, and the call was refused.
         kind: z.string().optional().describe("Optional, the language of the body given: 'ladder' (or 'ld'), 'fbd', 'cfc' or 'sfc'"),
@@ -467,7 +451,8 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
           const p = sfcProblems(a.sfc);
           if (p.length) throw new Error(p.join("\n"));
         }
-        const xml = a.ladder ? ladderXml(a.name, pouType, a.ladder) : a.fbd ? fbdXml(a.name, pouType, a.fbd) : a.cfc ? cfcXml(a.name, pouType, a.cfc) : sfcXml(a.name, pouType, a.sfc!);
+        const chart = a.cfc && "elements" in a.cfc ? planCfc(a.cfc) : undefined;
+        const xml = a.ladder ? ladderXml(a.name, pouType, a.ladder) : a.fbd ? fbdXml(a.name, pouType, a.fbd) : chart ? cfcChartXml(a.name, pouType, chart) : a.cfc ? cfcXml(a.name, pouType, a.cfc as z.infer<typeof fbdSchema>) : sfcXml(a.name, pouType, a.sfc!);
         let replaced = false;
         if (a.replace) {
           try {
@@ -478,10 +463,17 @@ export function registerGraphicalActions(reg: RegisterAction, ctx: AppContext, r
             if (!/not.?found|no object/i.test(e instanceof Error ? e.message : String(e))) throw e;
           }
         }
-        const r = await ctx.bridge.call<{ added: string[] }>("object.import_xml", { parent: a.parent, xml, save: false }, { timeoutMs: 120_000 });
+        const r = await ctx.bridge.call<{ added: string[]; messages?: { severity: string; text: string }[] }>("object.import_xml", { parent: a.parent, xml, save: false }, { timeoutMs: 120_000 });
         const path = r.added[0]!;
         await ctx.bridge.call("object.write", { path, declaration: a.declaration, save: ctx.autosave });
-        return `${replaced ? "Replaced" : "Created"} ${path} in ${kinds[0] === "ladder" ? "ladder (LD)" : kinds[0] === "fbd" ? "FBD" : kinds[0] === "cfc" ? "CFC" : "SFC"}${a.sfc ? ` with ${a.sfc.steps ? a.sfc.steps.length : stepNames(a.sfc.chart ?? []).length} steps` : ""}. Compile to check it, and call it from a task (configure_task) or another POU.`;
+        const label = kinds[0] === "ladder" ? "ladder (LD)" : kinds[0] === "fbd" ? "FBD" : kinds[0] === "cfc" ? (chart?.pages ? "page-oriented CFC" : "CFC") : "SFC";
+        const size = a.sfc
+          ? ` with ${a.sfc.steps ? a.sfc.steps.length : stepNames(a.sfc.chart ?? []).length} steps`
+          : chart
+            ? ` with ${chart.pages ? `${chart.pages.length} page${chart.pages.length === 1 ? "" : "s"}, ` : ""}${chart.nodes.filter((n) => n.kind === "box").length} boxes and ${chart.wires.length} wires`
+            : "";
+        const imported = r.messages?.length ? `\nCODESYS's import said:\n${r.messages.map((m) => `- ${m.severity}: ${m.text}`).join("\n")}` : "";
+        return `${replaced ? "Replaced" : "Created"} ${path} in ${label}${size}.${imported}\nCompile to check it, and call it from a task (configure_task) or another POU.`;
       }),
   );
 }

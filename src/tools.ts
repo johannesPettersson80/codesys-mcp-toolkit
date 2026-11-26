@@ -487,7 +487,7 @@ export function registerTools(server: McpServer, ctx: AppContext): void {
                 const xml = compactPlcOpen(o.xml) + (o.truncated ? "\n(truncated)" : "");
                 const d = o.truncated ? undefined : describeGraphical(o.xml);
                 if (d) {
-                  const label = d.kind === "ladder" ? "ladder (LD)" : d.kind === "fbd" ? "FBD" : d.kind === "cfc" ? "CFC" : "SFC";
+                  const label = d.kind === "ladder" ? "ladder (LD)" : d.kind === "fbd" ? "FBD" : d.kind === "cfc" ? (d.spec.pages ? "page-oriented CFC" : "CFC") : "SFC";
                   const how = `To change it: edit this and call create_graphical with name, declaration, ${d.kind}: <this> and replace: true.`;
                   graphicalBodies.set(
                     o.path,

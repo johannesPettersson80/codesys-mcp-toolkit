@@ -366,6 +366,33 @@ describe("project tools over MCP (fake CODESYS)", () => {
     expect((await call("list_tasks")).text).not.toMatch(/SFC_Kind/);
   });
 
+  it("creates a page-oriented CFC from elements and wires, and names a description's problems", async () => {
+    const decl = "PROGRAM CFC_Pages\nVAR\n    xStart, xMotor : BOOL;\n    tonDelay : TON;\nEND_VAR";
+    const cfc = {
+      pages: [{ name: "Start" }, { name: "Motor" }],
+      elements: [
+        { id: "start", input: "xStart" },
+        { id: "tonDelay", box: "TON", instance: "tonDelay" },
+        { id: "run", mark: "Run" },
+        { id: "runIn", mark: "Run", page: 2 },
+        { id: "motor", output: "xMotor", page: 2 },
+      ],
+      wires: [
+        { from: "start", to: "tonDelay.IN" },
+        { from: "tonDelay.Q", to: "run" },
+        { from: "runIn", to: "motor" },
+      ],
+    };
+    const ok = await call("create_graphical", { name: "CFC_Pages", declaration: decl, cfc });
+    expect(ok.isError).toBe(false);
+    expect(ok.text).toMatch(/Created .*CFC_Pages in page-oriented CFC with 2 pages, 1 boxes and 3 wires/);
+    expect(ok.text).not.toMatch(/import said/);
+    const bad = await call("create_graphical", { name: "CFC_Bad", declaration: decl.replace("CFC_Pages", "CFC_Bad"), cfc: { ...cfc, wires: [{ from: "start", to: "tonDelay" }] } });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toMatch(/wire to 'tonDelay': name the box input/);
+    expect(bad.text).toMatch(/connection mark run needs either one wire going in/);
+  });
+
   it("restores a deleted graphical object from the checkpoint's PLCopenXML", async () => {
     expect((await call("delete_object", { path: "SEQ_Fill" })).isError).toBe(false);
     expect((await call("get_changes")).text).toMatch(/D SEQ_Fill/);
