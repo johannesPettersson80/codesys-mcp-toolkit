@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+`rename_symbol` ([#16](https://github.com/johannesPettersson80/codesys-mcp-toolkit/issues/16)),
+checked on CODESYS V3.5 SP21 with `test/live/rename.live.test.ts`:
+
+- Objects in folders. CODESYS's cross-references name a POU without its folders (and in its
+  declaration's spelling), so every POU in a folder was skipped. They are now found through the
+  project tree, as `owner` too (`FB_A` or `Folder1/FB_A`), methods and properties included.
+- It answered "Renamed ..." when nothing had changed, so a `batch` carried on. It is now an error
+  when nothing was renamed or something was left.
+- A GVL variable's own declaration wasn't renamed: CODESYS gives its location as just "Line 2".
+- A variable can be renamed when other FBs declare one of the same name (`i`, `iCurrentState`):
+  only the owner's is renamed, with its uses through instances (`fbA.iX`, `fbA(iX := ...)`). A use
+  that can't be told apart stops the rename before anything changes.
+- I/O channels mapped to a renamed variable, program or GVL get the new name in the device tree;
+  before, the next build failed. The answer says how many channels were remapped.
+
 ## [2.12.3] - 2026-11-21
 
 ### Fixed

@@ -7,7 +7,7 @@
 # Keep this file ASCII-only (IronPython 2.7 inside CODESYS).
 import mcp_ops
 import mcp_sim
-from mcp_ops import Ctx, OpError, _safe
+from mcp_ops import Ctx, OpError, _safe, children, kind_of, name_of
 from mcp_compat import to_text
 
 import scriptengine as se
@@ -235,7 +235,57 @@ def op_devices_configure(args):
     return {"path": c.path_of(dev), "done": done, "errors": errors, "saved": c.save_if(args)}
 
 
+def _remapped(variable, pairs):
+    """variable with the first matching pair's 'from' (a whole name prefix, any case) replaced
+    by its 'to', the rest (array index, struct member) kept; None when no pair matches."""
+    low = variable.lower()
+    for p in pairs:
+        f = p["from"]
+        if low.startswith(f.lower()):
+            rest = variable[len(f):]
+            if not rest or not (rest[0].isalnum() or rest[0] == "_"):
+                return p["to"] + rest
+    return None
+
+
+def op_devices_remap(args):
+    """Rewrites the I/O mapping of every channel in the device tree that is mapped to a renamed
+    variable: a channel's mapping is the string io_mapping.variable ('Application.GVL_IO.wFoo[3]').
+    pairs: [{from, to}] name prefixes. Leaves the IEC addresses alone."""
+    c = Ctx()
+    pairs = args.get("pairs") or []
+    changed = []
+
+    def walk(dev_path, el):
+        if _safe(lambda: el.is_mappable_io, False):
+            m = _safe(lambda: el.io_mapping)
+            v = to_text(_safe(lambda: m.variable, "") or "") if m is not None else ""
+            new = _remapped(v, pairs) if v else None
+            if new is not None and new != v:
+                m.variable = new
+                changed.append({"device": dev_path, "key": to_text(_safe(lambda: el.identifier, "") or ""), "from": v, "to": new})
+        if _safe(lambda: el.has_sub_elements, False):
+            for sub in list(el):
+                walk(dev_path, sub)
+
+    def rec(obj, names):
+        for ch in children(obj):
+            nm = name_of(ch)
+            if _safe(lambda: ch.is_device, False):
+                for _prefix, ps in _param_sets(ch):
+                    for p in ps:
+                        walk("/".join(names + [nm]), p)
+                rec(ch, names + [nm])
+            elif kind_of(ch, c.app_guid) in ("folder", "other"):
+                rec(ch, names + [nm])
+
+    if pairs:
+        rec(c.proj, [])
+    return {"changed": changed, "saved": c.save_if(args)}
+
+
 mcp_ops.OPS["devices.params"] = op_devices_params
+mcp_ops.OPS["devices.remap"] = mcp_sim._locked(op_devices_remap)
 mcp_ops.OPS["devices.configure"] = mcp_sim._locked(op_devices_configure)
 mcp_ops.OPS["devices.search"] = op_devices_search
 mcp_ops.OPS["devices.add"] = mcp_sim._locked(op_devices_add)
